@@ -1,0 +1,33 @@
+{
+  "name": "content-engine",
+  "version": "1.0.0",
+  "description": "Content generation and publishing for two brands: daily image/video posters with email approval and rework loop, content refill, AI image factory, Post-for-Me delivery feedback loop, daily reports, and an operations dashboard.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "googleapis": "^140.0.1",
+    "luxon": "^3.4.4",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.14",
+    "openai": "^4.67.3",
+    "pg": "^8.12.0",
+    "pino": "^9.3.2",
+    "sharp": "^0.33.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.5"
+  }
+}

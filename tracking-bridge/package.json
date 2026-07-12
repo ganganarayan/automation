@@ -1,0 +1,29 @@
+{
+  "name": "tracking-bridge",
+  "version": "1.0.0",
+  "description": "Marketing-data service: Razorpay payment.captured -> enriched Meta Conversions API purchase events, plus a daily Meta ad-insights pull into a Google Sheet.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "googleapis": "^140.0.1",
+    "luxon": "^3.4.4",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.14",
+    "pg": "^8.12.0",
+    "pino": "^9.3.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.5"
+  }
+}
