@@ -9,16 +9,17 @@
  * Dependencies: providers (sheets, llm, storage), imageComposer, wrap util,
  *               tenantSettings.
  */
-import * as tenantSettings from '../core/tenantSettings.js';
+import { buildProviders } from './providerFactory.js';
 import { factoryCaptionBar } from './imageComposer.js';
 import { wrapHook } from '../utils/wrap.js';
 import { childLogger } from '../core/logger.js';
 
 const SHEET_TAB = 'Sheet1';
 
-export async function run({ providers, tenantId = 'default' }) {
+export async function run({ tenantId = 'default' }) {
   const log = childLogger({ module: 'imageFactory', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   if (!resolved.sheets.factory) {
     log.warn('FACTORY_SHEET_ID not configured; skipping');
     return { processed: 0 };

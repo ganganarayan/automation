@@ -11,13 +11,15 @@ import * as jobRepo from '../repositories/jobRepository.js';
 import * as eventLog from '../repositories/eventLogRepository.js';
 import * as approvals from '../repositories/approvalRepository.js';
 import { requireAdminKey } from '../middleware/auth.js';
+import { buildProviders } from '../services/providerFactory.js';
 import { settings } from '../settings/index.js';
 
 export function register(ctx) {
-  const { router, providers } = ctx;
+  const { router } = ctx;
 
-  router.get('/admin/pfm-accounts', requireAdminKey, async (_req, res, next) => {
+  router.get('/admin/pfm-accounts', requireAdminKey, async (req, res, next) => {
     try {
+      const providers = await buildProviders(req.tenantId);
       res.json(await providers.publish.listAccounts());
     } catch (err) {
       next(err);

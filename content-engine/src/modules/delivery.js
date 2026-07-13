@@ -14,13 +14,13 @@ import * as tenantSettings from '../core/tenantSettings.js';
 import { ZONE } from '../utils/time.js';
 
 export function register(ctx) {
-  const { router, providers, log } = ctx;
+  const { router, log } = ctx;
 
   router.post('/webhook/pfm-result', async (req, res) => {
     res.status(200).json({ accepted: true });
     if (!(await tenantSettings.moduleEnabled(req.tenantId, 'delivery'))) return;
     delivery
-      .recordResult({ tenantId: req.tenantId, providers, event: req.body || {} })
+      .recordResult({ tenantId: req.tenantId, event: req.body || {} })
       .catch((err) => req.log.error({ err: err.message }, 'pfm-result processing failed'));
   });
 
@@ -28,7 +28,7 @@ export function register(ctx) {
     '30 8 * * *',
     async () => {
       if (!(await tenantSettings.moduleEnabled('default', 'delivery'))) return;
-      delivery.sendGitaReport({ tenantId: 'default', providers }).catch((e) => log.error({ err: e.message }, 'gita report failed'));
+      delivery.sendGitaReport({ tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'gita report failed'));
     },
     { timezone: ZONE },
   );
@@ -36,7 +36,7 @@ export function register(ctx) {
     '0 9 * * *',
     async () => {
       if (!(await tenantSettings.moduleEnabled('default', 'delivery'))) return;
-      delivery.sendVidapulseReport({ tenantId: 'default', providers }).catch((e) => log.error({ err: e.message }, 'vidapulse report failed'));
+      delivery.sendVidapulseReport({ tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'vidapulse report failed'));
     },
     { timezone: ZONE },
   );

@@ -12,13 +12,13 @@ import { requireAdminKey } from '../middleware/auth.js';
 import { ZONE } from '../utils/time.js';
 
 export function register(ctx) {
-  const { router, providers, log } = ctx;
+  const { router, log } = ctx;
 
   cron.schedule(
     '0 9 * * *',
     async () => {
       if (!(await tenantSettings.moduleEnabled('default', 'vidapulseRefill'))) return;
-      refill.run({ providers, tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'refill cron failed'));
+      refill.run({ tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'refill cron failed'));
     },
     { timezone: ZONE },
   );
@@ -26,7 +26,7 @@ export function register(ctx) {
   // Manual trigger for operators.
   router.post('/jobs/refill', requireAdminKey, async (req, res, next) => {
     try {
-      await refill.run({ providers, tenantId: req.tenantId });
+      await refill.run({ tenantId: req.tenantId });
       res.json({ ok: true });
     } catch (err) {
       next(err);

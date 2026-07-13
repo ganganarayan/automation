@@ -10,7 +10,7 @@
  * Dependencies: providers (sheets, llm, mail), exceljs, prompts, refillState.
  */
 import ExcelJS from 'exceljs';
-import * as tenantSettings from '../core/tenantSettings.js';
+import { buildProviders } from './providerFactory.js';
 import * as refillState from '../repositories/refillStateRepository.js';
 import { VIDAPULSE_SYSTEM, vidapulseDashboardPrompt } from './prompts.js';
 import { childLogger } from '../core/logger.js';
@@ -20,9 +20,10 @@ const SHEET_TAB = 'Sheet1';
 const THRESHOLD = 5;
 const BATCH = 30;
 
-export async function run({ providers, tenantId = 'default' }) {
+export async function run({ tenantId = 'default' }) {
   const log = childLogger({ module: 'vidapulseRefill', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   if (!resolved.sheets.vidapulse) {
     log.warn('VIDAPULSE_SHEET_ID not configured; skipping');
     return;

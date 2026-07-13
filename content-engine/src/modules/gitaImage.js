@@ -13,19 +13,18 @@ import * as tenantSettings from '../core/tenantSettings.js';
 import { ZONE } from '../utils/time.js';
 
 export function register(ctx) {
-  const { providers, log } = ctx;
-  const deps = { providers };
+  const { log } = ctx;
 
   approvalService.onKind(poster.KIND, {
-    onApprove: (a) => poster.publish(a, deps),
-    onRework: (a, note) => poster.rework(a, note, deps),
+    onApprove: (a) => poster.publish(a),
+    onRework: (a, note) => poster.rework(a, note),
   });
 
   cron.schedule(
     '0 22 * * *',
     async () => {
       if (!(await tenantSettings.moduleEnabled('default', 'gitaImage'))) return;
-      poster.runDaily({ providers, tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'gita poster cron failed'));
+      poster.runDaily({ tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'gita poster cron failed'));
     },
     { timezone: ZONE },
   );

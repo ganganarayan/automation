@@ -97,6 +97,25 @@ export async function forTenant(tenantId = 'default') {
       gitaAssessment: pick('gita_assessment_link', settings.links.gitaAssessment),
       gitaSimpleAssessment: pick('gita_simple_assessment_link', settings.links.gitaSimpleAssessment),
     },
+    // Tenant-scoped credentials (BYO). Env is only a platform-provided default.
+    openai: {
+      apiKey: pick('openai_api_key', settings.openai.apiKey),
+      imageModel: pick('image_model', settings.openai.imageModel),
+      textModel: pick('text_model', settings.openai.textModel),
+    },
+    gemini: {
+      apiKey: pick('gemini_api_key', settings.gemini.apiKey),
+      imageModel: pick('gemini_image_model', settings.gemini.imageModel),
+    },
+    postformeKey: pick('postforme_api_key', settings.postforme.apiKey),
+    video: {
+      json2videoApiKey: pick('json2video_api_key', settings.video.json2videoApiKey),
+    },
+    instagram: {
+      automationUrl: pick('ig_automation_url', settings.instagram.automationUrl),
+      contactEmail: pick('ig_contact_email', settings.instagram.contactEmail),
+      commentWebhookUrl: pick('ig_comment_webhook_url', settings.instagram.commentWebhookUrl),
+    },
   };
 }
 

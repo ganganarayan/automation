@@ -39,6 +39,31 @@ Every service implements these (duplicated per service on purpose):
 - **Provider interfaces** — code depends on interfaces, not implementations.
 - **Plugin-style modules** — each feature registers its routes and jobs and is independently toggled via a settings flag. A disabled module wires nothing.
 
+## 3a. Configuration ownership (env vs in-app) — a hard rule
+
+**Environment variables are for platform infrastructure only.** A tenant only ever
+has the app UI; they can never see or set an environment variable. Therefore **not
+a single user/tenant-scoped setting may live only in an environment variable** — it
+must be configurable inside the app (stored in `tenant_config`, edited via the
+config UI), resolved per tenant, and used to build provider clients per tenant.
+
+| Scope | Examples | Where it lives |
+|---|---|---|
+| **Platform infrastructure** (operator-only) | `DATABASE_URL`, `PORT`, `TZ`, `APP_SECRET`, `INTERNAL_API_KEY`, `WA_GATEWAY_URL`, `EVOLUTION_BASE_URL` (server), the platform Google service account, the platform SMTP sender | Env vars |
+| **Tenant/user-scoped** (a customer sets their own) | Sheet IDs, Drive folders, connected social accounts, WhatsApp instance, AI/PostForMe/JSON2Video keys, Razorpay secret, Meta pixel/tokens, Assess360, approval/report emails, calendar link, templates, module on/off | `tenant_config` via the config UI (env is at most a *default* fallback) |
+
+Consequences enforced in code:
+
+- `tenantSettings.forTenant(tenantId)` resolves every tenant-scoped value from
+  `tenant_config`, falling back to env only as a platform default.
+- **Providers are built per tenant, on demand** (e.g. `providerFactory.buildProviders(tenantId)`),
+  never bound once at boot from env — otherwise a tenant's configured key would be
+  ignored. Platform-shared clients (Google service account, SMTP) are the only ones
+  built from env.
+
+If you are about to tell an operator "set X as an env var" and X is user-scoped,
+that is the bug: expose X in the config manifest instead.
+
 ## 4. Tenancy
 
 - A `tenants` table seeded with a single `default` row and a `tenant_config(tenant_id, key, value)` table are shared across services.

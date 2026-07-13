@@ -12,7 +12,7 @@
  *               scheduling utils, tenantSettings, approvals.
  */
 import { DateTime } from 'luxon';
-import * as tenantSettings from '../core/tenantSettings.js';
+import { buildProviders } from './providerFactory.js';
 import * as approvalService from './approvalService.js';
 import { setStatus } from '../repositories/approvalRepository.js';
 import { gitaVideoScheduledAt, simpleVideoScheduledAt } from '../utils/scheduling.js';
@@ -54,9 +54,10 @@ async function nextReadyVideoRow(providers, resolved) {
   return null;
 }
 
-export async function runFull({ providers, tenantId = 'default' }) {
+export async function runFull({ tenantId = 'default' }) {
   const log = childLogger({ module: 'videoPipeline', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   if (!resolved.sheets.video) {
     log.warn('VIDEO_SHEET_ID not configured; skipping');
     return;
@@ -111,10 +112,11 @@ export async function runFull({ providers, tenantId = 'default' }) {
   log.info({ day: row.day }, 'video approval email sent');
 }
 
-export async function publishFull(approval, { providers }) {
+export async function publishFull(approval) {
   const tenantId = approval.tenant_id;
   const log = childLogger({ module: 'videoPipeline', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   const p = approval.payload || {};
   const accounts = resolved.postforme.gitaVideoAccounts || [];
   if (!accounts.length) {
@@ -130,9 +132,10 @@ export async function publishFull(approval, { providers }) {
 
 // ---- simple reel poster ----------------------------------------------------
 
-export async function runSimple({ providers, tenantId = 'default' }) {
+export async function runSimple({ tenantId = 'default' }) {
   const log = childLogger({ module: 'videoSimple', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   const files = await providers.storage.listFiles(resolved.drive.reelsFolder);
   const oldest = files
     .filter((f) => (f.mimeType || '').startsWith('video') && !/POSTED/i.test(f.name || ''))
@@ -169,10 +172,11 @@ export async function runSimple({ providers, tenantId = 'default' }) {
   log.info({ file: oldest.name }, 'reel approval email sent');
 }
 
-export async function publishSimple(approval, { providers }) {
+export async function publishSimple(approval) {
   const tenantId = approval.tenant_id;
   const log = childLogger({ module: 'videoSimple', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   const p = approval.payload || {};
   const caption = (approval.note && approval.payload?.caption) || p.caption;
   const accounts = resolved.postforme.gitaAccounts || [];
@@ -181,9 +185,9 @@ export async function publishSimple(approval, { providers }) {
   if (accounts.length) {
     await providers.publish.createPost({ accountIds: accounts, caption, mediaUrl: p.mediaUrl, scheduledAt });
   }
-  if (settings.instagram.commentWebhookUrl) {
+  if (resolved.instagram.commentWebhookUrl) {
     import('../core/httpClient.js').then(({ request }) =>
-      request(settings.instagram.commentWebhookUrl, { method: 'POST', body: { file: p.fileName }, label: 'ig.comment', log, retries: 0 }).catch(() => {}),
+      request(resolved.instagram.commentWebhookUrl, { method: 'POST', body: { file: p.fileName }, label: 'ig.comment', log, retries: 0 }).catch(() => {}),
     );
   }
   await providers.storage.renameFile(p.fileId, `POSTED - ${p.fileName}`);

@@ -11,11 +11,11 @@ import * as factory from '../services/imageFactoryService.js';
 import { requireAdminKey } from '../middleware/auth.js';
 
 export function register(ctx) {
-  const { router, providers, log } = ctx;
+  const { router, log } = ctx;
 
   router.post('/jobs/image-factory', requireAdminKey, async (req, res, next) => {
     try {
-      const result = await factory.run({ providers, tenantId: req.tenantId });
+      const result = await factory.run({ tenantId: req.tenantId });
       res.json(result);
     } catch (err) {
       next(err);

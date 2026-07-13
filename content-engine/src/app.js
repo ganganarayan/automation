@@ -19,14 +19,6 @@ import { createRegistry } from './core/moduleRegistry.js';
 import { requestId, tenantResolver, requestLogger } from './middleware/requestContext.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 
-import { createSmtpMailProvider } from './providers/mailProvider.js';
-import { createGoogleSheetsProvider } from './providers/sheetsProvider.js';
-import { createGoogleDriveProvider } from './providers/storageProvider.js';
-import { createLlmProvider } from './providers/llmProvider.js';
-import { createPostForMeProvider } from './providers/publishProvider.js';
-import { createJson2VideoProvider } from './providers/videoProvider.js';
-import { createWaGatewayClient } from './providers/whatsappClient.js';
-
 import * as approvalService from './services/approvalService.js';
 
 import * as gitaImage from './modules/gitaImage.js';
@@ -60,24 +52,15 @@ export function createApp() {
     }
   });
 
-  // Providers (external integrations behind interfaces).
-  const providers = {
-    mail: createSmtpMailProvider(settings.smtp, logger),
-    sheets: createGoogleSheetsProvider(settings.google, logger),
-    storage: createGoogleDriveProvider(settings.google, logger),
-    llm: createLlmProvider({ openai: settings.openai, gemini: settings.gemini }, logger),
-    publish: createPostForMeProvider(settings.postforme, logger),
-    video: createJson2VideoProvider(settings.video, logger),
-    wa: createWaGatewayClient(settings.waGateway, logger),
-  };
-
+  // Providers are built per-tenant on demand (see services/providerFactory.js)
+  // so tenant-configured credentials take effect. Nothing is bound at boot.
   const router = express.Router();
 
   // Approval review routes are core (several modules depend on them).
   approvalService.register(router);
 
   const registry = createRegistry();
-  const ctx = { router, providers, log: logger, registry };
+  const ctx = { router, log: logger, registry };
 
   registry
     .add({ name: 'gita-image', enabled: settings.modules.gitaImage, register: gitaImage.register })

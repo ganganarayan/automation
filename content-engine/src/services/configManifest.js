@@ -108,6 +108,26 @@ export const CONFIG_MANIFEST = {
           { key: 'gita_simple_assessment_link', label: 'Gita simple assessment link' },
         ],
       },
+      {
+        title: 'AI & publishing keys',
+        fields: [
+          { key: 'openai_api_key', label: 'OpenAI API key', type: 'secret' },
+          { key: 'image_model', label: 'OpenAI image model', placeholder: 'gpt-image-2' },
+          { key: 'text_model', label: 'OpenAI text model', placeholder: 'gpt-5-mini' },
+          { key: 'gemini_api_key', label: 'Gemini API key', type: 'secret' },
+          { key: 'gemini_image_model', label: 'Gemini image model', placeholder: 'models/gemini-3.1-flash-image' },
+          { key: 'postforme_api_key', label: 'Post for Me API key', type: 'secret' },
+          { key: 'json2video_api_key', label: 'JSON2Video API key', type: 'secret' },
+        ],
+      },
+      {
+        title: 'Instagram automation',
+        fields: [
+          { key: 'ig_automation_url', label: 'IG automation URL' },
+          { key: 'ig_contact_email', label: 'IG contact email' },
+          { key: 'ig_comment_webhook_url', label: 'IG comment webhook URL' },
+        ],
+      },
     ],
     modules: [
       { key: 'gitaImage', label: 'Gita image poster' },

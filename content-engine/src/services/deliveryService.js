@@ -12,7 +12,7 @@
  */
 import * as deliveryLog from '../repositories/pfmDeliveryLogRepository.js';
 import { buildGitaReport, buildVidapulseReport } from '../utils/report.js';
-import * as tenantSettings from '../core/tenantSettings.js';
+import { buildProviders } from './providerFactory.js';
 import { todayKeyIst } from '../utils/time.js';
 import { childLogger } from '../core/logger.js';
 
@@ -20,9 +20,10 @@ import { childLogger } from '../core/logger.js';
  * Record a Post-for-Me "social.post.result.created" webhook.
  * @param {object} args - { tenantId, providers, event }
  */
-export async function recordResult({ tenantId = 'default', providers, event }) {
+export async function recordResult({ tenantId = 'default', event }) {
   const log = childLogger({ module: 'delivery', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   const map = resolved.postforme.accountMap || {};
 
   // Post for Me result shape is tolerant: pull from common locations.
@@ -57,9 +58,10 @@ export async function recordResult({ tenantId = 'default', providers, event }) {
 }
 
 /** Cron 08:30 IST: Gita 7/7 report. */
-export async function sendGitaReport({ tenantId = 'default', providers }) {
+export async function sendGitaReport({ tenantId = 'default' }) {
   const log = childLogger({ module: 'delivery', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   const day = todayKeyIst();
   const rows = await deliveryLog.forDay({ tenantId, brand: 'gita', dayIst: day });
   const expected = expectedAccounts(resolved.postforme.accountMap, 'gita', resolved.postforme.gitaAccounts);
@@ -69,9 +71,10 @@ export async function sendGitaReport({ tenantId = 'default', providers }) {
 }
 
 /** Cron 09:00 IST: VidaPulse report with 26h staleness check. */
-export async function sendVidapulseReport({ tenantId = 'default', providers }) {
+export async function sendVidapulseReport({ tenantId = 'default' }) {
   const log = childLogger({ module: 'delivery', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   const rows = await deliveryLog.latest({ tenantId, brand: 'vidapulse', limit: 50 });
   const expected = expectedAccounts(resolved.postforme.accountMap, 'vidapulse', resolved.postforme.vidapulseAccounts);
   const report = buildVidapulseReport(rows, expected, new Date(), 26);

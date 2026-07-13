@@ -15,7 +15,7 @@
  *               imageComposer, caption/scheduling utils, tenantSettings, approvals.
  */
 import { DateTime } from 'luxon';
-import * as tenantSettings from '../core/tenantSettings.js';
+import { buildProviders } from './providerFactory.js';
 import * as approvalService from './approvalService.js';
 import { gitaBand } from './imageComposer.js';
 import { humanizeCaption, withChannelLink, CHANNELS } from '../utils/caption.js';
@@ -60,9 +60,10 @@ async function generate(providers, row, note) {
 }
 
 /** Daily entry point. */
-export async function runDaily({ providers, tenantId = 'default' }) {
+export async function runDaily({ tenantId = 'default' }) {
   const log = childLogger({ module: 'gitaImagePoster', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   if (!resolved.sheets.gita) {
     log.warn('GITA_SHEET_ID not configured; skipping');
     return;
@@ -99,10 +100,11 @@ export async function runDaily({ providers, tenantId = 'default' }) {
 }
 
 /** Publish after approval. */
-export async function publish(approval, { providers }) {
+export async function publish(approval) {
   const tenantId = approval.tenant_id;
   const log = childLogger({ module: 'gitaImagePoster', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   const p = approval.payload || {};
   const accounts = resolved.postforme.gitaAccounts || [];
   if (!accounts.length) {
@@ -127,10 +129,10 @@ export async function publish(approval, { providers }) {
   });
 
   // IG comment automation trigger (ignore failures).
-  if (settings.instagram.automationUrl) {
-    request(settings.instagram.automationUrl, {
+  if (resolved.instagram.automationUrl) {
+    request(resolved.instagram.automationUrl, {
       method: 'POST',
-      headers: { contact_email: settings.instagram.contactEmail },
+      headers: { contact_email: resolved.instagram.contactEmail },
       body: { day: p.day },
       label: 'ig.automation',
       log,
@@ -158,10 +160,11 @@ export async function publish(approval, { providers }) {
 }
 
 /** Rework after a change request. */
-export async function rework(approval, note, { providers }) {
+export async function rework(approval, note) {
   const tenantId = approval.tenant_id;
   const log = childLogger({ module: 'gitaImagePoster', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   const p = approval.payload || {};
 
   // Ask the LLM for a revised prompt + caption.

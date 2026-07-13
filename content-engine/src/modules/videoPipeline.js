@@ -14,16 +14,15 @@ import * as approvalService from '../services/approvalService.js';
 import { requireAdminKey } from '../middleware/auth.js';
 
 export function register(ctx) {
-  const { router, providers, log } = ctx;
-  const deps = { providers };
+  const { router, log } = ctx;
 
-  approvalService.onKind(video.FULL_KIND, { onApprove: (a) => video.publishFull(a, deps) });
-  approvalService.onKind(video.SIMPLE_KIND, { onApprove: (a) => video.publishSimple(a, deps) });
+  approvalService.onKind(video.FULL_KIND, { onApprove: (a) => video.publishFull(a) });
+  approvalService.onKind(video.SIMPLE_KIND, { onApprove: (a) => video.publishSimple(a) });
 
   router.post('/jobs/video', requireAdminKey, async (req, res, next) => {
     try {
       res.status(202).json({ accepted: true });
-      video.runFull({ providers, tenantId: req.tenantId }).catch((e) => log.error({ err: e.message }, 'video full failed'));
+      video.runFull({ tenantId: req.tenantId }).catch((e) => log.error({ err: e.message }, 'video full failed'));
     } catch (err) {
       next(err);
     }
@@ -32,7 +31,7 @@ export function register(ctx) {
   router.post('/jobs/video-simple', requireAdminKey, async (req, res, next) => {
     try {
       res.status(202).json({ accepted: true });
-      video.runSimple({ providers, tenantId: req.tenantId }).catch((e) => log.error({ err: e.message }, 'video simple failed'));
+      video.runSimple({ tenantId: req.tenantId }).catch((e) => log.error({ err: e.message }, 'video simple failed'));
     } catch (err) {
       next(err);
     }

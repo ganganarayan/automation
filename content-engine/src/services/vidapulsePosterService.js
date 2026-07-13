@@ -11,7 +11,7 @@
  *               tenantSettings, approvals.
  */
 import { DateTime } from 'luxon';
-import * as tenantSettings from '../core/tenantSettings.js';
+import { buildProviders } from './providerFactory.js';
 import * as approvalService from './approvalService.js';
 import { setStatus } from '../repositories/approvalRepository.js';
 import { vidapulseStrip } from './imageComposer.js';
@@ -48,9 +48,10 @@ async function generate(providers, resolved, row, note) {
   return composited;
 }
 
-export async function runDaily({ providers, tenantId = 'default' }) {
+export async function runDaily({ tenantId = 'default' }) {
   const log = childLogger({ module: 'vidapulseImagePoster', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   if (!resolved.sheets.vidapulse) {
     log.warn('VIDAPULSE_SHEET_ID not configured; skipping');
     return;
@@ -79,10 +80,11 @@ export async function runDaily({ providers, tenantId = 'default' }) {
   log.info({ day: row.day }, 'vidapulse approval email sent');
 }
 
-export async function publish(approval, { providers }) {
+export async function publish(approval) {
   const tenantId = approval.tenant_id;
   const log = childLogger({ module: 'vidapulseImagePoster', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   const p = approval.payload || {};
   const accounts = resolved.postforme.vidapulseAccounts || [];
   if (!accounts.length) {
@@ -108,10 +110,11 @@ export async function publish(approval, { providers }) {
   log.info({ day: p.day, accounts: accounts.length }, 'vidapulse post published');
 }
 
-export async function rework(approval, note, { providers }) {
+export async function rework(approval, note) {
   const tenantId = approval.tenant_id;
   const log = childLogger({ module: 'vidapulseImagePoster', tenant_id: tenantId });
-  const resolved = await tenantSettings.forTenant(tenantId);
+  const providers = await buildProviders(tenantId);
+  const resolved = providers.resolved;
   const p = approval.payload || {};
   const row = { day: p.day, image_prompt: p.base_prompt, caption: p.caption };
 
