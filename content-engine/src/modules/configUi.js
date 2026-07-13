@@ -1,33 +1,35 @@
 /**
- * Module: tenant-scoped configuration UI (with Access management).
+ * Module: tenant-scoped configuration UI (with Users management).
  *
- * Purpose:      Browser interface to configure each app per tenant and to manage
- *               admin identities/roles and page access — the "where do I set up
- *               the flow" surface. Settings write to the shared tenant_config
- *               table (every service's resolver reads it).
- * Responsibility: HTTP wiring + HTML rendering; logic in configService.
- * Dependencies: configService, configManifest, tenantRepository, adminsRepository,
- *               tenantConfigRepository, settings.
+ * Purpose:      Browser control panel to configure each app per tenant and to
+ *               manage users, roles, and plans. Settings write to the shared
+ *               tenant_config table (every service's resolver reads it).
+ * Responsibility: HTTP wiring + HTML rendering; logic in configService/usersRepository.
+ * Dependencies: configService, configManifest, tenantRepository, usersRepository,
+ *               tenantConfigRepository, accessService.
  *
- * Access model (no password yet — identities/roles now, sign-in later):
- *   - super_admin: ganganarayan.rns@gmail.com (seeded, protected).
- *   - admin: scoped to a tenant.
- *   - Page access is guarded by a UI-settable access key stored in the DB
- *     (tenant_config default 'access_key'). If unset (and no ADMIN_KEY env), the
- *     pages are open — a banner warns to set one.
+ * Users model (self-signup; auth/login added later):
+ *   - Accounts are created on sign-up. The super admin (ganganarayan.rns@gmail.com)
+ *     is seeded and protected.
+ *   - The super admin changes each user's role (user/admin/super_admin) and plan
+ *     end date (a date, or "forever") with inline auto-save — no save button.
+ *   - Each user has billing history and last login. Users manage their own
+ *     password in their own login (not here).
+ *   - Interim page access is a UI-settable key (accessService); real login later.
  *
  * Routes (guarded by the access key when set):
- *   GET  /api/v1/admin/settings              the config page (?tenant=&key=)
- *   POST /api/v1/admin/settings/save         apply one app's form
+ *   GET  /api/v1/admin/settings              the control panel
+ *   POST /api/v1/admin/settings/save         apply one app's config form
  *   POST /api/v1/admin/tenants               create a tenant
- *   POST /api/v1/admin/access/admins         add/update an admin
- *   POST /api/v1/admin/access/admins/remove  remove an admin
+ *   POST /api/v1/admin/users/role            change a user's role (JSON, auto-save)
+ *   POST /api/v1/admin/users/plan            change a user's plan end (JSON, auto-save)
+ *   GET  /api/v1/admin/users/billing         a user's billing history (JSON)
  *   POST /api/v1/admin/access/key            set/clear the access key
  */
 import { CONFIG_MANIFEST, APPS } from '../services/configManifest.js';
 import * as configService from '../services/configService.js';
 import * as tenants from '../repositories/tenantRepository.js';
-import * as admins from '../repositories/adminsRepository.js';
+import * as users from '../repositories/usersRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { keyOk, requiredKey, ACCESS_KEY_STORE } from '../services/accessService.js';
 
@@ -38,14 +40,14 @@ export function register(ctx) {
     try {
       if (!(await keyOk(req))) return res.status(401).type('html').send(gatePage());
       const tenantId = (req.query.tenant || 'default').toString();
-      const [tenantList, configMap, adminList, hasKey] = await Promise.all([
+      const [tenantList, configMap, userList, hasKey] = await Promise.all([
         tenants.list().catch(() => [{ id: 'default', name: 'Default Tenant' }]),
         configService.load(tenantId).catch(() => ({})),
-        admins.list().catch(() => []),
+        users.list().catch(() => []),
         requiredKey().then((k) => !!k),
       ]);
       res.type('html').send(
-        page({ tenantId, tenantList, configMap, adminList, hasKey, key: req.query.key || '', saved: req.query.saved }),
+        page({ tenantId, tenantList, configMap, userList, hasKey, key: req.query.key || '', saved: req.query.saved }),
       );
     } catch (err) {
       next(err);
@@ -81,29 +83,33 @@ export function register(ctx) {
     }
   });
 
-  router.post('/admin/access/admins', async (req, res, next) => {
+  // --- Users: inline auto-save (JSON) ---
+  router.post('/admin/users/role', async (req, res, next) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
-      const body = req.body || {};
-      if (body.email) {
-        await admins.upsert({
-          email: body.email,
-          role: body.role === 'super_admin' ? 'admin' : 'admin',
-          tenantId: body.tenant_scope || 'default',
-        });
-      }
-      res.redirect(`settings?${new URLSearchParams({ tenant: body.tenant || 'default', key: body.key || '' })}#access`);
+      await users.setRole(req.body.email, req.body.role);
+      res.json({ ok: true });
     } catch (err) {
-      next(err);
+      res.status(400).json({ ok: false, error: err.message });
     }
   });
 
-  router.post('/admin/access/admins/remove', async (req, res, next) => {
+  router.post('/admin/users/plan', async (req, res, next) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
-      const body = req.body || {};
-      if (body.email) await admins.remove(body.email);
-      res.redirect(`settings?${new URLSearchParams({ tenant: body.tenant || 'default', key: body.key || '' })}#access`);
+      const forever = req.body.forever === true || req.body.forever === 'true';
+      const endsAt = forever || !req.body.date ? null : new Date(req.body.date);
+      await users.setPlanEnd(req.body.email, endsAt);
+      res.json({ ok: true, endsAt });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  router.get('/admin/users/billing', async (req, res, next) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
+      res.json({ rows: await users.billingFor(req.query.email) });
     } catch (err) {
       next(err);
     }
@@ -112,12 +118,10 @@ export function register(ctx) {
   router.post('/admin/access/key', async (req, res, next) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
-      const body = req.body || {};
-      const newKey = (body.new_key || '').toString();
+      const newKey = (req.body.new_key || '').toString();
       if (newKey.trim() === '') await tenantConfig.del(ACCESS_KEY_STORE.tenant, ACCESS_KEY_STORE.key);
       else await tenantConfig.set(ACCESS_KEY_STORE.tenant, ACCESS_KEY_STORE.key, newKey);
-      // Redirect carrying the new key so the session stays authorized.
-      res.redirect(`settings?${new URLSearchParams({ tenant: body.tenant || 'default', key: newKey })}#access`);
+      res.redirect(`settings?${new URLSearchParams({ tenant: req.body.tenant || 'default', key: newKey })}#users`);
     } catch (err) {
       next(err);
     }
@@ -128,11 +132,8 @@ export function register(ctx) {
 
 // ---- rendering -------------------------------------------------------------
 
-function page({ tenantId, tenantList, configMap, adminList, hasKey, key, saved }) {
-  const menu = [
-    ['access', 'Access & Admins'],
-    ...APPS.map((a) => [a, CONFIG_MANIFEST[a].label]),
-  ]
+function page({ tenantId, tenantList, configMap, userList, hasKey, key, saved }) {
+  const menu = [['users', 'Users'], ...APPS.map((a) => [a, CONFIG_MANIFEST[a].label])]
     .map(([id, label], i) => `<button class="nav${i === 0 ? ' active' : ''}" data-target="${id}" onclick="show('${id}')">${esc(label)}</button>`)
     .join('');
 
@@ -143,7 +144,7 @@ function page({ tenantId, tenantList, configMap, adminList, hasKey, key, saved }
   const appSections = APPS.map((a) => appSection(a, tenantId, configMap, key)).join('');
 
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>automation — configure</title>
+<title>automation — control panel</title>
 <style>
  :root{color-scheme:dark}*{box-sizing:border-box}
  body{font-family:system-ui;margin:0;background:#0b0b12;color:#e8e8ef}
@@ -152,8 +153,8 @@ function page({ tenantId, tenantList, configMap, adminList, hasKey, key, saved }
  aside .brand{font-weight:700;padding:.4rem .6rem 1rem;font-size:1.05rem}
  .nav{display:block;width:100%;text-align:left;background:none;border:0;color:#c7c7d9;padding:.6rem .7rem;border-radius:8px;font-size:.92rem;cursor:pointer;margin-bottom:.15rem}
  .nav:hover{background:#1c1c2a}.nav.active{background:#2a2a44;color:#fff}
- aside .dash{display:block;margin-top:1rem;color:#7aa2ff;text-decoration:none;font-size:.85rem;padding:.4rem .7rem}
- main{flex:1;padding:1.3rem;max-width:920px}
+ aside .dash{display:block;margin-top:1rem;color:#7aa2ff;text-decoration:none;font-size:.85rem;padding:.4rem .7rem;border-top:1px solid #24243a}
+ main{flex:1;padding:1.3rem;max-width:960px}
  header.top{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem}
  select,input,textarea{background:#0b0b12;color:#fff;border:1px solid #333;border-radius:8px;padding:.5rem}
  textarea{width:100%;min-height:4.5rem;font-family:ui-monospace,monospace;font-size:.82rem}
@@ -169,21 +170,23 @@ function page({ tenantId, tenantList, configMap, adminList, hasKey, key, saved }
  .mod span{font-size:.85rem}
  .save{margin-top:.5rem;background:#0a7d32;color:#fff;border:0;border-radius:8px;padding:.6rem 1.3rem;font-size:.95rem;cursor:pointer}
  button.act{background:#2a2a44;color:#fff;border:0;border-radius:8px;padding:.45rem .9rem;cursor:pointer}
- button.danger{background:#5a1e1e}
  table{width:100%;border-collapse:collapse;font-size:.88rem}
- th,td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid #24243a}
+ th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid #24243a;vertical-align:middle}
  .flash{background:#123b1f;border:1px solid #1f6b38;color:#8ff0b0;padding:.6rem 1rem;border-radius:8px;margin-bottom:1rem;font-size:.9rem}
  .err{background:#3b1212;border:1px solid #6b1f1f;color:#ff9a9a}
  .warn{background:#3a2f12;border:1px solid #7a5a1f;color:#f0d68f;padding:.6rem 1rem;border-radius:8px;margin-bottom:1rem;font-size:.85rem}
  .pill{font-size:.72rem;padding:.1rem .5rem;border-radius:999px;border:1px solid #24243a;color:#c7c7d9}
- .pill.super{background:#2a2a44;color:#fff}
  .hint{color:#6f6f88;font-size:.78rem;margin:.2rem 0 0}
  .row{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}
+ .saveflag{font-size:.72rem;color:#5bd08a;margin-left:.4rem;opacity:0;transition:opacity .2s}
+ .saveflag.show{opacity:1}
+ .planwrap{display:flex;gap:.5rem;align-items:center}
+ .billing{background:#0d0d16;border:1px solid #24243a;border-radius:8px;padding:.5rem .7rem;margin:.3rem 0}
  a{color:#7aa2ff}
 </style>
 <div class="layout">
   <aside>
-    <div class="brand">⚙️ Configure</div>
+    <div class="brand">⚙️ automation</div>
     ${menu}
     <a class="dash" href="../dashboard${key ? `?key=${encodeURIComponent(key)}` : ''}">← Dashboard</a>
   </aside>
@@ -195,7 +198,6 @@ function page({ tenantId, tenantList, configMap, adminList, hasKey, key, saved }
         <input type="hidden" name="key" value="${esc(key)}">
         <div><label style="margin:0 0 .2rem">Tenant</label>
         <select name="tenant" onchange="this.form.submit()">${tenantOptions}</select></div>
-        <noscript><button class="act" type="submit">Go</button></noscript>
       </form>
       <form method="post" action="tenants" class="row" style="gap:.4rem">
         <input type="hidden" name="key" value="${esc(key)}">
@@ -205,62 +207,96 @@ function page({ tenantId, tenantList, configMap, adminList, hasKey, key, saved }
       </form>
     </header>
 
-    ${accessPanel({ adminList, tenantList, tenantId, key, hasKey })}
+    ${usersPanel({ userList, hasKey, tenantId, key })}
     ${appSections}
 
-    <p class="hint">Blank fields fall back to the service's environment default. Secrets are never shown — leave blank to keep the current value. Changes apply within ~1 minute.</p>
+    <p class="hint">Blank config fields fall back to the service's environment default. Secrets are never shown — leave blank to keep the current value. Changes apply within ~1 minute.</p>
   </main>
 </div>
 <script>
+  const KEY = ${JSON.stringify(key || '')};
   function show(id){
     document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id==='panel-'+id));
     document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('active',n.dataset.target===id));
     if(history.replaceState) history.replaceState(null,'',location.pathname+location.search+'#'+id);
   }
-  const hash=(location.hash||'#access').slice(1);
+  function flag(i){ const f=document.getElementById('flag-'+i); if(!f) return; f.classList.add('show'); setTimeout(()=>f.classList.remove('show'),1200); }
+  async function post(path, body){
+    const r = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Key':KEY},body:JSON.stringify(body)});
+    return r.ok ? r.json() : Promise.reject(await r.json().catch(()=>({error:'failed'})));
+  }
+  async function saveRole(i, email, sel){
+    try{ await post('users/role',{email,role:sel.value}); flag(i); }
+    catch(e){ alert('Could not change role: '+(e.error||'')); }
+  }
+  async function savePlan(i, email){
+    const forever=document.getElementById('fv-'+i).checked;
+    const dt=document.getElementById('dt-'+i);
+    dt.disabled=forever;
+    try{ await post('users/plan',{email,forever,date:dt.value}); flag(i); }
+    catch(e){ alert('Could not change plan: '+(e.error||'')); }
+  }
+  async function toggleBilling(i, email){
+    const box=document.getElementById('bill-'+i);
+    if(box.style.display==='table-row'){ box.style.display='none'; return; }
+    box.style.display='table-row';
+    const cell=document.getElementById('billbody-'+i);
+    cell.textContent='Loading…';
+    try{
+      const r=await fetch('users/billing?email='+encodeURIComponent(email),{headers:{'X-Admin-Key':KEY}});
+      const j=await r.json();
+      cell.innerHTML = (j.rows&&j.rows.length)
+        ? '<div class="billing">'+j.rows.map(x=>esc2(x.occurred_at)+' — '+esc2(x.description||'')+' — ₹'+esc2(x.amount_inr||'0')+' ('+esc2(x.status||'')+')').join('<br>')+'</div>'
+        : '<div class="billing hint">No billing history yet.</div>';
+    }catch(e){ cell.textContent='Failed to load billing.'; }
+  }
+  function esc2(s){ return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  const hash=(location.hash||'#users').slice(1);
   if(document.getElementById('panel-'+hash)) show(hash);
   const e=new URLSearchParams(location.search).get('error');
   if(e){const d=document.getElementById('flash-error'); d.textContent='Error: '+e; d.style.display='block';}
 </script>`;
 }
 
-function accessPanel({ adminList, tenantList, tenantId, key, hasKey }) {
-  const rows = (adminList || [])
-    .map((a) => {
-      const isSuper = a.role === 'super_admin';
+function usersPanel({ userList, hasKey, tenantId, key }) {
+  const rows = (userList || [])
+    .map((u, i) => {
+      const isSuper = u.email === users.SUPER_ADMIN_EMAIL;
+      const roleSel = users.ROLES
+        .map((r) => `<option value="${r}"${u.role === r ? ' selected' : ''}>${r}</option>`)
+        .join('');
+      const forever = !u.plan_ends_at;
+      const dateVal = u.plan_ends_at ? new Date(u.plan_ends_at).toISOString().slice(0, 10) : '';
+      const lastLogin = u.last_login_at ? new Date(u.last_login_at).toISOString().slice(0, 16).replace('T', ' ') : '—';
       return `<tr>
-        <td>${esc(a.email)}</td>
-        <td><span class="pill${isSuper ? ' super' : ''}">${esc(a.role)}</span></td>
-        <td>${esc(a.tenant_id || 'all')}</td>
-        <td>${isSuper ? '<span class="hint">protected</span>' : removeForm(a.email, tenantId, key)}</td>
-      </tr>`;
+        <td>${esc(u.email)}${isSuper ? ' <span class="pill">super</span>' : ''}</td>
+        <td><select onchange="saveRole(${i}, '${escJs(u.email)}', this)"${isSuper ? ' disabled title="protected"' : ''}>${roleSel}</select></td>
+        <td><div class="planwrap">
+          <input id="dt-${i}" type="date" value="${dateVal}"${forever ? ' disabled' : ''} onchange="savePlan(${i}, '${escJs(u.email)}')">
+          <label style="margin:0;font-size:.8rem"><input id="fv-${i}" type="checkbox"${forever ? ' checked' : ''} onchange="savePlan(${i}, '${escJs(u.email)}')"> forever</label>
+        </div></td>
+        <td>${esc(lastLogin)}</td>
+        <td><button class="act" onclick="toggleBilling(${i}, '${escJs(u.email)}')">Billing</button><span id="flag-${i}" class="saveflag">saved</span></td>
+      </tr>
+      <tr id="bill-${i}" style="display:none"><td colspan="5"><div id="billbody-${i}"></div></td></tr>`;
     })
     .join('');
 
-  const tenantOpts = (tenantList || []).map((t) => `<option value="${esc(t.id)}">${esc(t.id)}</option>`).join('');
-
-  return `<section class="panel active card" id="panel-access">
-    <h2>Access &amp; Admins</h2>
-    <p class="blurb">Manage who administers the platform. Sign-in (password) is not set up yet — this defines identities and roles now.</p>
+  return `<section class="panel active card" id="panel-users">
+    <h2>Users</h2>
+    <p class="blurb">Accounts are created when people sign up from the landing page. Change a role or plan end date and it saves instantly — no save button. Users manage their own password in their own login.</p>
 
     ${hasKey
-      ? '<div class="hint">🔒 An access key is set — these pages require it.</div>'
-      : '<div class="warn">⚠️ No access key set — these pages (which show data and edit secrets) are currently open on the public URL. Set an access key below when ready.</div>'}
+      ? '<div class="hint">🔒 An access key protects these pages.</div>'
+      : '<div class="warn">⚠️ No access key set — these pages (which edit config/secrets and show data) are open on the public URL. Set an access key below when ready. Full sign-in is a later phase.</div>'}
 
-    <fieldset><legend>Admins</legend>
-      <table><thead><tr><th>Email</th><th>Role</th><th>Tenant</th><th></th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="4" class="hint">none</td></tr>'}</tbody></table>
-      <form method="post" action="access/admins" class="row" style="margin-top:.8rem">
-        <input type="hidden" name="key" value="${esc(key)}">
-        <input type="hidden" name="tenant" value="${esc(tenantId)}">
-        <div><label style="margin:0 0 .2rem">Add admin email</label><input name="email" type="email" placeholder="person@example.com" size="24"></div>
-        <div><label style="margin:0 0 .2rem">Tenant scope</label><select name="tenant_scope">${tenantOpts}</select></div>
-        <button class="act" type="submit">+ Add admin</button>
-      </form>
-      <p class="hint">The super admin (ganganarayan.rns@gmail.com) is locked and spans all tenants. Everyone else is a tenant-scoped admin.</p>
+    <fieldset><legend>Users</legend>
+      <table><thead><tr><th>Email</th><th>Role</th><th>Plan ends</th><th>Last login</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="hint">No users yet — they appear here after signing up.</td></tr>'}</tbody></table>
+      <p class="hint">The super admin (${esc(users.SUPER_ADMIN_EMAIL)}) is protected and cannot be demoted or removed.</p>
     </fieldset>
 
-    <fieldset><legend>Access key (protects these pages)</legend>
+    <fieldset><legend>Access key (interim page guard)</legend>
       <form method="post" action="access/key" class="row">
         <input type="hidden" name="key" value="${esc(key)}">
         <input type="hidden" name="tenant" value="${esc(tenantId)}">
@@ -268,16 +304,9 @@ function accessPanel({ adminList, tenantList, tenantId, key, hasKey }) {
           <input name="new_key" type="password" placeholder="${hasKey ? '•••• (set)' : 'no key set'}" size="24" autocomplete="off"></div>
         <button class="act" type="submit">Save key</button>
       </form>
-      <p class="hint">Stored in the database (not an env var). Until a real sign-in is added, open the pages with <code>?key=…</code>. This is a stopgap for the password-based login you'll set up later.</p>
+      <p class="hint">Stored in the database (not an env var). This is the stopgap until password login is built.</p>
     </fieldset>
   </section>`;
-}
-
-function removeForm(email, tenantId, key) {
-  return `<form method="post" action="access/admins/remove" style="display:inline">
-    <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
-    <input type="hidden" name="email" value="${esc(email)}">
-    <button class="act danger" type="submit">Remove</button></form>`;
 }
 
 function appSection(app, tenantId, configMap, key) {
@@ -327,18 +356,21 @@ function fieldRow(field, configMap) {
 
 function gatePage() {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>automation — configure</title>
+<title>automation — sign in</title>
 <style>body{font-family:system-ui;background:#0b0b12;color:#e8e8ef;display:grid;place-items:center;height:100vh;margin:0}
 form{background:#15151f;border:1px solid #24243a;padding:1.5rem;border-radius:12px;min-width:280px}
 input{width:100%;padding:.6rem;margin:.6rem 0;border-radius:8px;border:1px solid #333;background:#0b0b12;color:#fff}
 button{width:100%;padding:.6rem;border:0;border-radius:8px;background:#2a2a44;color:#fff;cursor:pointer}</style>
 <form onsubmit="location.href='settings?key='+encodeURIComponent(document.getElementById('k').value);return false">
-  <h1>⚙️ Configure</h1><input id="k" type="password" placeholder="Access key" autofocus>
+  <h1>⚙️ automation</h1><input id="k" type="password" placeholder="Access key" autofocus>
   <button type="submit">Open</button></form>`;
 }
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function escJs(s) {
+  return String(s ?? '').replace(/['\\]/g, '\\$&');
 }
 
 export default { register };
