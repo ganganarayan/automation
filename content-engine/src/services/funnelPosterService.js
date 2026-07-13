@@ -20,10 +20,8 @@ import { buildProviders } from './providerFactory.js';
 import * as approvalService from './approvalService.js';
 import { setStatus } from '../repositories/approvalRepository.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
-import { gitaBand, vidapulseStrip } from './imageComposer.js';
 import { humanizeCaption, withChannelLink, CHANNELS } from '../utils/caption.js';
 import { publishAtIst } from '../utils/scheduling.js';
-import { GITA_ORIENTATIONS, GITA_REWORK_SYSTEM, buildGitaImagePrompt, buildVidapulseImagePrompt } from './prompts.js';
 import { childLogger } from '../core/logger.js';
 import { settings } from '../settings/index.js';
 
@@ -46,26 +44,13 @@ async function nextReadyRow(sheets, sheetId) {
   return null;
 }
 
-/** Style-aware prompt + overlay. */
-async function generate(f, providers, row, note) {
-  let prompt;
-  if (f.style === 'band') {
-    const orientation = GITA_ORIENTATIONS[Math.floor(Math.random() * GITA_ORIENTATIONS.length)];
-    prompt = buildGitaImagePrompt(note ? `${row.image_prompt}. ${note}` : row.image_prompt, orientation);
-  } else if (f.style === 'strip') {
-    prompt = buildVidapulseImagePrompt(note ? `${row.image_prompt}. Revision requested: ${note}` : row.image_prompt);
-  } else {
-    prompt = note ? `${row.image_prompt}. ${note}` : row.image_prompt;
-  }
-
-  const raw = await providers.llm.generateImage({ prompt, size: '1024x1024' });
-  const audience = row.audience || f.audiencePrefix || '';
-  if (f.style === 'band') return gitaBand(raw, `FOR ${(audience || 'YOU').toUpperCase()}`);
-  if (f.style === 'strip' && f.stripFile) {
-    const strip = await providers.storage.download(f.stripFile);
-    return strip && strip.length ? vidapulseStrip(raw, strip) : raw;
-  }
-  return raw;
+/**
+ * Generate the image straight from the row's prompt. No compositing/overlay —
+ * the prompt itself is responsible for any layout / empty space for text.
+ */
+async function generate(providers, row, note) {
+  const prompt = note ? `${row.image_prompt}. ${note}` : row.image_prompt;
+  return providers.llm.generateImage({ prompt, size: '1024x1024' });
 }
 
 /** Daily entry point for one funnel. */
@@ -84,8 +69,8 @@ export async function runDaily(funnelRow) {
     return;
   }
 
-  const composited = await generate(f, providers, row);
-  const upload = await providers.storage.uploadPng(f.driveFolder, `${slug(f.name)}-day-${row.day}.png`, composited);
+  const image = await generate(providers, row);
+  const upload = await providers.storage.uploadPng(f.driveFolder, `${slug(f.name)}-day-${row.day}.png`, image);
   const audience = row.audience || f.audiencePrefix || '';
   const caption = humanizeCaption(row.caption, audience);
 
@@ -143,17 +128,10 @@ export async function rework(approval, note) {
   const log = childLogger({ module: 'funnelPoster', tenant_id: f.tenantId, funnel: f.name });
   const providers = await buildProviders(f.tenantId);
 
-  let row = { day: p.day, image_prompt: p.base_prompt, caption: p.caption, audience: p.audience };
-  if (f.style === 'band') {
-    const revised = await providers.llm.generateJson({
-      system: GITA_REWORK_SYSTEM,
-      user: JSON.stringify({ image_prompt: p.base_prompt, caption: p.caption, note }),
-    });
-    row = { ...row, image_prompt: revised.image_prompt || p.base_prompt, caption: revised.caption || p.caption };
-  }
-
-  const composited = await generate(f, providers, row, f.style === 'band' ? null : note);
-  const upload = await providers.storage.uploadPng(f.driveFolder, `${slug(f.name)}-day-${row.day}-rework.png`, composited);
+  // Rework re-generates the image with the reviewer's note appended to the prompt.
+  const row = { day: p.day, image_prompt: p.base_prompt, caption: p.caption, audience: p.audience };
+  const image = await generate(providers, row, note);
+  const upload = await providers.storage.uploadPng(f.driveFolder, `${slug(f.name)}-day-${row.day}-rework.png`, image);
   const caption = humanizeCaption(row.caption, row.audience || f.audiencePrefix || '');
 
   const { reviewUrl } = await approvalService.createRequest({

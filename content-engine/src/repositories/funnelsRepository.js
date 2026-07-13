@@ -13,21 +13,22 @@
  */
 import { query } from '../core/db.js';
 
-/** The config fields a funnel form edits (used by the UI and resolver). */
+/**
+ * The config fields a funnel form edits — the ONE template every funnel shares.
+ * No image compositing/overlay: the generated image is used as-is (layout is
+ * handled in the image prompt).
+ */
 export const FUNNEL_FIELDS = [
   { key: 'sheet_id', label: 'Content sheet ID' },
   { key: 'drive_folder_id', label: 'Drive folder ID (image uploads)' },
-  { key: 'strip_file_id', label: 'Brand strip PNG file ID (strip style)' },
   { key: 'postforme_api_key', label: 'Post for Me API key', type: 'secret' },
   { key: 'postforme_accounts', label: 'Post for Me account IDs (JSON array)', type: 'json' },
   { key: 'account_map', label: 'Account map (JSON id → {platform,account_name})', type: 'json' },
   { key: 'approval_email', label: 'Approval email' },
   { key: 'cta_link', label: 'CTA / assessment link' },
-  { key: 'audience_prefix', label: 'Audience prefix (caption / band label)' },
+  { key: 'audience_prefix', label: 'Audience prefix (caption line)' },
   { key: 'publish_time', label: 'Publish time (HH:mm IST)', placeholder: '08:02' },
 ];
-
-export const STYLES = ['band', 'strip', 'plain'];
 
 export async function listByTenant(tenantId = 'default') {
   const { rows } = await query(
@@ -55,22 +56,18 @@ export async function findByName(tenantId, name) {
   return rows[0] || null;
 }
 
-export async function create({ tenantId = 'default', name, style = 'band' }) {
+export async function create({ tenantId = 'default', name }) {
   const { rows } = await query(
-    `INSERT INTO funnels (tenant_id, name, style) VALUES ($1, $2, $3)
-     ON CONFLICT (tenant_id, name) DO UPDATE SET style = EXCLUDED.style
+    `INSERT INTO funnels (tenant_id, name) VALUES ($1, $2)
+     ON CONFLICT (tenant_id, name) DO NOTHING
      RETURNING *`,
-    [tenantId, name, STYLES.includes(style) ? style : 'band'],
+    [tenantId, name],
   );
-  return rows[0];
+  return rows[0] || findByName(tenantId, name);
 }
 
 export async function setActive(id, active) {
   await query('UPDATE funnels SET active = $2 WHERE id = $1', [id, !!active]);
-}
-
-export async function setStyle(id, style) {
-  await query('UPDATE funnels SET style = $2 WHERE id = $1', [id, STYLES.includes(style) ? style : 'band']);
 }
 
 export async function remove(id) {
@@ -111,23 +108,21 @@ export async function resolve(funnel) {
     id: funnel.id,
     tenantId: funnel.tenant_id,
     name: funnel.name,
-    style: funnel.style,
     active: funnel.active,
     sheetId: c.sheet_id || '',
     driveFolder: c.drive_folder_id || '',
-    stripFile: c.strip_file_id || '',
     postformeKey: c.postforme_api_key || '',
     accounts: json(c.postforme_accounts, []),
     accountMap: json(c.account_map, {}),
     approvalEmail: c.approval_email || '',
     ctaLink: c.cta_link || '',
     audiencePrefix: c.audience_prefix || '',
-    publishTime: c.publish_time || (funnel.style === 'strip' ? '10:00' : '08:02'),
+    publishTime: c.publish_time || '08:02',
   };
 }
 
 export default {
-  FUNNEL_FIELDS, STYLES,
-  listByTenant, listActive, get, findByName, create, setActive, setStyle, remove,
+  FUNNEL_FIELDS,
+  listByTenant, listActive, get, findByName, create, setActive, remove,
   getConfig, setConfig, delConfig, resolve,
 };

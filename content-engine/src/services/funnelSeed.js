@@ -14,8 +14,8 @@ import * as funnels from '../repositories/funnelsRepository.js';
 import { settings } from '../settings/index.js';
 import { logger } from '../core/logger.js';
 
-async function seedFunnel(tenantId, name, style, config) {
-  const funnel = await funnels.create({ tenantId, name, style });
+async function seedFunnel(tenantId, name, config) {
+  const funnel = await funnels.create({ tenantId, name });
   const existing = await funnels.getConfig(funnel.id);
   for (const [key, value] of Object.entries(config)) {
     if (value === undefined || value === null || value === '') continue;
@@ -32,7 +32,7 @@ export async function seedDefaults() {
     const existing = await funnels.listByTenant(tenantId);
     if (existing.length > 0) return; // already set up
 
-    await seedFunnel(tenantId, 'Gita', 'band', {
+    await seedFunnel(tenantId, 'Gita', {
       sheet_id: settings.sheets.gita,
       drive_folder_id: settings.drive.gitaFolder,
       postforme_api_key: settings.postforme.apiKey,
@@ -43,10 +43,9 @@ export async function seedDefaults() {
       publish_time: '08:02',
     });
 
-    await seedFunnel(tenantId, 'VidaPulse', 'strip', {
+    await seedFunnel(tenantId, 'VidaPulse', {
       sheet_id: settings.sheets.vidapulse,
       drive_folder_id: settings.drive.gitaFolder,
-      strip_file_id: settings.drive.stripFile,
       postforme_api_key: settings.postforme.apiKey,
       postforme_accounts: JSON.stringify(settings.postforme.vidapulseAccounts || []),
       account_map: JSON.stringify(settings.postforme.accountMap || {}),

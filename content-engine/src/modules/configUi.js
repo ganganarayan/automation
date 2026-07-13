@@ -66,21 +66,24 @@ export function register(ctx) {
       const q = new URLSearchParams({ tenant: tenantId, key: body.key || '' });
       if (result.errors.length) q.set('error', result.errors.join('; '));
       else q.set('saved', body.app);
-      res.redirect(`settings?${q.toString()}#${body.app}`);
+      res.redirect(`/api/v1/admin/settings?${q.toString()}#${body.app}`);
     } catch (err) {
       next(err);
     }
   });
 
   // --- Funnels (multi-account content scope) ---
-  const backToFunnels = (body) => `settings?${new URLSearchParams({ tenant: body.tenant || 'default', key: body.key || '' })}#funnels`;
+  // Absolute redirect target (relative paths resolve against the POST route,
+  // which produced a /admin/funnels/settings 404).
+  const backToFunnels = (body) =>
+    `/api/v1/admin/settings?${new URLSearchParams({ tenant: body.tenant || 'default', key: body.key || '' })}#funnels`;
 
   router.post('/admin/funnels', async (req, res, next) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
       const body = req.body || {};
       const name = (body.name || '').toString().trim();
-      if (name) await funnels.create({ tenantId: body.tenant || 'default', name, style: body.style || 'band' });
+      if (name) await funnels.create({ tenantId: body.tenant || 'default', name });
       res.redirect(backToFunnels(body));
     } catch (err) {
       next(err);
@@ -94,7 +97,6 @@ export function register(ctx) {
       const id = Number(body.funnel_id);
       const funnel = await funnels.get(id);
       if (funnel) {
-        if (body.style) await funnels.setStyle(id, body.style);
         const set = body.set || {};
         for (const field of funnels.FUNNEL_FIELDS) {
           if (!(field.key in set)) continue;
@@ -174,7 +176,7 @@ export function register(ctx) {
       const newKey = (req.body.new_key || '').toString();
       if (newKey.trim() === '') await tenantConfig.del(ACCESS_KEY_STORE.tenant, ACCESS_KEY_STORE.key);
       else await tenantConfig.set(ACCESS_KEY_STORE.tenant, ACCESS_KEY_STORE.key, newKey);
-      res.redirect(`settings?${new URLSearchParams({ tenant: req.body.tenant || 'default', key: newKey })}#users`);
+      res.redirect(`/api/v1/admin/settings?${new URLSearchParams({ tenant: req.body.tenant || 'default', key: newKey })}#users`);
     } catch (err) {
       next(err);
     }
@@ -356,29 +358,24 @@ function usersPanel({ userList, hasKey, tenantId, key }) {
 }
 
 function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
-  const styleOpts = (selected) =>
-    funnels.STYLES.map((s) => `<option value="${s}"${s === selected ? ' selected' : ''}>${s}</option>`).join('');
-
   const cards = (funnelList || [])
     .map((f) => {
       const cfg = funnelConfigs[f.id] || {};
       const fields = funnels.FUNNEL_FIELDS.map((field) => fieldRow(field, cfg)).join('');
-      return `<fieldset><legend>${esc(f.name)} <span class="pill">${esc(f.style)}</span> ${f.active ? '' : '<span class="pill">paused</span>'}</legend>
-        <form method="post" action="funnels/config">
+      return `<fieldset><legend>${esc(f.name)} ${f.active ? '' : '<span class="pill">paused</span>'}</legend>
+        <form method="post" action="/api/v1/admin/funnels/config">
           <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
           <input type="hidden" name="funnel_id" value="${f.id}">
-          <label style="margin:.2rem 0">Style</label>
-          <select name="style">${styleOpts(f.style)}</select>
           ${fields}
           <button class="save" type="submit">Save changes</button>
         </form>
         <div class="row" style="margin-top:.5rem">
-          <form method="post" action="funnels/active" style="display:inline">
+          <form method="post" action="/api/v1/admin/funnels/active" style="display:inline">
             <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
             <input type="hidden" name="funnel_id" value="${f.id}"><input type="hidden" name="active" value="${f.active ? 'false' : 'true'}">
             <button class="act" type="submit">${f.active ? 'Pause' : 'Activate'}</button>
           </form>
-          <form method="post" action="funnels/remove" style="display:inline" onsubmit="return confirm('Delete funnel ${escJs(f.name)}?')">
+          <form method="post" action="/api/v1/admin/funnels/remove" style="display:inline" onsubmit="return confirm('Delete funnel ${escJs(f.name)}?')">
             <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
             <input type="hidden" name="funnel_id" value="${f.id}">
             <button class="act danger" type="submit">Delete</button>
@@ -390,15 +387,13 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
 
   return `<section class="panel card" id="panel-funnels">
     <h2>Funnels</h2>
-    <p class="blurb">A funnel is a brand/campaign scope with its own content sheet, social accounts, style, and schedule. The daily poster runs once per active funnel. Add as many as you like.</p>
+    <p class="blurb">A funnel is a brand/campaign scope with its own content sheet, social accounts, and schedule — one shared template. The daily poster runs once per active funnel. Add as many as you like. The generated image is posted as-is (handle any layout in your image prompt).</p>
     <fieldset><legend>Add a funnel</legend>
-      <form method="post" action="funnels" class="row">
+      <form method="post" action="/api/v1/admin/funnels" class="row">
         <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
         <div><label style="margin:0 0 .2rem">Funnel name</label><input name="name" placeholder="e.g. Divine Leads" size="20"></div>
-        <div><label style="margin:0 0 .2rem">Style</label><select name="style">${styleOpts('band')}</select></div>
         <button class="act" type="submit">+ Add funnel</button>
       </form>
-      <p class="hint">Style: <b>band</b> = dark top band + label · <b>strip</b> = brand strip PNG overlay · <b>plain</b> = no overlay.</p>
     </fieldset>
     ${cards || '<p class="hint">No funnels yet — add one above.</p>'}
   </section>`;
