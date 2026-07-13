@@ -65,74 +65,39 @@ export const CONFIG_MANIFEST = {
     blurb: 'Content generation, approval, publishing, reports, dashboard.',
     groups: [
       {
-        title: 'Content sheets',
-        fields: [
-          { key: 'gita_sheet_id', label: 'Gita sheet ID' },
-          { key: 'vidapulse_sheet_id', label: 'VidaPulse sheet ID' },
-          { key: 'video_sheet_id', label: 'Video sheet ID' },
-          { key: 'factory_sheet_id', label: 'Image factory sheet ID' },
-        ],
-      },
-      {
-        title: 'Drive folders / assets',
-        fields: [
-          { key: 'gita_drive_folder_id', label: 'Gita Drive folder ID' },
-          { key: 'strip_file_id', label: 'VidaPulse strip PNG file ID' },
-          { key: 'voiceover_folder_id', label: 'Voiceover folder ID' },
-          { key: 'reels_folder_id', label: 'Reels folder ID' },
-          { key: 'factory_gpt_folder_id', label: 'Factory GPT folder ID' },
-          { key: 'factory_gemini_folder_id', label: 'Factory Gemini folder ID' },
-        ],
-      },
-      {
-        title: 'Post for Me accounts',
-        fields: [
-          { key: 'pfm_gita_accounts', label: 'Gita account IDs (JSON array)', type: 'json' },
-          { key: 'pfm_vidapulse_accounts', label: 'VidaPulse account IDs (JSON array)', type: 'json' },
-          { key: 'pfm_gita_video_accounts', label: 'Gita video account IDs (JSON array)', type: 'json' },
-          { key: 'pfm_account_map', label: 'Account map (JSON id → {platform,brand,account_name})', type: 'json' },
-        ],
-      },
-      {
-        title: 'Emails',
-        fields: [
-          { key: 'approval_email_gita', label: 'Gita approval email' },
-          { key: 'approval_email_vidapulse', label: 'VidaPulse approval email' },
-          { key: 'report_email', label: 'Report email' },
-        ],
-      },
-      {
-        title: 'Links',
-        fields: [
-          { key: 'gita_assessment_link', label: 'Gita assessment link' },
-          { key: 'gita_simple_assessment_link', label: 'Gita simple assessment link' },
-        ],
-      },
-      {
-        title: 'AI & publishing keys',
+        title: 'AI keys (shared by all funnels)',
         fields: [
           { key: 'openai_api_key', label: 'OpenAI API key', type: 'secret' },
           { key: 'image_model', label: 'OpenAI image model', placeholder: 'gpt-image-2' },
           { key: 'text_model', label: 'OpenAI text model', placeholder: 'gpt-5-mini' },
           { key: 'gemini_api_key', label: 'Gemini API key', type: 'secret' },
           { key: 'gemini_image_model', label: 'Gemini image model', placeholder: 'models/gemini-3.1-flash-image' },
-          { key: 'postforme_api_key', label: 'Post for Me API key', type: 'secret' },
           { key: 'json2video_api_key', label: 'JSON2Video API key', type: 'secret' },
         ],
       },
       {
-        title: 'Instagram automation',
+        title: 'Reports & Instagram automation',
         fields: [
+          { key: 'report_email', label: 'Report email' },
           { key: 'ig_automation_url', label: 'IG automation URL' },
           { key: 'ig_contact_email', label: 'IG contact email' },
           { key: 'ig_comment_webhook_url', label: 'IG comment webhook URL' },
         ],
       },
+      {
+        title: 'Video & image factory (advanced)',
+        fields: [
+          { key: 'video_sheet_id', label: 'Video sheet ID' },
+          { key: 'voiceover_folder_id', label: 'Voiceover folder ID' },
+          { key: 'reels_folder_id', label: 'Reels folder ID' },
+          { key: 'factory_sheet_id', label: 'Image factory sheet ID' },
+          { key: 'factory_gpt_folder_id', label: 'Factory GPT folder ID' },
+          { key: 'factory_gemini_folder_id', label: 'Factory Gemini folder ID' },
+        ],
+      },
     ],
     modules: [
-      { key: 'gitaImage', label: 'Gita image poster' },
-      { key: 'vidapulseImage', label: 'VidaPulse image poster' },
-      { key: 'vidapulseRefill', label: 'VidaPulse refill' },
+      { key: 'vidapulseRefill', label: 'Content refill' },
       { key: 'delivery', label: 'Delivery log & reports' },
       { key: 'videoPipeline', label: 'Video pipeline' },
       { key: 'imageFactory', label: 'AI image factory' },
@@ -147,7 +112,14 @@ export const CONFIG_MANIFEST = {
     groups: [
       {
         title: 'Razorpay',
-        fields: [{ key: 'razorpay_webhook_secret', label: 'Razorpay webhook secret', type: 'secret' }],
+        fields: [
+          {
+            key: 'razorpay_webhook_secret',
+            label: 'Razorpay webhook secret',
+            type: 'generated_secret',
+            help: 'Click Generate, copy the value, and paste it as the "Secret" when you create the webhook in your Razorpay dashboard (point the webhook URL at your tracking-bridge domain + /api/v1/webhook/razorpay-capi, event: payment.captured).',
+          },
+        ],
       },
       {
         title: 'Meta Conversions API',

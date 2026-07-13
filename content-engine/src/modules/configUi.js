@@ -28,8 +28,8 @@
  */
 import { CONFIG_MANIFEST, APPS } from '../services/configManifest.js';
 import * as configService from '../services/configService.js';
-import * as tenants from '../repositories/tenantRepository.js';
 import * as users from '../repositories/usersRepository.js';
+import * as funnels from '../repositories/funnelsRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { keyOk, requiredKey, ACCESS_KEY_STORE } from '../services/accessService.js';
 
@@ -40,14 +40,16 @@ export function register(ctx) {
     try {
       if (!(await keyOk(req))) return res.status(401).type('html').send(gatePage());
       const tenantId = (req.query.tenant || 'default').toString();
-      const [tenantList, configMap, userList, hasKey] = await Promise.all([
-        tenants.list().catch(() => [{ id: 'default', name: 'Default Tenant' }]),
+      const [configMap, userList, funnelList, hasKey] = await Promise.all([
         configService.load(tenantId).catch(() => ({})),
         users.list().catch(() => []),
+        funnels.listByTenant(tenantId).catch(() => []),
         requiredKey().then((k) => !!k),
       ]);
+      const funnelConfigs = {};
+      for (const f of funnelList) funnelConfigs[f.id] = await funnels.getConfig(f.id).catch(() => ({}));
       res.type('html').send(
-        page({ tenantId, tenantList, configMap, userList, hasKey, key: req.query.key || '', saved: req.query.saved }),
+        page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey, key: req.query.key || '', saved: req.query.saved }),
       );
     } catch (err) {
       next(err);
@@ -70,14 +72,65 @@ export function register(ctx) {
     }
   });
 
-  router.post('/admin/tenants', async (req, res, next) => {
+  // --- Funnels (multi-account content scope) ---
+  const backToFunnels = (body) => `settings?${new URLSearchParams({ tenant: body.tenant || 'default', key: body.key || '' })}#funnels`;
+
+  router.post('/admin/funnels', async (req, res, next) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
       const body = req.body || {};
-      const id = (body.id || '').toString().trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
-      if (!id) return res.status(400).json({ error: 'tenant id required' });
-      await tenants.create({ id, name: body.name || id });
-      res.redirect(`settings?${new URLSearchParams({ tenant: id, key: body.key || '' })}`);
+      const name = (body.name || '').toString().trim();
+      if (name) await funnels.create({ tenantId: body.tenant || 'default', name, style: body.style || 'band' });
+      res.redirect(backToFunnels(body));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/admin/funnels/config', async (req, res, next) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
+      const body = req.body || {};
+      const id = Number(body.funnel_id);
+      const funnel = await funnels.get(id);
+      if (funnel) {
+        if (body.style) await funnels.setStyle(id, body.style);
+        const set = body.set || {};
+        for (const field of funnels.FUNNEL_FIELDS) {
+          if (!(field.key in set)) continue;
+          const val = String(set[field.key] ?? '');
+          if (field.type === 'secret') {
+            if (val.trim() !== '') await funnels.setConfig(id, field.key, val);
+          } else if (val.trim() === '') {
+            await funnels.delConfig(id, field.key);
+          } else {
+            await funnels.setConfig(id, field.key, val.trim());
+          }
+        }
+      }
+      res.redirect(backToFunnels(body));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/admin/funnels/active', async (req, res, next) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
+      const body = req.body || {};
+      await funnels.setActive(Number(body.funnel_id), body.active === 'true');
+      res.redirect(backToFunnels(body));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/admin/funnels/remove', async (req, res, next) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
+      const body = req.body || {};
+      await funnels.remove(Number(body.funnel_id));
+      res.redirect(backToFunnels(body));
     } catch (err) {
       next(err);
     }
@@ -132,13 +185,9 @@ export function register(ctx) {
 
 // ---- rendering -------------------------------------------------------------
 
-function page({ tenantId, tenantList, configMap, userList, hasKey, key, saved }) {
-  const menu = [['users', 'Users'], ...APPS.map((a) => [a, CONFIG_MANIFEST[a].label])]
+function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey, key, saved }) {
+  const menu = [['users', 'Users'], ['funnels', 'Funnels'], ...APPS.map((a) => [a, CONFIG_MANIFEST[a].label])]
     .map(([id, label], i) => `<button class="nav${i === 0 ? ' active' : ''}" data-target="${id}" onclick="show('${id}')">${esc(label)}</button>`)
-    .join('');
-
-  const tenantOptions = tenantList
-    .map((t) => `<option value="${esc(t.id)}"${t.id === tenantId ? ' selected' : ''}>${esc(t.name || t.id)} (${esc(t.id)})</option>`)
     .join('');
 
   const appSections = APPS.map((a) => appSection(a, tenantId, configMap, key)).join('');
@@ -191,26 +240,14 @@ function page({ tenantId, tenantList, configMap, userList, hasKey, key, saved })
     <a class="dash" href="../dashboard${key ? `?key=${encodeURIComponent(key)}` : ''}">← Dashboard</a>
   </aside>
   <main>
-    ${saved ? `<div class="flash">Saved <b>${esc(saved)}</b> for tenant <b>${esc(tenantId)}</b>.</div>` : ''}
+    ${saved ? `<div class="flash">Saved <b>${esc(saved)}</b>.</div>` : ''}
     <div id="flash-error" class="flash err" style="display:none"></div>
-    <header class="top">
-      <form method="get" action="settings" class="row" style="gap:.4rem">
-        <input type="hidden" name="key" value="${esc(key)}">
-        <div><label style="margin:0 0 .2rem">Tenant</label>
-        <select name="tenant" onchange="this.form.submit()">${tenantOptions}</select></div>
-      </form>
-      <form method="post" action="tenants" class="row" style="gap:.4rem">
-        <input type="hidden" name="key" value="${esc(key)}">
-        <div><label style="margin:0 0 .2rem">New tenant</label><input name="id" placeholder="tenant-id" size="14"></div>
-        <div><label style="margin:0 0 .2rem">Name</label><input name="name" placeholder="Display name" size="14"></div>
-        <button class="act" type="submit">+ Add</button>
-      </form>
-    </header>
 
     ${usersPanel({ userList, hasKey, tenantId, key })}
+    ${funnelsPanel({ funnelList, funnelConfigs, tenantId, key })}
     ${appSections}
 
-    <p class="hint">Blank config fields fall back to the service's environment default. Secrets are never shown — leave blank to keep the current value. Changes apply within ~1 minute.</p>
+    <p class="hint">Blank config fields fall back to a platform default where one exists. Secrets are never shown — leave blank to keep the current value. Changes apply within ~1 minute.</p>
   </main>
 </div>
 <script>
@@ -251,6 +288,15 @@ function page({ tenantId, tenantList, configMap, userList, hasKey, key, saved })
     }catch(e){ cell.textContent='Failed to load billing.'; }
   }
   function esc2(s){ return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  function genSecret(id){
+    const b=new Uint8Array(24); crypto.getRandomValues(b);
+    const hex=Array.from(b).map(x=>x.toString(16).padStart(2,'0')).join('');
+    const el=document.getElementById(id); el.value='whsec_'+hex; el.focus(); el.select();
+  }
+  function copyField(id){
+    const el=document.getElementById(id); el.select();
+    navigator.clipboard?.writeText(el.value).then(()=>{ el.style.outline='2px solid #5bd08a'; setTimeout(()=>el.style.outline='',700); });
+  }
   const hash=(location.hash||'#users').slice(1);
   if(document.getElementById('panel-'+hash)) show(hash);
   const e=new URLSearchParams(location.search).get('error');
@@ -309,6 +355,55 @@ function usersPanel({ userList, hasKey, tenantId, key }) {
   </section>`;
 }
 
+function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
+  const styleOpts = (selected) =>
+    funnels.STYLES.map((s) => `<option value="${s}"${s === selected ? ' selected' : ''}>${s}</option>`).join('');
+
+  const cards = (funnelList || [])
+    .map((f) => {
+      const cfg = funnelConfigs[f.id] || {};
+      const fields = funnels.FUNNEL_FIELDS.map((field) => fieldRow(field, cfg)).join('');
+      return `<fieldset><legend>${esc(f.name)} <span class="pill">${esc(f.style)}</span> ${f.active ? '' : '<span class="pill">paused</span>'}</legend>
+        <form method="post" action="funnels/config">
+          <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
+          <input type="hidden" name="funnel_id" value="${f.id}">
+          <label style="margin:.2rem 0">Style</label>
+          <select name="style">${styleOpts(f.style)}</select>
+          ${fields}
+          <button class="save" type="submit">Save ${esc(f.name)}</button>
+        </form>
+        <div class="row" style="margin-top:.5rem">
+          <form method="post" action="funnels/active" style="display:inline">
+            <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
+            <input type="hidden" name="funnel_id" value="${f.id}"><input type="hidden" name="active" value="${f.active ? 'false' : 'true'}">
+            <button class="act" type="submit">${f.active ? 'Pause' : 'Activate'}</button>
+          </form>
+          <form method="post" action="funnels/remove" style="display:inline" onsubmit="return confirm('Delete funnel ${escJs(f.name)}?')">
+            <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
+            <input type="hidden" name="funnel_id" value="${f.id}">
+            <button class="act danger" type="submit">Delete</button>
+          </form>
+        </div>
+      </fieldset>`;
+    })
+    .join('');
+
+  return `<section class="panel card" id="panel-funnels">
+    <h2>Funnels</h2>
+    <p class="blurb">A funnel is a brand/campaign scope with its own content sheet, social accounts, style, and schedule. The daily poster runs once per active funnel. Add as many as you like.</p>
+    <fieldset><legend>Add a funnel</legend>
+      <form method="post" action="funnels" class="row">
+        <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
+        <div><label style="margin:0 0 .2rem">Funnel name</label><input name="name" placeholder="e.g. Divine Leads" size="20"></div>
+        <div><label style="margin:0 0 .2rem">Style</label><select name="style">${styleOpts('band')}</select></div>
+        <button class="act" type="submit">+ Add funnel</button>
+      </form>
+      <p class="hint">Style: <b>band</b> = dark top band + label · <b>strip</b> = brand strip PNG overlay · <b>plain</b> = no overlay.</p>
+    </fieldset>
+    ${cards || '<p class="hint">No funnels yet — add one above.</p>'}
+  </section>`;
+}
+
 function appSection(app, tenantId, configMap, key) {
   const m = CONFIG_MANIFEST[app];
   const groups = m.groups
@@ -340,6 +435,17 @@ function appSection(app, tenantId, configMap, key) {
 function fieldRow(field, configMap) {
   const current = configMap[field.key];
   const has = current !== undefined && current !== null && current !== '';
+  if (field.type === 'generated_secret') {
+    const fid = `gs-${field.key}`;
+    return `<div class="field"><label>${esc(field.label)}</label>
+      <div class="row" style="gap:.4rem">
+        <input id="${fid}" type="text" name="set[${esc(field.key)}]" value="${esc(has ? current : '')}"
+          placeholder="click Generate" autocomplete="off" style="flex:1;min-width:220px">
+        <button type="button" class="act" onclick="genSecret('${fid}')">Generate</button>
+        <button type="button" class="act" onclick="copyField('${fid}')">Copy</button>
+      </div>
+      ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
+  }
   if (field.type === 'secret') {
     return `<div class="field"><label>${esc(field.label)}</label>
       <input type="password" name="set[${esc(field.key)}]" autocomplete="off"

@@ -54,6 +54,19 @@ export function simpleVideoScheduledAt(now = DateTime.now().setZone(ZONE)) {
   return n <= target ? target : at(n.plus({ days: 1 }), 11, 0);
 }
 
+/**
+ * Generic per-funnel publish time: today at HH:mm IST if that is still ahead,
+ * else tomorrow at HH:mm.
+ * @param {string} timeStr - "HH:mm"
+ * @param {DateTime} [now]
+ */
+export function publishAtIst(timeStr, now = DateTime.now().setZone(ZONE)) {
+  const n = now.setZone(ZONE);
+  const [h, m] = String(timeStr || '08:02').split(':').map((x) => parseInt(x, 10) || 0);
+  const target = at(n, h, m);
+  return n <= target ? target : at(n.plus({ days: 1 }), h, m);
+}
+
 export { ZONE };
 export default {
   gitaImageScheduledAt,

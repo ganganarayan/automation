@@ -17,6 +17,10 @@ async function main() {
   await runMigrations();
   logger.info('migrations applied');
 
+  // Seed the operator's existing brands as funnels (idempotent).
+  const { seedDefaults } = await import('./services/funnelSeed.js');
+  await seedDefaults();
+
   const { app, shutdown } = createApp();
   jobRunner.start({ intervalMs: 5000, batch: 5 });
 

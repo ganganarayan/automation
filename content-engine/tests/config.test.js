@@ -49,9 +49,9 @@ describe('buildSaveOps', () => {
   it('sets module true/false and deletes on default', () => {
     const ops = buildSaveOps('content-engine', {
       settings: {},
-      modules: { gitaImage: 'false', delivery: 'true', videoPipeline: 'default' },
+      modules: { imageFactory: 'false', delivery: 'true', videoPipeline: 'default' },
     });
-    expect(ops.sets).toContainEqual({ key: 'module.content-engine.gitaImage', value: 'false' });
+    expect(ops.sets).toContainEqual({ key: 'module.content-engine.imageFactory', value: 'false' });
     expect(ops.sets).toContainEqual({ key: 'module.content-engine.delivery', value: 'true' });
     expect(ops.dels).toContain('module.content-engine.videoPipeline');
   });

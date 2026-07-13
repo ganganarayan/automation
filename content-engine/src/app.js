@@ -21,8 +21,7 @@ import { notFound, errorHandler } from './middleware/errorHandler.js';
 
 import * as approvalService from './services/approvalService.js';
 
-import * as gitaImage from './modules/gitaImage.js';
-import * as vidapulseImage from './modules/vidapulseImage.js';
+import * as funnelPosters from './modules/funnelPosters.js';
 import * as vidapulseRefill from './modules/vidapulseRefill.js';
 import * as delivery from './modules/delivery.js';
 import * as videoPipeline from './modules/videoPipeline.js';
@@ -63,8 +62,7 @@ export function createApp() {
   const ctx = { router, log: logger, registry };
 
   registry
-    .add({ name: 'gita-image', enabled: settings.modules.gitaImage, register: gitaImage.register })
-    .add({ name: 'vidapulse-image', enabled: settings.modules.vidapulseImage, register: vidapulseImage.register })
+    .add({ name: 'funnel-posters', enabled: true, register: funnelPosters.register })
     .add({ name: 'vidapulse-refill', enabled: settings.modules.vidapulseRefill, register: vidapulseRefill.register })
     .add({ name: 'delivery', enabled: settings.modules.delivery, register: delivery.register })
     .add({ name: 'video-pipeline', enabled: settings.modules.videoPipeline, register: videoPipeline.register })
