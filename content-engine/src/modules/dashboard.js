@@ -9,29 +9,19 @@
  *
  * Route: GET /api/v1/dashboard
  *
- * Access: when ADMIN_KEY is configured, the page requires a matching key via
- * `?key=` (browser-friendly) or the X-Admin-Key header; otherwise it is open
- * (local/dev). The page shows cross-service operational data, so gate it in prod.
+ * Access: guarded by the UI-settable access key (see accessService) via `?key=`
+ * or the X-Admin-Key header; open when no key is set. Shows cross-service data.
  */
 import * as dashboard from '../services/dashboardService.js';
-import { settings } from '../settings/index.js';
+import { keyOk } from '../services/accessService.js';
 
 export function register(ctx) {
   const { router, log } = ctx;
 
   router.get('/dashboard', async (req, res, next) => {
     try {
-      const adminKey = settings.auth.adminKey;
-      if (adminKey) {
-        const provided = req.query.key || req.headers['x-admin-key'];
-        if (provided !== adminKey) {
-          return res
-            .status(401)
-            .type('html')
-            .send(gatePage());
-        }
-      }
-      res.type('html').send(await dashboard.render(req.tenantId));
+      if (!(await keyOk(req))) return res.status(401).type('html').send(gatePage());
+      res.type('html').send(await dashboard.render(req.tenantId, { key: req.query.key || '' }));
     } catch (err) {
       next(err);
     }

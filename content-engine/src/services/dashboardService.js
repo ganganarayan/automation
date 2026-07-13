@@ -52,8 +52,9 @@ export async function collect(tenantId = 'default') {
 }
 
 /** Render the unified dashboard HTML. */
-export async function render(tenantId = 'default') {
+export async function render(tenantId = 'default', opts = {}) {
   const d = await collect(tenantId);
+  const keyQs = opts.key ? `?key=${encodeURIComponent(opts.key)}` : '';
 
   const countBy = (brand, success) =>
     (d.content.deliverySummary || [])
@@ -164,6 +165,8 @@ export async function render(tenantId = 'default') {
    padding:.6rem .7rem;border-radius:8px;font-size:.95rem;cursor:pointer;margin-bottom:.2rem}
  .nav:hover{background:#1c1c2a}
  .nav.active{background:#2a2a44;color:#fff}
+ .configlink{display:block;margin-top:1rem;padding:.6rem .7rem;color:#7aa2ff;text-decoration:none;border-top:1px solid #24243a;font-size:.9rem}
+ .configlink:hover{background:#1c1c2a}
  main{flex:1;padding:1.5rem;max-width:1100px}
  header.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem}
  header.top small{color:#9a9ab0}
@@ -186,6 +189,7 @@ export async function render(tenantId = 'default') {
   <aside>
     <div class="brand">⚙️ automation</div>
     ${menu}
+    <a class="configlink" href="admin/settings${keyQs}">⚙️ Configure →</a>
   </aside>
   <main>
     <header class="top">
