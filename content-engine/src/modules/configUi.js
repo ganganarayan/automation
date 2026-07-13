@@ -370,7 +370,7 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
           <label style="margin:.2rem 0">Style</label>
           <select name="style">${styleOpts(f.style)}</select>
           ${fields}
-          <button class="save" type="submit">Save ${esc(f.name)}</button>
+          <button class="save" type="submit">Save changes</button>
         </form>
         <div class="row" style="margin-top:.5rem">
           <form method="post" action="funnels/active" style="display:inline">
