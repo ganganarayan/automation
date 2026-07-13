@@ -25,7 +25,12 @@ const cache = new Map(); // tenantId -> { at, map }
 async function loadOverrides(tenantId) {
   const hit = cache.get(tenantId);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.map;
-  const map = await tenantConfig.getAll(tenantId);
+  let map = {};
+  try {
+    map = await tenantConfig.getAll(tenantId);
+  } catch {
+    return {}; // fail safe: fall back to env defaults, retry next call
+  }
   cache.set(tenantId, { at: Date.now(), map });
   return map;
 }
@@ -34,6 +39,21 @@ async function loadOverrides(tenantId) {
 export function invalidate(tenantId) {
   if (tenantId) cache.delete(tenantId);
   else cache.clear();
+}
+
+/**
+ * Whether a module is enabled for a tenant. A `module.wa-gateway.<name>`
+ * tenant_config override ('true'/'false') wins; otherwise the env flag is the
+ * default, so behavior is unchanged when no override exists.
+ * @param {string} tenantId
+ * @param {string} name - camelCase module key (e.g. 'crmRelay')
+ */
+export async function moduleEnabled(tenantId = 'default', name) {
+  const overrides = await loadOverrides(tenantId);
+  const v = overrides[`module.wa-gateway.${name}`];
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  return !!settings.modules[name];
 }
 
 /**

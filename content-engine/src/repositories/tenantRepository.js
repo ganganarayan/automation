@@ -22,4 +22,27 @@ export async function findById(tenantId) {
   return rows[0] || null;
 }
 
-export default { isActive, findById };
+/** List all tenants (for the config UI selector). */
+export async function list() {
+  const { rows } = await query(
+    'SELECT id, name, status, created_at FROM tenants ORDER BY (id = $1) DESC, created_at ASC',
+    ['default'],
+  );
+  return rows;
+}
+
+/**
+ * Create a tenant if it doesn't exist. Returns the row.
+ * @param {object} args - { id, name }
+ */
+export async function create({ id, name }) {
+  const { rows } = await query(
+    `INSERT INTO tenants (id, name, status) VALUES ($1, $2, 'active')
+     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+     RETURNING id, name, status, created_at`,
+    [id, name || id],
+  );
+  return rows[0];
+}
+
+export default { isActive, findById, list, create };

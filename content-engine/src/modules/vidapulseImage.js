@@ -8,6 +8,7 @@
 import cron from 'node-cron';
 import * as poster from '../services/vidapulsePosterService.js';
 import * as approvalService from '../services/approvalService.js';
+import * as tenantSettings from '../core/tenantSettings.js';
 import { ZONE } from '../utils/time.js';
 
 export function register(ctx) {
@@ -21,7 +22,10 @@ export function register(ctx) {
 
   cron.schedule(
     '0 22 * * *',
-    () => poster.runDaily({ providers, tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'vidapulse poster cron failed')),
+    async () => {
+      if (!(await tenantSettings.moduleEnabled('default', 'vidapulseImage'))) return;
+      poster.runDaily({ providers, tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'vidapulse poster cron failed'));
+    },
     { timezone: ZONE },
   );
   log.info('vidapulse image poster scheduled 22:00 ' + ZONE);

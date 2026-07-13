@@ -14,11 +14,12 @@
 import * as queue from '../core/queueService.js';
 import { cleanRelayNumber, hasMinDigits } from '../utils/phone.js';
 import { applyLineBreakMarkers } from '../utils/text.js';
+import { gate } from '../middleware/moduleGate.js';
 
 export function register(ctx) {
   const { router } = ctx;
-  router.post('/webhook/gita-wa', handler('gita'));
-  router.post('/webhook/vidapulse-wa', handler('vidapulse'));
+  router.post('/webhook/gita-wa', gate('rawRelay'), handler('gita'));
+  router.post('/webhook/vidapulse-wa', gate('rawRelay'), handler('vidapulse'));
 }
 
 function handler(instance) {

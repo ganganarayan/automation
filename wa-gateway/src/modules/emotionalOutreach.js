@@ -11,6 +11,7 @@
 import { z } from 'zod';
 import * as jobRunner from '../core/jobRunner.js';
 import { run as runOutreach } from '../services/outreachService.js';
+import { gate } from '../middleware/moduleGate.js';
 
 const JOB_TYPE = 'emotional_outreach';
 
@@ -34,7 +35,7 @@ export function register(ctx) {
     { maxAttempts: 2, backoffSeconds: 120 },
   );
 
-  router.post('/webhook/gita-emo-outreach', (req, res) => {
+  router.post('/webhook/gita-emo-outreach', gate('emotionalOutreach'), (req, res) => {
     const parsed = schema.safeParse(req.body || {});
     res.status(200).json({ accepted: true });
     if (!parsed.success) {

@@ -10,13 +10,15 @@
  */
 import cron from 'node-cron';
 import * as delivery from '../services/deliveryService.js';
+import * as tenantSettings from '../core/tenantSettings.js';
 import { ZONE } from '../utils/time.js';
 
 export function register(ctx) {
   const { router, providers, log } = ctx;
 
-  router.post('/webhook/pfm-result', (req, res) => {
+  router.post('/webhook/pfm-result', async (req, res) => {
     res.status(200).json({ accepted: true });
+    if (!(await tenantSettings.moduleEnabled(req.tenantId, 'delivery'))) return;
     delivery
       .recordResult({ tenantId: req.tenantId, providers, event: req.body || {} })
       .catch((err) => req.log.error({ err: err.message }, 'pfm-result processing failed'));
@@ -24,12 +26,18 @@ export function register(ctx) {
 
   cron.schedule(
     '30 8 * * *',
-    () => delivery.sendGitaReport({ tenantId: 'default', providers }).catch((e) => log.error({ err: e.message }, 'gita report failed')),
+    async () => {
+      if (!(await tenantSettings.moduleEnabled('default', 'delivery'))) return;
+      delivery.sendGitaReport({ tenantId: 'default', providers }).catch((e) => log.error({ err: e.message }, 'gita report failed'));
+    },
     { timezone: ZONE },
   );
   cron.schedule(
     '0 9 * * *',
-    () => delivery.sendVidapulseReport({ tenantId: 'default', providers }).catch((e) => log.error({ err: e.message }, 'vidapulse report failed')),
+    async () => {
+      if (!(await tenantSettings.moduleEnabled('default', 'delivery'))) return;
+      delivery.sendVidapulseReport({ tenantId: 'default', providers }).catch((e) => log.error({ err: e.message }, 'vidapulse report failed'));
+    },
     { timezone: ZONE },
   );
 

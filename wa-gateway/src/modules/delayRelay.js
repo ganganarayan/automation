@@ -20,6 +20,8 @@ import * as relayControl from '../repositories/relayControlRepository.js';
 import { validateContact } from '../validators/contactValidator.js';
 import { runAll } from '../services/relayService.js';
 import { withTransaction } from '../core/db.js';
+import * as tenantSettings from '../core/tenantSettings.js';
+import { gate } from '../middleware/moduleGate.js';
 import { settings } from '../settings/index.js';
 import { ZONE } from '../utils/time.js';
 
@@ -47,7 +49,7 @@ export function register(ctx) {
   const { router, providers, log } = ctx;
 
   // Per-account intake webhook.
-  router.post('/webhook/delay-relay-:account', async (req, res, next) => {
+  router.post('/webhook/delay-relay-:account', gate('delayRelay'), async (req, res, next) => {
     try {
       const account = req.params.account;
       if (!ACCOUNTS.includes(account)) {
@@ -114,7 +116,8 @@ export function register(ctx) {
   // Daily ramped drip at 06:00 IST.
   cron.schedule(
     '0 6 * * *',
-    () => {
+    async () => {
+      if (!(await tenantSettings.moduleEnabled('default', 'delayRelay'))) return;
       runAll({ sheets: providers.sheets }).catch((err) =>
         log.error({ err: err.message }, 'delay relay cron failed'),
       );

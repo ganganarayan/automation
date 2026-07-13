@@ -16,7 +16,12 @@ const cache = new Map();
 async function loadOverrides(tenantId) {
   const hit = cache.get(tenantId);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.map;
-  const map = await tenantConfig.getAll(tenantId);
+  let map = {};
+  try {
+    map = await tenantConfig.getAll(tenantId);
+  } catch {
+    return {}; // fail safe: fall back to env defaults, retry next call
+  }
   cache.set(tenantId, { at: Date.now(), map });
   return map;
 }
@@ -24,6 +29,24 @@ async function loadOverrides(tenantId) {
 export function invalidate(tenantId) {
   if (tenantId) cache.delete(tenantId);
   else cache.clear();
+}
+
+const APP = 'content-engine';
+
+/**
+ * Whether a module is enabled for a tenant. A `module.content-engine.<name>`
+ * tenant_config override ('true'/'false') wins; otherwise the env flag
+ * (settings.modules[name]) is the default, so behavior is unchanged when no
+ * override exists.
+ * @param {string} tenantId
+ * @param {string} name - camelCase module key (e.g. 'gitaImage')
+ */
+export async function moduleEnabled(tenantId = 'default', name) {
+  const o = await loadOverrides(tenantId);
+  const v = o[`module.${APP}.${name}`];
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  return !!settings.modules[name];
 }
 
 const parseJson = (v, fallback) => {

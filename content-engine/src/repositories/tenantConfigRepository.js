@@ -37,4 +37,9 @@ export async function set(tenantId, key, value) {
   );
 }
 
-export default { getAll, get, set };
+/** Delete a config override (reverts the key to its env default). */
+export async function del(tenantId, key) {
+  await query('DELETE FROM tenant_config WHERE tenant_id = $1 AND key = $2', [tenantId, key]);
+}
+
+export default { getAll, get, set, del };

@@ -9,6 +9,7 @@
  */
 import cron from 'node-cron';
 import * as insights from '../services/insightsService.js';
+import * as tenantSettings from '../core/tenantSettings.js';
 import { ZONE } from '../utils/time.js';
 
 export function register(ctx) {
@@ -16,7 +17,10 @@ export function register(ctx) {
 
   cron.schedule(
     '0 7 * * *',
-    () => insights.run({ tenantId: 'default', providers }).catch((e) => log.error({ err: e.message }, 'insights cron failed')),
+    async () => {
+      if (!(await tenantSettings.moduleEnabled('default', 'insights'))) return;
+      insights.run({ tenantId: 'default', providers }).catch((e) => log.error({ err: e.message }, 'insights cron failed'));
+    },
     { timezone: ZONE },
   );
 

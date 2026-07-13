@@ -36,6 +36,7 @@ import * as delivery from './modules/delivery.js';
 import * as videoPipeline from './modules/videoPipeline.js';
 import * as imageFactory from './modules/imageFactory.js';
 import * as dashboard from './modules/dashboard.js';
+import * as configUi from './modules/configUi.js';
 import * as admin from './modules/admin.js';
 
 export function createApp() {
@@ -86,6 +87,7 @@ export function createApp() {
     .add({ name: 'video-pipeline', enabled: settings.modules.videoPipeline, register: videoPipeline.register })
     .add({ name: 'image-factory', enabled: settings.modules.imageFactory, register: imageFactory.register })
     .add({ name: 'dashboard', enabled: settings.modules.dashboard, register: dashboard.register })
+    .add({ name: 'config-ui', enabled: settings.modules.admin, register: configUi.register })
     .add({ name: 'admin', enabled: settings.modules.admin, register: admin.register });
 
   registry.registerAll(ctx);

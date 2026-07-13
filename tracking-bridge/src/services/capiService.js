@@ -12,6 +12,9 @@
  */
 import { buildPurchaseEvent, extractPurchase } from './capiBuilder.js';
 import * as eventLog from '../repositories/eventLogRepository.js';
+import * as tenantSettings from '../core/tenantSettings.js';
+import { createMetaProvider } from '../providers/metaProvider.js';
+import { createAssess360Provider } from '../providers/enrichmentProvider.js';
 import { settings } from '../settings/index.js';
 import { childLogger } from '../core/logger.js';
 
@@ -27,17 +30,22 @@ export async function process({ tenantId = 'default', providers, payload }) {
     return;
   }
 
-  const enrichment = await providers.enrichment.match({ email: purchase.email, phone: purchase.phone });
+  // Resolve per-tenant config and build the Meta/enrichment clients from it.
+  const resolved = await tenantSettings.forTenant(tenantId);
+  const meta = createMetaProvider(resolved.meta, log);
+  const enrichmentClient = createAssess360Provider(resolved.assess360, log);
+
+  const enrichment = await enrichmentClient.match({ email: purchase.email, phone: purchase.phone });
 
   const { event, matchSignals } = buildPurchaseEvent({
     purchase,
     enrichment,
-    config: { contentName: settings.meta.contentName, eventSourceUrl: settings.meta.eventSourceUrl },
+    config: { contentName: resolved.meta.contentName, eventSourceUrl: resolved.meta.eventSourceUrl },
   });
 
   let metaResult = { ok: false };
   try {
-    metaResult = await providers.meta.sendEvent(event, { testEventCode: settings.meta.testEventCode || undefined });
+    metaResult = await meta.sendEvent(event, { testEventCode: resolved.meta.testEventCode || undefined });
   } catch (err) {
     log.warn({ err: err.message }, 'meta CAPI send failed (continuing)');
     metaResult = { ok: false, error: err.message };

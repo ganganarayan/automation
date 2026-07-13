@@ -10,11 +10,12 @@
 import * as tenantSettings from '../core/tenantSettings.js';
 import * as eventLog from '../repositories/eventLogRepository.js';
 import { isoIst } from '../utils/time.js';
+import { gate } from '../middleware/moduleGate.js';
 
 export function register(ctx) {
   const { router, providers } = ctx;
 
-  router.post('/webhook/evolution-connection', async (req, res, next) => {
+  router.post('/webhook/evolution-connection', gate('connectionMonitor'), async (req, res, next) => {
     try {
       const body = req.body || {};
       const state = body?.data?.state ?? body?.state ?? 'unknown';

@@ -17,6 +17,7 @@ import { enqueueMessage } from '../services/sendService.js';
 import * as tenantSettings from '../core/tenantSettings.js';
 import { settings } from '../settings/index.js';
 import { requireInternalKey } from '../middleware/auth.js';
+import { gate } from '../middleware/moduleGate.js';
 import { ValidationError } from '../core/errors.js';
 
 const relaySchema = z.object({
@@ -38,7 +39,7 @@ export function register(ctx) {
   const { router, providers } = ctx;
 
   // Public CRM relay: respond 200 immediately, process asynchronously.
-  router.post('/webhook/crm-wa-relay', (req, res) => {
+  router.post('/webhook/crm-wa-relay', gate('crmRelay'), (req, res) => {
     const parsed = relaySchema.safeParse(req.body || {});
     res.status(200).json({ accepted: true });
     if (!parsed.success) {

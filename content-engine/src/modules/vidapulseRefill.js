@@ -7,6 +7,7 @@
  */
 import cron from 'node-cron';
 import * as refill from '../services/refillService.js';
+import * as tenantSettings from '../core/tenantSettings.js';
 import { requireAdminKey } from '../middleware/auth.js';
 import { ZONE } from '../utils/time.js';
 
@@ -15,7 +16,10 @@ export function register(ctx) {
 
   cron.schedule(
     '0 9 * * *',
-    () => refill.run({ providers, tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'refill cron failed')),
+    async () => {
+      if (!(await tenantSettings.moduleEnabled('default', 'vidapulseRefill'))) return;
+      refill.run({ providers, tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'refill cron failed'));
+    },
     { timezone: ZONE },
   );
 

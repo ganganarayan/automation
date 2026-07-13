@@ -1,0 +1,188 @@
+/**
+ * Configuration manifest.
+ *
+ * Purpose:      Describe, for each app, the tenant-scoped settings and module
+ *               toggles the config UI should render. This is the single source
+ *               of truth that drives the forms and the save/validation logic.
+ * Responsibility: Pure data + tiny helpers; no I/O.
+ * Dependencies: none.
+ *
+ * Settings `key` values are the flat tenant_config keys the services' resolvers
+ * already read (so edits take effect live). Module `key` values are the
+ * camelCase module names; they are stored per-app as `module.<app>.<name>` and
+ * honored at runtime with the env flag as the default (see moduleGate).
+ *
+ * Field types: 'text' (default) | 'secret' (masked) | 'json' | 'textarea'.
+ */
+
+export const APPS = ['wa-gateway', 'content-engine', 'tracking-bridge'];
+
+export const CONFIG_MANIFEST = {
+  'wa-gateway': {
+    label: 'wa-gateway',
+    blurb: 'WhatsApp orchestration: templates, throttle, Delay Relay, outreach.',
+    groups: [
+      {
+        title: 'Evolution (WhatsApp gateway)',
+        fields: [
+          { key: 'evolution_base_url', label: 'Evolution base URL' },
+          { key: 'evolution_api_key', label: 'Evolution API key', type: 'secret' },
+        ],
+      },
+      {
+        title: 'Message templates',
+        fields: [
+          { key: 'templates_sheet_id', label: 'Templates sheet ID' },
+          { key: 'templates_sheet_tab', label: 'Templates tab', placeholder: 'WA Msg Templates' },
+        ],
+      },
+      {
+        title: 'Booking & outreach',
+        fields: [
+          { key: 'calendar_link', label: 'Calendar link' },
+          { key: 'audio_bands', label: 'Audio bands (JSON map band → URLs)', type: 'json' },
+        ],
+      },
+      {
+        title: 'Alerts',
+        fields: [{ key: 'alert_email', label: 'Alert email' }],
+      },
+    ],
+    modules: [
+      { key: 'crmRelay', label: 'CRM relay' },
+      { key: 'dispatcher', label: 'Dispatcher (queue sender)' },
+      { key: 'rawRelay', label: 'Raw relays' },
+      { key: 'formBooking', label: 'Form booking' },
+      { key: 'emotionalOutreach', label: 'Emotional outreach' },
+      { key: 'connectionMonitor', label: 'Connection monitor' },
+      { key: 'delayRelay', label: 'Delay Relay' },
+      { key: 'admin', label: 'Admin API' },
+    ],
+  },
+
+  'content-engine': {
+    label: 'content-engine',
+    blurb: 'Content generation, approval, publishing, reports, dashboard.',
+    groups: [
+      {
+        title: 'Content sheets',
+        fields: [
+          { key: 'gita_sheet_id', label: 'Gita sheet ID' },
+          { key: 'vidapulse_sheet_id', label: 'VidaPulse sheet ID' },
+          { key: 'video_sheet_id', label: 'Video sheet ID' },
+          { key: 'factory_sheet_id', label: 'Image factory sheet ID' },
+        ],
+      },
+      {
+        title: 'Drive folders / assets',
+        fields: [
+          { key: 'gita_drive_folder_id', label: 'Gita Drive folder ID' },
+          { key: 'strip_file_id', label: 'VidaPulse strip PNG file ID' },
+          { key: 'voiceover_folder_id', label: 'Voiceover folder ID' },
+          { key: 'reels_folder_id', label: 'Reels folder ID' },
+          { key: 'factory_gpt_folder_id', label: 'Factory GPT folder ID' },
+          { key: 'factory_gemini_folder_id', label: 'Factory Gemini folder ID' },
+        ],
+      },
+      {
+        title: 'Post for Me accounts',
+        fields: [
+          { key: 'pfm_gita_accounts', label: 'Gita account IDs (JSON array)', type: 'json' },
+          { key: 'pfm_vidapulse_accounts', label: 'VidaPulse account IDs (JSON array)', type: 'json' },
+          { key: 'pfm_gita_video_accounts', label: 'Gita video account IDs (JSON array)', type: 'json' },
+          { key: 'pfm_account_map', label: 'Account map (JSON id → {platform,brand,account_name})', type: 'json' },
+        ],
+      },
+      {
+        title: 'Emails',
+        fields: [
+          { key: 'approval_email_gita', label: 'Gita approval email' },
+          { key: 'approval_email_vidapulse', label: 'VidaPulse approval email' },
+          { key: 'report_email', label: 'Report email' },
+        ],
+      },
+      {
+        title: 'Links',
+        fields: [
+          { key: 'gita_assessment_link', label: 'Gita assessment link' },
+          { key: 'gita_simple_assessment_link', label: 'Gita simple assessment link' },
+        ],
+      },
+    ],
+    modules: [
+      { key: 'gitaImage', label: 'Gita image poster' },
+      { key: 'vidapulseImage', label: 'VidaPulse image poster' },
+      { key: 'vidapulseRefill', label: 'VidaPulse refill' },
+      { key: 'delivery', label: 'Delivery log & reports' },
+      { key: 'videoPipeline', label: 'Video pipeline' },
+      { key: 'imageFactory', label: 'AI image factory' },
+      { key: 'dashboard', label: 'Dashboard' },
+      { key: 'admin', label: 'Admin API' },
+    ],
+  },
+
+  'tracking-bridge': {
+    label: 'tracking-bridge',
+    blurb: 'Razorpay → Meta CAPI purchases and daily ad insights.',
+    groups: [
+      {
+        title: 'Razorpay',
+        fields: [{ key: 'razorpay_webhook_secret', label: 'Razorpay webhook secret', type: 'secret' }],
+      },
+      {
+        title: 'Meta Conversions API',
+        fields: [
+          { key: 'meta_pixel_id', label: 'Meta pixel ID' },
+          { key: 'meta_capi_token', label: 'Meta CAPI token', type: 'secret' },
+          { key: 'meta_api_version', label: 'Meta API version', placeholder: 'v21.0' },
+          { key: 'event_source_url', label: 'Event source URL' },
+          { key: 'content_name', label: 'Content name' },
+        ],
+      },
+      {
+        title: 'Meta Ads insights',
+        fields: [
+          { key: 'meta_ad_account_id', label: 'Ad account ID (act_...)' },
+          { key: 'meta_ads_token', label: 'Meta Ads token', type: 'secret' },
+          { key: 'insights_sheet_id', label: 'Insights sheet ID' },
+        ],
+      },
+      {
+        title: 'Enrichment (Assess360)',
+        fields: [
+          { key: 'assess360_url', label: 'Assess360 URL' },
+          { key: 'assess360_token', label: 'Assess360 token', type: 'secret' },
+        ],
+      },
+    ],
+    modules: [
+      { key: 'capi', label: 'Razorpay → CAPI' },
+      { key: 'insights', label: 'Daily ad insights' },
+    ],
+  },
+};
+
+/** The tenant_config key used to store a module toggle for an app. */
+export function moduleKey(app, name) {
+  return `module.${app}.${name}`;
+}
+
+/** All settings field keys for an app. */
+export function settingKeys(app) {
+  const m = CONFIG_MANIFEST[app];
+  if (!m) return [];
+  return m.groups.flatMap((g) => g.fields.map((f) => f.key));
+}
+
+/** Look up a field descriptor by key within an app. */
+export function fieldByKey(app, key) {
+  const m = CONFIG_MANIFEST[app];
+  if (!m) return null;
+  for (const g of m.groups) {
+    const f = g.fields.find((x) => x.key === key);
+    if (f) return f;
+  }
+  return null;
+}
+
+export default { APPS, CONFIG_MANIFEST, moduleKey, settingKeys, fieldByKey };

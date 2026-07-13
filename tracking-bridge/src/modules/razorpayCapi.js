@@ -13,18 +13,22 @@
  */
 import { verifyRazorpaySignature } from '../utils/signature.js';
 import * as capiService from '../services/capiService.js';
-import { settings } from '../settings/index.js';
+import * as tenantSettings from '../core/tenantSettings.js';
 
 export function register(ctx) {
   const { router, providers } = ctx;
 
-  router.post('/webhook/razorpay-capi', (req, res) => {
+  router.post('/webhook/razorpay-capi', async (req, res) => {
     // Always ack; the caller must never learn whether verification passed.
     res.status(200).json({ ok: true });
 
+    // Per-tenant module toggle + webhook secret.
+    if (!(await tenantSettings.moduleEnabled(req.tenantId, 'capi'))) return;
+    const resolved = await tenantSettings.forTenant(req.tenantId);
+
     const signature = req.headers['x-razorpay-signature'];
     const raw = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
-    if (!verifyRazorpaySignature(raw, signature, settings.razorpay.webhookSecret)) {
+    if (!verifyRazorpaySignature(raw, signature, resolved.razorpay.webhookSecret)) {
       req.log.warn('razorpay signature mismatch; dropped');
       return;
     }

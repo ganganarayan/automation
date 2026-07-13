@@ -10,6 +10,7 @@
  */
 import { enqueueMessage } from '../services/sendService.js';
 import * as tenantSettings from '../core/tenantSettings.js';
+import { gate } from '../middleware/moduleGate.js';
 
 /** Read a field from a form payload regardless of casing/spacing. */
 function field(body, ...names) {
@@ -25,7 +26,7 @@ function field(body, ...names) {
 export function register(ctx) {
   const { router } = ctx;
 
-  router.post('/webhook/gita-form-booking', async (req, res, next) => {
+  router.post('/webhook/gita-form-booking', gate('formBooking'), async (req, res, next) => {
     try {
       const body = req.body || {};
       const name = field(body, 'name', 'fullname') || 'there';
