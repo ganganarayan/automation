@@ -26,7 +26,8 @@
  *   GET  /api/v1/admin/users/billing         a user's billing history (JSON)
  *   POST /api/v1/admin/access/key            set/clear the access key
  */
-import { CONFIG_MANIFEST, APPS } from '../services/configManifest.js';
+import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
+import { FLOW_MANIFEST, hasFlow } from '../services/flowManifest.js';
 import * as configService from '../services/configService.js';
 import * as users from '../repositories/usersRepository.js';
 import * as funnels from '../repositories/funnelsRepository.js';
@@ -192,7 +193,9 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey
     .map(([id, label], i) => `<button class="nav${i === 0 ? ' active' : ''}" data-target="${id}" onclick="show('${id}')">${esc(label)}</button>`)
     .join('');
 
-  const appSections = APPS.map((a) => appSection(a, tenantId, configMap, key)).join('');
+  const appSections = APPS
+    .map((a) => (hasFlow(a) ? flowSection(a, tenantId, configMap, key) : appSection(a, tenantId, configMap, key)))
+    .join('');
 
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>automation — control panel</title>
@@ -234,6 +237,22 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey
  .planwrap{display:flex;gap:.5rem;align-items:center}
  .billing{background:#0d0d16;border:1px solid #24243a;border-radius:8px;padding:.5rem .7rem;margin:.3rem 0}
  a{color:#7aa2ff}
+ /* flowchart view */
+ .flow{margin:.5rem 0}
+ .flowphase{margin:0}
+ .flowphase-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:#8a8aa2;margin:.2rem 0 .5rem}
+ .flowrow{display:block}
+ .flowrow.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.8rem}
+ .flowbox{background:#15151f;border:1px solid #2a2a44;border-radius:10px;padding:.8rem 1rem;margin:0 0 .8rem}
+ .flowrow.cols .flowbox{margin:0}
+ .flowbox-head{display:flex;justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap}
+ .flowbox-head h4{margin:0;font-size:.98rem}
+ .flowdesc{color:#9a9ab0;font-size:.82rem;margin:.25rem 0 .5rem}
+ .flowinfo{color:#6f6f88;font-size:.78rem;margin:.4rem 0 0;border-top:1px dashed #24243a;padding-top:.4rem}
+ .flowtoggle{display:flex;align-items:center;gap:.4rem}
+ .flowtoggle span{font-size:.72rem;color:#8a8aa2}
+ .flowtoggle select{padding:.3rem .5rem}
+ .flowarrow{text-align:center;color:#4a4a66;font-size:1rem;margin:-.2rem 0 .5rem}
 </style>
 <div class="layout">
   <aside>
@@ -396,6 +415,53 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
       </form>
     </fieldset>
     ${cards || '<p class="hint">No funnels yet — add one above.</p>'}
+  </section>`;
+}
+
+function flowSection(app, tenantId, configMap, key) {
+  const m = CONFIG_MANIFEST[app];
+  const flow = FLOW_MANIFEST[app];
+
+  const moduleSelect = (moduleKey) => {
+    if (!moduleKey) return '';
+    const choice = configService.moduleChoice(configMap, app, moduleKey);
+    const opt = (v, lbl) => `<option value="${v}"${choice === v ? ' selected' : ''}>${lbl}</option>`;
+    return `<div class="flowtoggle"><span>Status</span>
+      <select name="mod[${esc(moduleKey)}]">${opt('default', 'Default')}${opt('true', 'On')}${opt('false', 'Off')}</select></div>`;
+  };
+
+  const box = (b) => {
+    const fields = (b.fieldKeys || [])
+      .map((fk) => {
+        const field = fieldByKey(app, fk);
+        return field ? fieldRow(field, configMap) : '';
+      })
+      .join('');
+    return `<div class="flowbox">
+      <div class="flowbox-head"><h4>${esc(b.title)}</h4>${moduleSelect(b.moduleKey)}</div>
+      ${b.desc ? `<p class="flowdesc">${esc(b.desc)}</p>` : ''}
+      ${fields}
+      ${b.info ? `<p class="flowinfo">${esc(b.info)}</p>` : ''}
+    </div>`;
+  };
+
+  const phases = flow.phases
+    .map((phase, i) => {
+      const boxes = `<div class="flowrow${phase.columns ? ' cols' : ''}">${phase.boxes.map(box).join('')}</div>`;
+      const arrow = i < flow.phases.length - 1 ? '<div class="flowarrow">▼</div>' : '';
+      return `<div class="flowphase"><div class="flowphase-label">${esc(phase.label)}</div>${boxes}</div>${arrow}`;
+    })
+    .join('');
+
+  return `<section class="panel card" id="panel-${esc(app)}">
+    <h2>${esc(m.label)}</h2><p class="blurb">${esc(flow.intro || m.blurb)}</p>
+    <form method="post" action="/api/v1/admin/settings/save">
+      <input type="hidden" name="app" value="${esc(app)}">
+      <input type="hidden" name="tenant" value="${esc(tenantId)}">
+      <input type="hidden" name="key" value="${esc(key)}">
+      <div class="flow">${phases}</div>
+      <button class="save" type="submit">Save ${esc(m.label)}</button>
+    </form>
   </section>`;
 }
 
