@@ -32,14 +32,40 @@ import * as configService from '../services/configService.js';
 import * as users from '../repositories/usersRepository.js';
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
-import { keyOk, requiredKey, ACCESS_KEY_STORE } from '../services/accessService.js';
+import { keyOk, requiredKey, verifyKey, setAccessCookie, clearAccessCookie, ACCESS_KEY_STORE } from '../services/accessService.js';
 
 export function register(ctx) {
   const { router, log } = ctx;
 
+  // Sign in: exchange the key for an httpOnly cookie, then land on a clean URL.
+  router.post('/admin/login', async (req, res, next) => {
+    try {
+      const nextTarget = req.body?.next === 'dashboard' ? '/api/v1/dashboard' : '/api/v1/admin/settings';
+      if (await verifyKey(req.body?.key)) {
+        await setAccessCookie(res);
+        return res.redirect(nextTarget);
+      }
+      return res.status(401).type('html').send(gatePage(nextTarget, 'Wrong key'));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/admin/logout', (req, res) => {
+    clearAccessCookie(res);
+    res.redirect('/api/v1/admin/settings');
+  });
+
   router.get('/admin/settings', async (req, res, next) => {
     try {
-      if (!(await keyOk(req))) return res.status(401).type('html').send(gatePage());
+      if (!(await keyOk(req))) return res.status(401).type('html').send(gatePage('/api/v1/admin/settings'));
+      // Migrate any ?key= visit onto the cookie and strip it from the URL.
+      if (req.query.key) {
+        await setAccessCookie(res);
+        const q = new URLSearchParams();
+        if (req.query.tenant) q.set('tenant', String(req.query.tenant));
+        return res.redirect(`/api/v1/admin/settings${q.toString() ? `?${q}` : ''}`);
+      }
       const tenantId = (req.query.tenant || 'default').toString();
       const [configMap, userList, funnelList, hasKey] = await Promise.all([
         configService.load(tenantId).catch(() => ({})),
@@ -50,7 +76,7 @@ export function register(ctx) {
       const funnelConfigs = {};
       for (const f of funnelList) funnelConfigs[f.id] = await funnels.getConfig(f.id).catch(() => ({}));
       res.type('html').send(
-        page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey, key: req.query.key || '', saved: req.query.saved }),
+        page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey, key: '', saved: req.query.saved }),
       );
     } catch (err) {
       next(err);
@@ -64,7 +90,7 @@ export function register(ctx) {
       const tenantId = (body.tenant || 'default').toString();
       const submitted = { settings: body.set || {}, modules: body.mod || {} };
       const result = await configService.save(tenantId, body.app, submitted);
-      const q = new URLSearchParams({ tenant: tenantId, key: body.key || '' });
+      const q = new URLSearchParams({ tenant: tenantId });
       if (result.errors.length) q.set('error', result.errors.join('; '));
       else q.set('saved', body.app);
       res.redirect(`/api/v1/admin/settings?${q.toString()}#${body.app}`);
@@ -77,7 +103,7 @@ export function register(ctx) {
   // Absolute redirect target (relative paths resolve against the POST route,
   // which produced a /admin/funnels/settings 404).
   const backToFunnels = (body) =>
-    `/api/v1/admin/settings?${new URLSearchParams({ tenant: body.tenant || 'default', key: body.key || '' })}#funnels`;
+    `/api/v1/admin/settings?${new URLSearchParams({ tenant: body.tenant || 'default' })}#funnels`;
 
   router.post('/admin/funnels', async (req, res, next) => {
     try {
@@ -175,9 +201,14 @@ export function register(ctx) {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
       const newKey = (req.body.new_key || '').toString();
-      if (newKey.trim() === '') await tenantConfig.del(ACCESS_KEY_STORE.tenant, ACCESS_KEY_STORE.key);
-      else await tenantConfig.set(ACCESS_KEY_STORE.tenant, ACCESS_KEY_STORE.key, newKey);
-      res.redirect(`/api/v1/admin/settings?${new URLSearchParams({ tenant: req.body.tenant || 'default', key: newKey })}#users`);
+      if (newKey.trim() === '') {
+        await tenantConfig.del(ACCESS_KEY_STORE.tenant, ACCESS_KEY_STORE.key);
+        clearAccessCookie(res);
+      } else {
+        await tenantConfig.set(ACCESS_KEY_STORE.tenant, ACCESS_KEY_STORE.key, newKey);
+        await setAccessCookie(res); // refresh cookie to the new key (never in the URL)
+      }
+      res.redirect(`/api/v1/admin/settings?${new URLSearchParams({ tenant: req.body.tenant || 'default' })}#users`);
     } catch (err) {
       next(err);
     }
@@ -521,16 +552,21 @@ function fieldRow(field, configMap) {
       placeholder="${field.placeholder ? esc(field.placeholder) : 'env default'}"></div>`;
 }
 
-function gatePage() {
+function gatePage(next = '/api/v1/admin/settings', error = '') {
+  const nextName = next.includes('dashboard') ? 'dashboard' : 'settings';
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>automation — sign in</title>
 <style>body{font-family:system-ui;background:#0b0b12;color:#e8e8ef;display:grid;place-items:center;height:100vh;margin:0}
 form{background:#15151f;border:1px solid #24243a;padding:1.5rem;border-radius:12px;min-width:280px}
 input{width:100%;padding:.6rem;margin:.6rem 0;border-radius:8px;border:1px solid #333;background:#0b0b12;color:#fff}
-button{width:100%;padding:.6rem;border:0;border-radius:8px;background:#2a2a44;color:#fff;cursor:pointer}</style>
-<form onsubmit="location.href='settings?key='+encodeURIComponent(document.getElementById('k').value);return false">
-  <h1>⚙️ automation</h1><input id="k" type="password" placeholder="Access key" autofocus>
-  <button type="submit">Open</button></form>`;
+button{width:100%;padding:.6rem;border:0;border-radius:8px;background:#2a2a44;color:#fff;cursor:pointer}
+.err{color:#ff9a9a;font-size:.85rem;margin:.2rem 0}</style>
+<form method="post" action="/api/v1/admin/login">
+  <h1>⚙️ automation</h1>
+  ${error ? `<div class="err">${esc(error)}</div>` : ''}
+  <input type="hidden" name="next" value="${esc(nextName)}">
+  <input name="key" type="password" placeholder="Access key" autofocus autocomplete="current-password">
+  <button type="submit">Sign in</button></form>`;
 }
 
 function esc(s) {

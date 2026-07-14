@@ -9,11 +9,13 @@
  *
  * Route: GET /api/v1/dashboard
  *
- * Access: guarded by the UI-settable access key (see accessService) via `?key=`
- * or the X-Admin-Key header; open when no key is set. Shows cross-service data.
+ * Access: guarded by an httpOnly access cookie (see accessService). Signing in
+ * happens via /api/v1/admin/login; the key is never placed in a URL. An
+ * existing `?key=` visit is migrated onto the cookie and stripped. Open when no
+ * key is set.
  */
 import * as dashboard from '../services/dashboardService.js';
-import { keyOk } from '../services/accessService.js';
+import { keyOk, setAccessCookie } from '../services/accessService.js';
 
 export function register(ctx) {
   const { router, log } = ctx;
@@ -21,7 +23,11 @@ export function register(ctx) {
   router.get('/dashboard', async (req, res, next) => {
     try {
       if (!(await keyOk(req))) return res.status(401).type('html').send(gatePage());
-      res.type('html').send(await dashboard.render(req.tenantId, { key: req.query.key || '' }));
+      if (req.query.key) {
+        await setAccessCookie(res);
+        return res.redirect('/api/v1/dashboard');
+      }
+      res.type('html').send(await dashboard.render(req.tenantId, {}));
     } catch (err) {
       next(err);
     }
@@ -38,10 +44,11 @@ form{background:#15151f;border:1px solid #24243a;padding:1.5rem;border-radius:12
 input{width:100%;padding:.6rem;margin:.6rem 0;border-radius:8px;border:1px solid #333;background:#0b0b12;color:#fff}
 button{width:100%;padding:.6rem;border:0;border-radius:8px;background:#2a2a44;color:#fff;cursor:pointer}
 h1{font-size:1rem;margin:0 0 .3rem}</style>
-<form onsubmit="location.href='?key='+encodeURIComponent(document.getElementById('k').value);return false">
+<form method="post" action="/api/v1/admin/login">
   <h1>⚙️ automation dashboard</h1>
-  <input id="k" type="password" placeholder="Admin key" autofocus>
-  <button type="submit">Open</button>
+  <input type="hidden" name="next" value="dashboard">
+  <input name="key" type="password" placeholder="Access key" autofocus autocomplete="current-password">
+  <button type="submit">Sign in</button>
 </form>`;
 }
 
