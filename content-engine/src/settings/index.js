@@ -98,6 +98,11 @@ const schema = z.object({
   MODULE_IMAGE_FACTORY_ENABLED: boolFromEnv(true),
   MODULE_DASHBOARD_ENABLED: boolFromEnv(true),
   MODULE_ADMIN_ENABLED: boolFromEnv(true),
+
+  // Scheduler: 'internal' runs an in-process 1-minute cron (always-on host);
+  // 'external' turns it off so the host can sleep and an external scheduler
+  // pings POST /api/v1/jobs/run-due ~10 min before each funnel's time.
+  SCHEDULER_MODE: z.string().optional().default('internal'),
 });
 
 function build(rawEnv) {
@@ -180,6 +185,8 @@ function build(rawEnv) {
     links: Object.freeze({ gitaAssessment: e.GITA_ASSESSMENT_LINK, gitaSimpleAssessment: e.GITA_SIMPLE_ASSESSMENT_LINK }),
 
     auth: Object.freeze({ internalApiKey: e.INTERNAL_API_KEY, adminKey: e.ADMIN_KEY }),
+
+    schedulerInternal: e.SCHEDULER_MODE.toLowerCase() !== 'external',
 
     modules: Object.freeze({
       gitaImage: e.MODULE_GITA_IMAGE_ENABLED,

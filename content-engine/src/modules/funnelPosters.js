@@ -21,7 +21,31 @@ import * as poster from '../services/funnelPosterService.js';
 import * as approvalService from '../services/approvalService.js';
 import * as funnels from '../repositories/funnelsRepository.js';
 import { requireAdminKey } from '../middleware/auth.js';
+import { settings } from '../settings/index.js';
 import { ZONE } from '../utils/time.js';
+
+/**
+ * Run funnels that are due. A funnel is due if today's weekday matches its
+ * generate_days (blank = daily) and its generate_time falls within the window
+ * [now - 2min, now + windowMinutes]. Used by both the internal minute-cron
+ * (window 0) and the external /run-due trigger (window ~15).
+ */
+async function runDue(windowMinutes, log) {
+  const now = DateTime.now().setZone(ZONE);
+  const dow = String(now.weekday); // 1 (Mon) .. 7 (Sun)
+  const active = await funnels.listActive();
+  for (const funnel of active) {
+    const cfg = await funnels.resolve(funnel);
+    const [h, m] = (cfg.generateTime || '22:00').split(':').map(Number);
+    const target = now.set({ hour: h, minute: m, second: 0, millisecond: 0 });
+    const diffMin = target.diff(now, 'minutes').minutes;
+    if (diffMin < -2 || diffMin > windowMinutes) continue;
+    const days = (cfg.generateDays || '').split(',').map((d) => d.trim()).filter(Boolean);
+    if (days.length && !days.includes(dow)) continue;
+    log.info({ funnel: funnel.name, at: cfg.generateTime }, 'funnel due; running');
+    poster.runFunnel(funnel).catch((e) => log.error({ err: e.message, funnel: funnel.name }, 'funnel run failed'));
+  }
+}
 
 export function register(ctx) {
   const { router, log } = ctx;
@@ -31,30 +55,38 @@ export function register(ctx) {
     onRework: (a, note) => poster.rework(a, note),
   });
 
-  let running = false;
-  cron.schedule('* * * * *', async () => {
-    if (running) return;
-    running = true;
-    try {
-      const now = DateTime.now().setZone(ZONE);
-      const hhmm = now.toFormat('HH:mm');
-      const dow = String(now.weekday); // 1 (Mon) .. 7 (Sun)
-      const active = await funnels.listActive();
-      for (const funnel of active) {
-        const cfg = await funnels.resolve(funnel);
-        if (cfg.generateTime !== hhmm) continue;
-        const days = (cfg.generateDays || '').split(',').map((d) => d.trim()).filter(Boolean);
-        if (days.length && !days.includes(dow)) continue;
-        log.info({ funnel: funnel.name, at: hhmm }, 'funnel due; running');
-        poster.runFunnel(funnel).catch((e) => log.error({ err: e.message, funnel: funnel.name }, 'funnel run failed'));
+  // Internal cron only when the host is always-on. In 'external' mode it is off
+  // so the host can sleep; an external scheduler pings /jobs/run-due instead.
+  if (settings.schedulerInternal) {
+    let running = false;
+    cron.schedule('* * * * *', async () => {
+      if (running) return;
+      running = true;
+      try {
+        await runDue(0, log); // exact-minute match
+      } catch (err) {
+        log.error({ err: err.message }, 'funnel scheduler tick failed');
+      } finally {
+        running = false;
       }
+    });
+    log.info('funnel scheduler running (internal minute-cron)');
+  } else {
+    log.info("funnel scheduler in 'external' mode — trigger via POST /jobs/run-due");
+  }
+
+  // External trigger: run funnels due within the next `window` minutes (default 15).
+  router.post('/jobs/run-due', requireAdminKey, async (req, res, next) => {
+    try {
+      const windowMin = Math.max(1, Number(req.query.window || 15));
+      res.status(202).json({ accepted: true, window: windowMin });
+      runDue(windowMin, log).catch((e) => log.error({ err: e.message }, 'run-due failed'));
     } catch (err) {
-      log.error({ err: err.message }, 'funnel scheduler tick failed');
-    } finally {
-      running = false;
+      next(err);
     }
   });
 
+  // Manual "run all active now" (ignores schedule).
   router.post('/jobs/funnel-posters', requireAdminKey, async (_req, res, next) => {
     try {
       res.status(202).json({ accepted: true });
@@ -63,8 +95,6 @@ export function register(ctx) {
       next(err);
     }
   });
-
-  log.info('funnel scheduler running (per-funnel time + days)');
 }
 
 export default { register };
