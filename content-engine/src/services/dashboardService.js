@@ -21,15 +21,9 @@ import { todayKeyIst, isoIst } from '../utils/time.js';
 export async function collect(tenantId = 'default') {
   const day = todayKeyIst();
   const [
-    waDepth, contactQueue, relay, waEvents,
     deliverySummary, gitaToday, vidaLatest, pendingApprovals, recentJobs, contentEvents,
     purchases, purchasesCount, trackingEvents,
   ] = await Promise.all([
-    // wa-gateway
-    crossRead.waQueueDepth(tenantId),
-    crossRead.contactQueueByAccount(tenantId),
-    crossRead.relayAccounts(tenantId),
-    crossRead.recentEvents('wa-gateway', tenantId, 15),
     // content-engine
     deliveryLog.summaryForDay({ tenantId, dayIst: day }).catch(() => []),
     deliveryLog.forDay({ tenantId, brand: 'gita', dayIst: day }).catch(() => []),
@@ -45,7 +39,6 @@ export async function collect(tenantId = 'default') {
 
   return {
     day,
-    wa: { depth: waDepth, contactQueue, relay, events: waEvents },
     content: { deliverySummary, gitaToday, vidaLatest, pendingApprovals, recentJobs, events: contentEvents },
     tracking: { purchases, purchasesCount, events: trackingEvents },
   };
@@ -61,41 +54,16 @@ export async function render(tenantId = 'default', opts = {}) {
       .filter((s) => s.brand === brand && s.success === success)
       .reduce((a, s) => a + s.n, 0);
 
-  const waQueued = d.wa.depth ? d.wa.depth.QUEUED ?? 0 : '—';
-  const waFailed = d.wa.depth ? d.wa.depth.FAILED ?? 0 : '—';
   const pending = (d.content.pendingApprovals || []).filter((a) => a.status === 'pending').length;
 
   // ---- Overview -----------------------------------------------------------
   const overview = section('overview', `
     <div class="cards">
-      ${card('wa-gateway', 'Queue', d.wa.depth === null ? 'unavailable' : `${waQueued} queued · ${waFailed} failed`)}
       ${card('content-engine', 'Delivered today', `${countBy('gita', true) + countBy('vidapulse', true)} ok · ${countBy('gita', false) + countBy('vidapulse', false)} failed`)}
       ${card('content-engine', 'Pending approvals', String(pending))}
       ${card('tracking-bridge', 'Purchases today', String(d.tracking.purchasesCount))}
     </div>
     <p class="hint">Use the menu on the left to drill into each service.</p>
-  `);
-
-  // ---- wa-gateway ---------------------------------------------------------
-  const wa = section('wa-gateway', `
-    <h2>WhatsApp queue</h2>
-    ${d.wa.depth === null
-      ? unavailable()
-      : table(['status', 'count'], Object.entries(d.wa.depth).map(([s, n]) => [s, n]))}
-
-    <h2>Delay Relay — contacts by account</h2>
-    ${d.wa.contactQueue === null
-      ? unavailable()
-      : table(['account', 'status', 'count'], (d.wa.contactQueue || []).map((r) => [r.account, r.status, r.n]))}
-
-    <h2>Delay Relay — ramp progress</h2>
-    ${d.wa.relay === null
-      ? unavailable()
-      : table(['account', 'ramp day', 'last sent', 'daily limit', 'destination set'],
-          (d.wa.relay || []).map((r) => [r.account, r.ramp_day, r.last_qty, r.daily_limit, r.has_destination ? 'yes' : 'no']))}
-
-    <h2>Recent events</h2>
-    ${eventsTable(d.wa.events)}
   `);
 
   // ---- content-engine -----------------------------------------------------
@@ -145,7 +113,6 @@ export async function render(tenantId = 'default', opts = {}) {
 
   const menu = [
     ['overview', 'Overview'],
-    ['wa-gateway', 'wa-gateway'],
     ['content-engine', 'content-engine'],
     ['tracking-bridge', 'tracking-bridge'],
   ]
@@ -196,7 +163,7 @@ export async function render(tenantId = 'default', opts = {}) {
       <small>${d.day} IST · generated ${isoIst()}</small>
       <button class="refresh" onclick="location.reload()">Refresh</button>
     </header>
-    ${overview}${wa}${content}${tracking}
+    ${overview}${content}${tracking}
   </main>
 </div>
 <script>

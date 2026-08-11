@@ -15,51 +15,9 @@
  * Field types: 'text' (default) | 'secret' (masked) | 'json' | 'textarea'.
  */
 
-export const APPS = ['wa-gateway', 'content-engine', 'tracking-bridge'];
+export const APPS = ['content-engine', 'tracking-bridge'];
 
 export const CONFIG_MANIFEST = {
-  'wa-gateway': {
-    label: 'wa-gateway',
-    blurb: 'WhatsApp orchestration: templates, throttle, Delay Relay, outreach.',
-    groups: [
-      {
-        title: 'Evolution (WhatsApp gateway)',
-        fields: [
-          { key: 'evolution_base_url', label: 'Evolution base URL' },
-          { key: 'evolution_api_key', label: 'Evolution API key', type: 'secret' },
-        ],
-      },
-      {
-        title: 'Message templates',
-        fields: [
-          { key: 'templates_sheet_id', label: 'Templates sheet ID' },
-          { key: 'templates_sheet_tab', label: 'Templates tab', placeholder: 'WA Msg Templates' },
-        ],
-      },
-      {
-        title: 'Booking & outreach',
-        fields: [
-          { key: 'calendar_link', label: 'Calendar link' },
-          { key: 'audio_bands', label: 'Audio bands (JSON map band → URLs)', type: 'json' },
-        ],
-      },
-      {
-        title: 'Alerts',
-        fields: [{ key: 'alert_email', label: 'Alert email' }],
-      },
-    ],
-    modules: [
-      { key: 'crmRelay', label: 'CRM relay' },
-      { key: 'dispatcher', label: 'Dispatcher (queue sender)' },
-      { key: 'rawRelay', label: 'Raw relays' },
-      { key: 'formBooking', label: 'Form booking' },
-      { key: 'emotionalOutreach', label: 'Emotional outreach' },
-      { key: 'connectionMonitor', label: 'Connection monitor' },
-      { key: 'delayRelay', label: 'Delay Relay' },
-      { key: 'admin', label: 'Admin API' },
-    ],
-  },
-
   'content-engine': {
     label: 'content-engine',
     blurb: 'Content generation, approval, publishing, reports, dashboard.',

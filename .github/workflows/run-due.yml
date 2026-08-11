@@ -1,0 +1,32 @@
+name: Wake content-engine and run due funnels
+
+# Free external scheduler (GitHub Actions runs on UTC). It pings the
+# content-engine /run-due endpoint ~before the daily posting window, so the
+# Railway service can sleep the rest of the day (SCHEDULER_MODE=external).
+#
+# Set two repo secrets (Settings → Secrets and variables → Actions):
+#   CONTENT_ENGINE_URL  e.g. https://content-engine-production-230f.up.railway.app
+#   RUN_DUE_KEY         the content-engine ADMIN_KEY
+#
+# A generous window means the ping can be early/late and still catch every
+# evening funnel; each post is generated once and Post for Me publishes it at
+# the funnel's own scheduled time.
+
+on:
+  schedule:
+    # 15:40 UTC = 21:10 IST — covers Corporate (21:30) + Gita/VidaPulse (22:00).
+    - cron: '40 15 * * *'
+    # Add more lines for funnels at other times, e.g. a morning batch:
+    # - cron: '30 2 * * *'   # 08:00 IST
+  workflow_dispatch: {}      # lets you run it manually from the Actions tab
+
+jobs:
+  run-due:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger run-due
+        run: |
+          curl -fsS -X POST \
+            "${{ secrets.CONTENT_ENGINE_URL }}/api/v1/jobs/run-due?window=180" \
+            -H "X-Admin-Key: ${{ secrets.RUN_DUE_KEY }}" \
+            -w '\nHTTP %{http_code}\n'

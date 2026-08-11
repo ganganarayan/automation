@@ -9,92 +9,55 @@
  * Responsibility: Pure data.
  * Dependencies: none.
  *
- * Box shape: { title, desc?, moduleKey?, fieldKeys?: string[], info?: string }
+ * Box shape: { title, desc?, moduleKey?, fieldKeys?: string[], info? }
  * Phase shape: { label, columns?: boolean, boxes: Box[] }
  */
 
 export const FLOW_MANIFEST = {
-  'wa-gateway': {
+  'tracking-bridge': {
     intro:
-      'Every customer WhatsApp message flows through one throttled, connection-checked queue into Evolution. Configure each step below.',
+      'Turns a Razorpay purchase into a fully-matched Meta Conversions API event, and pulls daily ad insights. Configure each step below.',
     phases: [
       {
-        label: 'Triggers (inbound)',
-        columns: true,
+        label: 'Inbound',
         boxes: [
           {
-            title: 'CRM relay',
-            desc: 'CRM event → look up a template → queue the message.',
-            moduleKey: 'crmRelay',
-            fieldKeys: ['templates_sheet_id', 'templates_sheet_tab'],
-          },
-          {
-            title: 'Raw relays',
-            desc: 'Pre-composed CRM messages (gita / vidapulse) → queue as-is.',
-            moduleKey: 'rawRelay',
-          },
-          {
-            title: 'Form booking',
-            desc: 'Google Form submit → send the calendar-link message.',
-            moduleKey: 'formBooking',
-            fieldKeys: ['calendar_link'],
-          },
-          {
-            title: 'Delay Relay',
-            desc: 'Lead intake → validation → ramped daily drip. Per-account ramp & destination are set in Delay Relay accounts (not here).',
-            moduleKey: 'delayRelay',
+            title: 'Razorpay webhook',
+            desc: 'Receives payment.captured and verifies the signature (invalid → silently dropped).',
+            moduleKey: 'capi',
+            fieldKeys: ['razorpay_webhook_secret'],
+            info: 'Generate the secret here, paste it into your Razorpay dashboard, and point the webhook at this service /api/v1/webhook/razorpay-capi (event: payment.captured).',
           },
         ],
       },
       {
-        label: 'Emotional Outreach (separate path)',
+        label: 'Enrich',
         boxes: [
           {
-            title: 'Emotional Outreach',
-            desc: 'Assess360 calls this per lead. Sequence: intro text → voice note → timed statement bubbles → CTA. It bypasses the queue gap (spacing is built in) but still checks the connection.',
-            moduleKey: 'emotionalOutreach',
-            fieldKeys: ['audio_bands'],
-            info:
-              'Audio is chosen by band: the lead’s diagnosis is matched to critical / overwhelmed / strained / stable, then one of that band’s Drive voice-note links is sent. Audio is used ONLY in this flow.',
+            title: 'Assess360 match',
+            desc: 'Looks up the buyer to fetch fbclid / fbp / fbc / ip / ua (best-effort; falls back to the payment notes).',
+            fieldKeys: ['assess360_url', 'assess360_token'],
           },
         ],
       },
       {
-        label: 'Queue → send',
+        label: 'Send to Meta',
         boxes: [
           {
-            title: 'Message queue',
-            desc: 'All triggered messages land here (wa_queue) as QUEUED, tagged by instance.',
-            info: 'No settings — this is the buffer the dispatcher drains.',
-          },
-          {
-            title: 'Dispatcher',
-            desc: 'Drains the queue safely into Evolution.',
-            moduleKey: 'dispatcher',
-            info:
-              'Sends at most one message per instance per tick, only 06:00–24:00 IST, with a random 180–240s gap, and only when the WhatsApp instance is connected (state = open). These limits are platform settings.',
-          },
-          {
-            title: 'Evolution → WhatsApp',
-            desc: 'The WhatsApp gateway this app sends through. This service is the only one that calls Evolution.',
-            fieldKeys: ['evolution_base_url', 'evolution_api_key'],
+            title: 'Meta Conversions API',
+            desc: 'Builds a Purchase event (hashed email+phone, fbc/fbp/ip/ua ladders, payment id as event_id for dedup) and posts to your pixel.',
+            fieldKeys: ['meta_pixel_id', 'meta_capi_token', 'meta_api_version', 'event_source_url', 'content_name'],
           },
         ],
       },
       {
-        label: 'Monitoring',
-        columns: true,
+        label: 'Daily insights',
         boxes: [
           {
-            title: 'Connection monitor',
-            desc: 'Evolution posts CONNECTION_UPDATE here; if the instance drops, you get an alert email.',
-            moduleKey: 'connectionMonitor',
-            fieldKeys: ['alert_email'],
-          },
-          {
-            title: 'Admin API',
-            desc: 'Queue purge and operational endpoints (admin key required).',
-            moduleKey: 'admin',
+            title: 'Ad insights → Sheet',
+            desc: 'Daily 07:00 IST: pulls ad-level Meta insights for the lookback window and upserts them into a Google Sheet (idempotent).',
+            moduleKey: 'insights',
+            fieldKeys: ['meta_ad_account_id', 'meta_ads_token', 'insights_sheet_id'],
           },
         ],
       },

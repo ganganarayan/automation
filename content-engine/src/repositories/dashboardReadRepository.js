@@ -24,45 +24,6 @@ async function safe(fn, fallback = null) {
   }
 }
 
-// ---- wa-gateway -------------------------------------------------------------
-
-/** WhatsApp queue depth grouped by status. */
-export function waQueueDepth(tenantId = 'default') {
-  return safe(async () => {
-    const { rows } = await query(
-      `SELECT status, count(*)::int AS n FROM wa_queue WHERE tenant_id = $1 GROUP BY status`,
-      [tenantId],
-    );
-    return rows.reduce((acc, r) => ({ ...acc, [r.status]: r.n }), {});
-  });
-}
-
-/** Delay Relay contact_queue counts grouped by account + status. */
-export function contactQueueByAccount(tenantId = 'default') {
-  return safe(async () => {
-    const { rows } = await query(
-      `SELECT account, status, count(*)::int AS n
-         FROM contact_queue WHERE tenant_id = $1
-        GROUP BY account, status ORDER BY account`,
-      [tenantId],
-    );
-    return rows;
-  });
-}
-
-/** Per-account relay control / ramp progress. */
-export function relayAccounts(tenantId = 'default') {
-  return safe(async () => {
-    const { rows } = await query(
-      `SELECT account, ramp_day, last_qty, daily_limit,
-              (destination_url IS NOT NULL AND destination_url <> '') AS has_destination
-         FROM relay_control WHERE tenant_id = $1 ORDER BY account`,
-      [tenantId],
-    );
-    return rows;
-  });
-}
-
 // ---- tracking-bridge --------------------------------------------------------
 
 /** Recent CAPI purchase events (from the shared event_log). */
@@ -107,9 +68,6 @@ export function recentEvents(service, tenantId = 'default', limit = 15) {
 }
 
 export default {
-  waQueueDepth,
-  contactQueueByAccount,
-  relayAccounts,
   recentPurchases,
   purchasesToday,
   recentEvents,

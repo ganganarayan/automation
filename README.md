@@ -4,7 +4,8 @@ A commercial, multi-product automation platform. Three independent Node.js servi
 
 | Service | Role |
 |---|---|
-| [`wa-gateway`](./wa-gateway) | Single WhatsApp orchestration service. Throttled, connection-checked queue against the existing Evolution API (instances `gita`, `vidapulse`). Owns lead intake / validation / drip (Delay Relay), connection alerts, and queue admin. **The only service allowed to call Evolution directly** — everyone else goes through its internal send endpoint. |
+> **Note:** WhatsApp is handled externally (official WhatsApp Cloud API from the CRM); the former `wa-gateway` service has been removed.
+
 | [`content-engine`](./content-engine) | All content generation & publishing for two brands (Gita, VidaPulse): daily image posters with an email approval + rework loop, content refill watchdog, video pipelines, dual-provider AI image factory, delivery feedback loop, daily reports, and an operations dashboard. |
 | [`tracking-bridge`](./tracking-bridge) | Marketing-data service. Razorpay `payment.captured` → enriched Meta Conversions API purchase events, plus a daily Meta ad-insights pull into a Google Sheet. Standalone. |
 
@@ -26,7 +27,6 @@ All three services connect to the same `DATABASE_URL`. Each runs its own **addit
 | Table(s) | Owner |
 |---|---|
 | `tenants`, `tenant_config` | shared (any service) |
-| `wa_queue`, `wa_gate`, `contact_queue`, `relay_control` | wa-gateway |
 | `pfm_delivery_log`, `approvals`, `refill_state` | content-engine |
 | (stateless domain data; dedup via Meta `event_id`) | tracking-bridge |
 | `jobs`, `event_log` | each service owns its own |
@@ -37,7 +37,6 @@ Deploy all three as services in **one** Railway project (`automation`) with per-
 
 ```
 Railway Project: automation
-├── wa-gateway        (root dir /wa-gateway)   public webhooks + internal /api/v1/send
 ├── content-engine    (root dir /content-engine) public webhooks + approval/dashboard pages
 ├── tracking-bridge   (root dir /tracking-bridge) public webhook + daily cron
 ├── postgres          (Railway Postgres plugin — shared DB)
@@ -49,7 +48,6 @@ Railway Project: automation
 | Scope | Variables |
 |---|---|
 | **Project (shared)** | `DATABASE_URL`, `TZ=Asia/Kolkata`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `SMTP_*`, `INTERNAL_API_KEY` |
-| **wa-gateway only** | `EVOLUTION_BASE_URL`, `EVOLUTION_API_KEY`, templates sheet id, calendar link, audio bands, admin key, gap/window settings |
 | **content-engine only** | `POSTFORME_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `JSON2VIDEO_API_KEY`, account/sheet/folder ids, approval/report emails, `WA_GATEWAY_URL`, `PUBLIC_BASE_URL`, `APP_SECRET` |
 | **tracking-bridge only** | `RAZORPAY_WEBHOOK_SECRET`, Meta pixel/CAPI/ads tokens, ad account id, insights sheet id, Assess360 url/token |
 

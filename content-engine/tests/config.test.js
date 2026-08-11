@@ -3,47 +3,39 @@ import { buildSaveOps } from '../src/services/configOps.js';
 import { CONFIG_MANIFEST, settingKeys, moduleKey, fieldByKey } from '../src/services/configManifest.js';
 
 describe('configManifest', () => {
-  it('exposes all three apps', () => {
-    expect(Object.keys(CONFIG_MANIFEST)).toEqual(['wa-gateway', 'content-engine', 'tracking-bridge']);
+  it('exposes the configured apps', () => {
+    expect(Object.keys(CONFIG_MANIFEST)).toEqual(['content-engine', 'tracking-bridge']);
   });
   it('lists setting keys for an app', () => {
-    expect(settingKeys('wa-gateway')).toContain('evolution_base_url');
+    expect(settingKeys('tracking-bridge')).toContain('meta_pixel_id');
   });
   it('namespaces module keys per app', () => {
-    expect(moduleKey('wa-gateway', 'dispatcher')).toBe('module.wa-gateway.dispatcher');
+    expect(moduleKey('tracking-bridge', 'capi')).toBe('module.tracking-bridge.capi');
   });
   it('marks secret fields', () => {
-    expect(fieldByKey('wa-gateway', 'evolution_api_key').type).toBe('secret');
+    expect(fieldByKey('tracking-bridge', 'meta_capi_token').type).toBe('secret');
   });
 });
 
 describe('buildSaveOps', () => {
   it('sets a normal field with a value', () => {
-    const ops = buildSaveOps('wa-gateway', { settings: { calendar_link: 'https://x' }, modules: {} });
-    expect(ops.sets).toContainEqual({ key: 'calendar_link', value: 'https://x' });
+    const ops = buildSaveOps('tracking-bridge', { settings: { event_source_url: 'https://x' }, modules: {} });
+    expect(ops.sets).toContainEqual({ key: 'event_source_url', value: 'https://x' });
     expect(ops.errors).toEqual([]);
   });
 
   it('deletes a normal field when blank (revert to env default)', () => {
-    const ops = buildSaveOps('wa-gateway', { settings: { calendar_link: '' }, modules: {} });
-    expect(ops.dels).toContain('calendar_link');
+    const ops = buildSaveOps('tracking-bridge', { settings: { event_source_url: '' }, modules: {} });
+    expect(ops.dels).toContain('event_source_url');
   });
 
   it('leaves a secret unchanged when blank, sets when provided', () => {
-    const blank = buildSaveOps('wa-gateway', { settings: { evolution_api_key: '' }, modules: {} });
-    expect(blank.sets.find((s) => s.key === 'evolution_api_key')).toBeUndefined();
-    expect(blank.dels).not.toContain('evolution_api_key');
+    const blank = buildSaveOps('tracking-bridge', { settings: { meta_capi_token: '' }, modules: {} });
+    expect(blank.sets.find((s) => s.key === 'meta_capi_token')).toBeUndefined();
+    expect(blank.dels).not.toContain('meta_capi_token');
 
-    const set = buildSaveOps('wa-gateway', { settings: { evolution_api_key: 'k123' }, modules: {} });
-    expect(set.sets).toContainEqual({ key: 'evolution_api_key', value: 'k123' });
-  });
-
-  it('validates JSON fields', () => {
-    const bad = buildSaveOps('wa-gateway', { settings: { audio_bands: '{not json' }, modules: {} });
-    expect(bad.errors.length).toBe(1);
-    const good = buildSaveOps('wa-gateway', { settings: { audio_bands: '{"stable":[]}' }, modules: {} });
-    expect(good.errors).toEqual([]);
-    expect(good.sets).toContainEqual({ key: 'audio_bands', value: '{"stable":[]}' });
+    const set = buildSaveOps('tracking-bridge', { settings: { meta_capi_token: 'tok123' }, modules: {} });
+    expect(set.sets).toContainEqual({ key: 'meta_capi_token', value: 'tok123' });
   });
 
   it('sets module true/false and deletes on default', () => {
