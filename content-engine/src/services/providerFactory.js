@@ -40,12 +40,14 @@ export async function buildProviders(tenantId = 'default') {
     publish: createPostForMeProvider({ apiKey: r.postformeKey }, log),
     video: createJson2VideoProvider(r.video, log),
 
+    // Tenant-scoped: each tenant sends approval/status email from their own
+    // mailbox (SMTP configured in the app; env is only a fallback).
+    mail: createSmtpMailProvider(r.smtp, log),
+
     // Platform-shared infrastructure (operator-managed; not per-tenant):
     //  - Google service account: the account tenants share their Sheets/Drive with.
-    //  - SMTP: the platform's outbound mail sender (tenants set recipient emails).
     storage: createGoogleDriveProvider(settings.google, log),
     sheets: createGoogleSheetsProvider(settings.google, log),
-    mail: createSmtpMailProvider(settings.smtp, log),
     wa: createWaGatewayClient(settings.waGateway, log), // platform service topology
 
     resolved: r,

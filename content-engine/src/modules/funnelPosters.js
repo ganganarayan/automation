@@ -26,11 +26,13 @@ import { ZONE } from '../utils/time.js';
 
 /**
  * Run funnels that are due. A funnel is due if today's weekday matches its
- * generate_days (blank = daily) and its generate_time falls within the window
- * [now - 2min, now + windowMinutes]. Used by both the internal minute-cron
- * (window 0) and the external /run-due trigger (window ~15).
+ * generate_days (blank = daily) and its generate_time falls within
+ * [now - backMin, now + forwardMin]. The internal minute-cron uses (0, 2) for
+ * an exact-minute match; the external /run-due trigger uses a small symmetric
+ * window (~15) so a ~10-min-early ping still catches it and a late run doesn't
+ * miss it — without running funnels scheduled far away.
  */
-async function runDue(windowMinutes, log) {
+async function runDue(forwardMin, backMin, log) {
   const now = DateTime.now().setZone(ZONE);
   const dow = String(now.weekday); // 1 (Mon) .. 7 (Sun)
   const active = await funnels.listActive();
@@ -39,7 +41,7 @@ async function runDue(windowMinutes, log) {
     const [h, m] = (cfg.generateTime || '22:00').split(':').map(Number);
     const target = now.set({ hour: h, minute: m, second: 0, millisecond: 0 });
     const diffMin = target.diff(now, 'minutes').minutes;
-    if (diffMin < -2 || diffMin > windowMinutes) continue;
+    if (diffMin > forwardMin || diffMin < -backMin) continue;
     const days = (cfg.generateDays || '').split(',').map((d) => d.trim()).filter(Boolean);
     if (days.length && !days.includes(dow)) continue;
     log.info({ funnel: funnel.name, at: cfg.generateTime }, 'funnel due; running');
@@ -63,7 +65,7 @@ export function register(ctx) {
       if (running) return;
       running = true;
       try {
-        await runDue(0, log); // exact-minute match
+        await runDue(0, 2, log); // exact-minute match
       } catch (err) {
         log.error({ err: err.message }, 'funnel scheduler tick failed');
       } finally {
@@ -80,7 +82,9 @@ export function register(ctx) {
     try {
       const windowMin = Math.max(1, Number(req.query.window || 15));
       res.status(202).json({ accepted: true, window: windowMin });
-      runDue(windowMin, log).catch((e) => log.error({ err: e.message }, 'run-due failed'));
+      // Symmetric window: catches a funnel pinged ~10 min early and tolerates a
+      // late run, without touching funnels scheduled far away.
+      runDue(windowMin, windowMin, log).catch((e) => log.error({ err: e.message }, 'run-due failed'));
     } catch (err) {
       next(err);
     }

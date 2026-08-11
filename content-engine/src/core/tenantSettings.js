@@ -116,6 +116,15 @@ export async function forTenant(tenantId = 'default') {
       contactEmail: pick('ig_contact_email', settings.instagram.contactEmail),
       commentWebhookUrl: pick('ig_comment_webhook_url', settings.instagram.commentWebhookUrl),
     },
+    // Email/SMTP is tenant-scoped (each tenant sends from their own mailbox);
+    // env is only a fallback default.
+    smtp: {
+      host: pick('smtp_host', settings.smtp.host),
+      port: Number(pick('smtp_port', settings.smtp.port)) || settings.smtp.port,
+      user: pick('smtp_user', settings.smtp.user),
+      pass: pick('smtp_pass', settings.smtp.pass),
+      from: pick('smtp_from', settings.smtp.from),
+    },
   };
 }
 

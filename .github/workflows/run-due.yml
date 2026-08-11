@@ -14,11 +14,13 @@ name: Wake content-engine and run due funnels
 
 on:
   schedule:
-    # 15:40 UTC = 21:10 IST — covers Corporate (21:30) + Gita/VidaPulse (22:00).
-    - cron: '40 15 * * *'
-    # Add more lines for funnels at other times, e.g. a morning batch:
-    # - cron: '30 2 * * *'   # 08:00 IST
-  workflow_dispatch: {}      # lets you run it manually from the Actions tab
+    # Fire ~10 min before each funnel's generate time (GitHub Actions cron is
+    # UTC). The endpoint runs only funnels due within ±15 min, then the app
+    # sleeps again. Add/adjust a line per distinct schedule.
+    - cron: '20 16 * * *'      # 21:50 IST daily  → Gita/VidaPulse (22:00)
+    - cron: '50 15 * * 1,2,3'  # 21:20 IST Mon-Wed → Corporate (21:30)
+    # - cron: '50 2 * * *'     # 08:20 IST daily   → a morning funnel (08:30)
+  workflow_dispatch: {}        # lets you run it manually from the Actions tab
 
 jobs:
   run-due:
@@ -27,6 +29,6 @@ jobs:
       - name: Trigger run-due
         run: |
           curl -fsS -X POST \
-            "${{ secrets.CONTENT_ENGINE_URL }}/api/v1/jobs/run-due?window=180" \
+            "${{ secrets.CONTENT_ENGINE_URL }}/api/v1/jobs/run-due?window=15" \
             -H "X-Admin-Key: ${{ secrets.RUN_DUE_KEY }}" \
             -w '\nHTTP %{http_code}\n'

@@ -43,6 +43,16 @@ export const CONFIG_MANIFEST = {
         ],
       },
       {
+        title: 'Email (SMTP — for approval & status notifications)',
+        fields: [
+          { key: 'smtp_host', label: 'SMTP host', placeholder: 'smtp.zoho.com / smtp.gmail.com' },
+          { key: 'smtp_port', label: 'SMTP port', placeholder: '587' },
+          { key: 'smtp_user', label: 'SMTP user (your email)' },
+          { key: 'smtp_pass', label: 'SMTP password (app password)', type: 'secret' },
+          { key: 'smtp_from', label: 'From address (defaults to user)' },
+        ],
+      },
+      {
         title: 'Video & image factory (advanced)',
         fields: [
           { key: 'video_sheet_id', label: 'Video sheet ID' },
