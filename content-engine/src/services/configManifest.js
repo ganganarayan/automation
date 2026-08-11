@@ -50,6 +50,7 @@ export const CONFIG_MANIFEST = {
           { key: 'smtp_user', label: 'SMTP user (your email)' },
           { key: 'smtp_pass', label: 'SMTP password (app password)', type: 'secret' },
           { key: 'smtp_from', label: 'From address (defaults to user)' },
+          { key: 'smtp_test', label: 'Test', type: 'smtp_test' },
         ],
       },
       {

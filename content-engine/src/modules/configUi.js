@@ -32,6 +32,7 @@ import * as configService from '../services/configService.js';
 import * as users from '../repositories/usersRepository.js';
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
+import { buildProviders } from '../services/providerFactory.js';
 import { keyOk, requiredKey, verifyKey, setAccessCookie, clearAccessCookie, ACCESS_KEY_STORE } from '../services/accessService.js';
 
 export function register(ctx) {
@@ -185,6 +186,26 @@ export function register(ctx) {
       res.json({ ok: true, endsAt });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Send a test email using the tenant's saved SMTP settings.
+  router.post('/admin/test-email', async (req, res, next) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
+      const providers = await buildProviders(req.tenantId);
+      const smtp = providers.resolved.smtp || {};
+      const to = (req.body?.to || smtp.from || smtp.user || '').trim();
+      if (!smtp.host || !smtp.user) return res.json({ ok: false, error: 'SMTP not configured — set host/user and Save first' });
+      if (!to) return res.json({ ok: false, error: 'no recipient (set a From/user address)' });
+      const result = await providers.mail.send({
+        to,
+        subject: 'Test email — automation content-engine',
+        text: 'This is a test from your content-engine SMTP settings. If you received this, approval and status emails will work.',
+      });
+      res.json({ ok: !!result.ok, to, error: result.ok ? null : 'send failed' });
+    } catch (err) {
+      res.json({ ok: false, error: err.message });
     }
   });
 
@@ -348,6 +369,17 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey
   function copyField(id){
     const el=document.getElementById(id); el.select();
     navigator.clipboard?.writeText(el.value).then(()=>{ el.style.outline='2px solid #5bd08a'; setTimeout(()=>el.style.outline='',700); });
+  }
+  async function testEmail(){
+    const to=document.getElementById('smtp-test-to').value;
+    const el=document.getElementById('smtp-test-result');
+    el.textContent='Sending…'; el.style.color='';
+    try{
+      const r=await fetch('/api/v1/admin/test-email',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Key':KEY},body:JSON.stringify({to})});
+      const j=await r.json();
+      el.textContent = j.ok ? ('✓ sent to '+(j.to||'')+' — check inbox/spam') : ('✗ '+(j.error||'failed'));
+      el.style.color = j.ok ? '#5bd08a' : '#ff9a9a';
+    }catch(e){ el.textContent='✗ '+e.message; el.style.color='#ff9a9a'; }
   }
   const hash=(location.hash||'#users').slice(1);
   if(document.getElementById('panel-'+hash)) show(hash);
@@ -527,6 +559,16 @@ function appSection(app, tenantId, configMap, key) {
 function fieldRow(field, configMap) {
   const current = configMap[field.key];
   const has = current !== undefined && current !== null && current !== '';
+  if (field.type === 'smtp_test') {
+    const prefill = configMap.smtp_from || configMap.smtp_user || '';
+    return `<div class="field"><label>Send a test email</label>
+      <div class="row" style="gap:.4rem">
+        <input id="smtp-test-to" type="email" placeholder="recipient (defaults to your From)" value="${esc(prefill)}" style="flex:1;min-width:220px">
+        <button type="button" class="act" onclick="testEmail()">Send test</button>
+        <span id="smtp-test-result" class="hint"></span>
+      </div>
+      <p class="hint">Save your SMTP settings first, then send a test to confirm delivery (check spam once).</p></div>`;
+  }
   if (field.type === 'generated_secret') {
     const fid = `gs-${field.key}`;
     return `<div class="field"><label>${esc(field.label)}</label>
