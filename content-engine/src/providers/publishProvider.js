@@ -26,18 +26,22 @@ export function createPostForMeProvider(cfg, log) {
      * @param {string} args.mediaUrl
      * @param {string} args.scheduledAt         - ISO
      * @param {Record<string,string>} [args.perAccountCaption] - accountId -> caption override
+     * @param {Record<string,{caption:string}>} [args.platformConfigurations] - per-platform caption (e.g. { linkedin:{caption}, facebook:{caption} })
      */
-    async createPost({ accountIds, caption, mediaUrl, scheduledAt, perAccountCaption = {} }) {
+    async createPost({ accountIds, caption, mediaUrl, scheduledAt, perAccountCaption, platformConfigurations }) {
       const headers = requireKey();
+      const usePerAccount = perAccountCaption && Object.keys(perAccountCaption).length > 0;
       const body = {
-        social_accounts: accountIds.map((id) => ({
-          id,
-          caption: perAccountCaption[id] || caption,
-        })),
         caption,
+        // Per-account captions -> [{id,caption}]; otherwise an array of ids and
+        // (optionally) per-platform captions, matching Post for Me's shape.
+        social_accounts: usePerAccount
+          ? accountIds.map((id) => ({ id, caption: perAccountCaption[id] || caption }))
+          : accountIds,
         media: mediaUrl ? [{ url: mediaUrl }] : undefined,
         scheduled_at: scheduledAt,
       };
+      if (platformConfigurations) body.platform_configurations = platformConfigurations;
       const res = await request(`${BASE}/social-posts`, {
         method: 'POST',
         headers,

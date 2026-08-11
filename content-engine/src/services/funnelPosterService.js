@@ -1,18 +1,25 @@
 /**
- * Funnel image poster (generalized, per-funnel).
+ * Funnel poster (generalized — replicates the n8n daily posters).
  *
  * Purpose:      Produce, approve, and publish a daily image post for ANY funnel,
- *               driven entirely by that funnel's own configuration. This replaces
- *               the two hardcoded brand posters (Gita/VidaPulse) — those are now
- *               just funnels with style 'band' and 'strip'.
+ *               driven entirely by that funnel's own configuration. One template
+ *               covers Gita, VidaPulse, Corporate and Divine Leads — you just
+ *               create a funnel per brand.
  * Responsibility:
- *               - runDaily(funnel): next Ready row → generate (style-aware) →
- *                 overlay → upload → approval email.
- *               - publish(approval): publish to the funnel's own Post-for-Me
- *                 accounts at the funnel's publish time, then mark the sheet.
- *               - rework(approval, note): LLM revise + regenerate.
- * Dependencies: funnelsRepository, providerFactory, imageComposer, prompts,
- *               caption/scheduling utils, approvals, publishProvider.
+ *               - runFunnel(funnel): next Ready row → compose prompt/captions →
+ *                 generate image (funnel image size) → upload → approval email.
+ *               - publish(approval): ONE Post-for-Me call to the funnel's
+ *                 accounts, with per-platform captions (LinkedIn full / others
+ *                 short) when the sheet provides both, at the funnel's publish
+ *                 time; fire the IG webhook; mark the sheet Posted.
+ *               - rework(approval, note): regenerate with the reviewer note.
+ * Dependencies: funnelsRepository, providerFactory, publishProvider, caption/
+ *               scheduling utils, httpClient, approvals.
+ *
+ * Recognized sheet columns (case-insensitive; only image_prompt + status are
+ * required): a match key (post #, day, or id), image prompt, caption, caption
+ * full (LinkedIn long), caption short, headline, subhead, hashtags, locked text
+ * specs, audience, status.
  */
 import { DateTime } from 'luxon';
 import * as funnels from '../repositories/funnelsRepository.js';
@@ -20,75 +27,73 @@ import { buildProviders } from './providerFactory.js';
 import * as approvalService from './approvalService.js';
 import { setStatus } from '../repositories/approvalRepository.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
-import { humanizeCaption, withChannelLink, CHANNELS } from '../utils/caption.js';
+import { extractRow, composePrompt, composeCaptions, buildPlatformConfigs } from '../utils/postCompose.js';
 import { publishAtIst } from '../utils/scheduling.js';
+import { request } from '../core/httpClient.js';
 import { childLogger } from '../core/logger.js';
 import { settings } from '../settings/index.js';
 
 const KIND = 'funnel_image';
 const SHEET_TAB = 'Sheet1';
 
-/** Read the first Ready + image row from a funnel's sheet. */
+/** Read the first Ready row and extract the recognized fields. */
 async function nextReadyRow(sheets, sheetId) {
   const rows = await sheets.readTab(sheetId, SHEET_TAB, { fresh: true });
   if (rows.length < 2) return null;
-  const header = rows[0].map((h) => String(h).trim().toLowerCase());
-  const col = (n) => header.indexOf(n);
   for (const r of rows.slice(1)) {
-    const status = String(r[col('status')] ?? '').trim().toLowerCase();
-    const format = col('format') === -1 ? 'image' : String(r[col('format')] ?? 'image').trim().toLowerCase();
-    if (status === 'ready' && format === 'image') {
-      return { day: r[col('day')], image_prompt: r[col('image_prompt')] || '', caption: r[col('caption')] || '', audience: col('audience') === -1 ? '' : r[col('audience')] || '' };
-    }
+    const fields = extractRow(rows[0], r);
+    if (fields.hasSchema && fields.isReady) return fields;
   }
   return null;
 }
 
-/**
- * Generate the image straight from the row's prompt. No compositing/overlay —
- * the prompt itself is responsible for any layout / empty space for text.
- */
-async function generate(providers, row, note) {
-  const prompt = note ? `${row.image_prompt}. ${note}` : row.image_prompt;
-  return providers.llm.generateImage({ prompt, size: '1024x1024' });
+async function generate(providers, prompt, size) {
+  return providers.llm.generateImage({ prompt, size });
 }
 
-/** Daily entry point for one funnel. */
-export async function runDaily(funnelRow) {
+/** Generation + approval for one funnel. */
+export async function runFunnel(funnelRow) {
   const f = await funnels.resolve(funnelRow);
   const log = childLogger({ module: 'funnelPoster', tenant_id: f.tenantId, funnel: f.name });
   if (!f.sheetId) {
-    log.warn('funnel has no content sheet configured; skipping');
+    log.warn('funnel has no content sheet; skipping');
     return;
   }
   const providers = await buildProviders(f.tenantId);
-
   const row = await nextReadyRow(providers.sheets, f.sheetId);
   if (!row) {
     log.info('no Ready row');
     return;
   }
 
-  const image = await generate(providers, row);
-  const upload = await providers.storage.uploadPng(f.driveFolder, `${slug(f.name)}-day-${row.day}.png`, image);
-  const audience = row.audience || f.audiencePrefix || '';
-  const caption = humanizeCaption(row.caption, audience);
+  const image = await generate(providers, composePrompt(row), f.imageSize);
+  const upload = await providers.storage.uploadPng(f.driveFolder, `${slug(f.name)}-${row.matchKey || Date.now()}.png`, image);
+  const { full, short } = composeCaptions(row, { ctaLink: f.ctaLink, audiencePrefix: f.audiencePrefix });
 
   const { reviewUrl } = await approvalService.createRequest({
     tenantId: f.tenantId,
     kind: KIND,
-    payload: { funnelId: f.id, day: row.day, base_prompt: row.image_prompt, caption, audience, mediaUrl: upload.downloadUrl, thumbnailUrl: upload.thumbnailUrl },
+    payload: {
+      funnelId: f.id,
+      matchColName: row.matchColName,
+      matchKey: row.matchKey,
+      basePrompt: row.imagePrompt,
+      captionFull: full,
+      captionShort: short,
+      mediaUrl: upload.downloadUrl,
+      thumbnailUrl: upload.thumbnailUrl,
+    },
   });
 
   await providers.mail.send({
     to: f.approvalEmail,
-    subject: `Approve ${f.name} post — day ${row.day}`,
-    html: approvalEmail(f.name, upload.thumbnailUrl, caption, reviewUrl),
+    subject: `Approve ${f.name} post${row.matchKey ? ` (${row.matchKey})` : ''}`,
+    html: approvalEmail(f.name, upload.thumbnailUrl, full, short, reviewUrl),
   });
-  log.info({ day: row.day }, 'approval email sent');
+  log.info({ match: row.matchKey }, 'approval email sent');
 }
 
-/** Publish after approval. */
+/** Publish after approval — one Post-for-Me call. */
 export async function publish(approval) {
   const p = approval.payload || {};
   const funnelRow = await funnels.get(p.funnelId);
@@ -104,22 +109,28 @@ export async function publish(approval) {
     return;
   }
 
-  const platformOf = (id) => f.accountMap?.[id]?.platform || 'organic';
-  const perAccountCaption = {};
-  for (const id of accounts) {
-    const platform = CHANNELS.includes(platformOf(id)) ? platformOf(id) : 'organic';
-    perAccountCaption[id] = f.ctaLink ? withChannelLink(p.caption, f.ctaLink, platform) : p.caption;
+  const scheduledAt = publishAtIst(f.publishTime, DateTime.now().setZone(settings.tz)).toISO();
+  // LinkedIn gets the full caption, other platforms the short one (when distinct).
+  const platformConfigurations = buildPlatformConfigs(p.captionFull, p.captionShort);
+  await publisher.createPost({
+    accountIds: accounts,
+    caption: p.captionShort || p.captionFull,
+    mediaUrl: p.mediaUrl,
+    scheduledAt,
+    platformConfigurations,
+  });
+
+  // Optional IG-comment automation webhook (best-effort).
+  if (f.igWebhookUrl) {
+    request(f.igWebhookUrl, { method: 'POST', body: { funnel: f.name, match: p.matchKey }, label: 'ig.webhook', log, retries: 0 }).catch(() => {});
   }
 
-  const scheduledAt = publishAtIst(f.publishTime, DateTime.now().setZone(settings.tz)).toISO();
-  await publisher.createPost({ accountIds: accounts, caption: p.caption, mediaUrl: p.mediaUrl, scheduledAt, perAccountCaption });
-
-  await markSheetPosted(providers.sheets, f.sheetId, p.day, log);
+  await markSheetPosted(providers.sheets, f.sheetId, p.matchColName, p.matchKey, log);
   await setStatus(approval.id, 'published');
-  log.info({ day: p.day, accounts: accounts.length }, 'published');
+  log.info({ match: p.matchKey, accounts: accounts.length, perPlatform: !!platformConfigurations }, 'published');
 }
 
-/** Rework after a change request. */
+/** Rework — regenerate with the reviewer note. */
 export async function rework(approval, note) {
   const p = approval.payload || {};
   const funnelRow = await funnels.get(p.funnelId);
@@ -128,31 +139,28 @@ export async function rework(approval, note) {
   const log = childLogger({ module: 'funnelPoster', tenant_id: f.tenantId, funnel: f.name });
   const providers = await buildProviders(f.tenantId);
 
-  // Rework re-generates the image with the reviewer's note appended to the prompt.
-  const row = { day: p.day, image_prompt: p.base_prompt, caption: p.caption, audience: p.audience };
-  const image = await generate(providers, row, note);
-  const upload = await providers.storage.uploadPng(f.driveFolder, `${slug(f.name)}-day-${row.day}-rework.png`, image);
-  const caption = humanizeCaption(row.caption, row.audience || f.audiencePrefix || '');
+  const image = await generate(providers, composePrompt({ imagePrompt: p.basePrompt }, note), f.imageSize);
+  const upload = await providers.storage.uploadPng(f.driveFolder, `${slug(f.name)}-${p.matchKey || Date.now()}-rework.png`, image);
 
   const { reviewUrl } = await approvalService.createRequest({
     tenantId: f.tenantId,
     kind: KIND,
-    payload: { funnelId: f.id, day: row.day, base_prompt: row.image_prompt, caption, audience: row.audience, mediaUrl: upload.downloadUrl, thumbnailUrl: upload.thumbnailUrl },
+    payload: { ...p, mediaUrl: upload.downloadUrl, thumbnailUrl: upload.thumbnailUrl },
   });
   await providers.mail.send({
     to: f.approvalEmail,
-    subject: `Reworked ${f.name} post — day ${row.day}`,
-    html: approvalEmail(f.name, upload.thumbnailUrl, caption, reviewUrl),
+    subject: `Reworked ${f.name} post${p.matchKey ? ` (${p.matchKey})` : ''}`,
+    html: approvalEmail(f.name, upload.thumbnailUrl, p.captionFull, p.captionShort, reviewUrl),
   });
-  log.info({ day: row.day }, 'rework email sent');
+  log.info({ match: p.matchKey }, 'rework email sent');
 }
 
-/** Run every active funnel (daily cron entry). */
+/** Run every active funnel (used by the manual trigger). */
 export async function runAllActive() {
   const active = await funnels.listActive();
   for (const funnel of active) {
     try {
-      await runDaily(funnel);
+      await runFunnel(funnel);
     } catch (err) {
       childLogger({ module: 'funnelPoster', tenant_id: funnel.tenant_id, funnel: funnel.name }).error({ err: err.message }, 'funnel run failed');
     }
@@ -161,31 +169,41 @@ export async function runAllActive() {
 
 // ---- helpers ---------------------------------------------------------------
 
-async function markSheetPosted(sheets, sheetId, day, log) {
+async function markSheetPosted(sheets, sheetId, matchColName, matchKey, log) {
   try {
-    const rowNumber = await sheets.findRowIndex(sheetId, SHEET_TAB, 'day', day);
+    const matchCol = matchColName || 'day';
+    const rowNumber = await sheets.findRowIndex(sheetId, SHEET_TAB, matchCol, matchKey);
     if (rowNumber <= 0) return;
     const rows = await sheets.readTab(sheetId, SHEET_TAB, { fresh: true });
     const header = rows[0].map((h) => String(h).trim().toLowerCase());
     const idx = header.indexOf('status');
     if (idx === -1) return;
-    let n = idx;
-    let s = '';
-    do {
-      s = String.fromCharCode(65 + (n % 26)) + s;
-      n = Math.floor(n / 26) - 1;
-    } while (n >= 0);
-    await sheets.updateCells(sheetId, `${SHEET_TAB}!${s}${rowNumber}`, [['Posted']]);
+    await sheets.updateCells(sheetId, `${SHEET_TAB}!${colLetter(idx)}${rowNumber}`, [['Posted']]);
   } catch (err) {
     log.warn({ err: err.message }, 'failed to mark sheet Posted');
   }
 }
 
-function approvalEmail(funnelName, thumbnailUrl, caption, reviewUrl) {
+function colLetter(index0) {
+  let n = index0;
+  let s = '';
+  do {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return s;
+}
+
+function approvalEmail(funnelName, thumbnailUrl, full, short, reviewUrl) {
+  const distinct = full && short && full !== short;
+  const caps = distinct
+    ? `<p><b>LinkedIn (full):</b></p><pre style="white-space:pre-wrap;background:#f5f5f5;padding:12px;border-radius:6px">${escapeHtml(full)}</pre>
+       <p><b>Other channels (short):</b></p><pre style="white-space:pre-wrap;background:#f5f5f5;padding:12px;border-radius:6px">${escapeHtml(short)}</pre>`
+    : `<pre style="white-space:pre-wrap;background:#f5f5f5;padding:12px;border-radius:6px">${escapeHtml(short || full)}</pre>`;
   return `<div style="font-family:system-ui">
     <p>New ${escapeHtml(funnelName)} post ready for review:</p>
     ${thumbnailUrl ? `<img src="${thumbnailUrl}" style="max-width:420px;border-radius:8px">` : ''}
-    <pre style="white-space:pre-wrap;background:#f5f5f5;padding:12px;border-radius:6px">${escapeHtml(caption)}</pre>
+    ${caps}
     <p><a href="${reviewUrl}" style="background:#0a7d32;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Review &amp; Approve</a></p>
   </div>`;
 }
@@ -198,4 +216,4 @@ function slug(s) {
 }
 
 export { KIND };
-export default { runDaily, publish, rework, runAllActive, KIND };
+export default { runFunnel, publish, rework, runAllActive, KIND };

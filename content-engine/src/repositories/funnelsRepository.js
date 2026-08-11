@@ -26,8 +26,12 @@ export const FUNNEL_FIELDS = [
   { key: 'account_map', label: 'Account map (JSON id → {platform,account_name})', type: 'json' },
   { key: 'approval_email', label: 'Approval email' },
   { key: 'cta_link', label: 'CTA / assessment link' },
-  { key: 'audience_prefix', label: 'Audience prefix (caption line)' },
+  { key: 'audience_prefix', label: 'Audience prefix (caption line, optional)' },
+  { key: 'generate_time', label: 'Generate/approval time (HH:mm IST)', placeholder: '22:00' },
+  { key: 'generate_days', label: 'Days to run (1-7 Mon-Sun, comma-sep; blank = daily)', placeholder: 'e.g. 1,2,3' },
   { key: 'publish_time', label: 'Publish time (HH:mm IST)', placeholder: '08:02' },
+  { key: 'image_size', label: 'Image size (square | portrait)', placeholder: 'square' },
+  { key: 'ig_webhook_url', label: 'IG-comment webhook URL (optional)' },
 ];
 
 export async function listByTenant(tenantId = 'default') {
@@ -117,7 +121,11 @@ export async function resolve(funnel) {
     approvalEmail: c.approval_email || '',
     ctaLink: c.cta_link || '',
     audiencePrefix: c.audience_prefix || '',
+    generateTime: c.generate_time || '22:00',
+    generateDays: c.generate_days || '', // '' = daily
     publishTime: c.publish_time || '08:02',
+    imageSize: (c.image_size || 'square').toLowerCase() === 'portrait' ? '1024x1536' : '1024x1024',
+    igWebhookUrl: c.ig_webhook_url || '',
   };
 }
 
