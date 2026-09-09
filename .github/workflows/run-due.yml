@@ -13,13 +13,18 @@ name: Wake content-engine and run due funnels
 # the funnel's own scheduled time.
 
 on:
-  schedule:
-    # Fire ~10 min before each funnel's generate time (GitHub Actions cron is
-    # UTC). The endpoint runs only funnels due within ±15 min, then the app
-    # sleeps again. Add/adjust a line per distinct schedule.
-    - cron: '20 16 * * *'      # 21:50 IST daily  → Gita/VidaPulse (22:00)
-    - cron: '50 15 * * 1,2,3'  # 21:20 IST Mon-Wed → Corporate (21:30)
-    # - cron: '50 2 * * *'     # 08:20 IST daily   → a morning funnel (08:30)
+  # SCHEDULE DISABLED (user request, 2026-09-09): the daily cron is commented
+  # out so this workflow no longer wakes the app or triggers posting/emails.
+  # Re-enable by uncommenting the `schedule:` block below. The workflow can
+  # still be run by hand from the Actions tab via workflow_dispatch.
+  #
+  # schedule:
+  #   # Fire ~10 min before each funnel's generate time (GitHub Actions cron is
+  #   # UTC). The endpoint runs only funnels due within ±15 min, then the app
+  #   # sleeps again. Add/adjust a line per distinct schedule.
+  #   - cron: '20 16 * * *'      # 21:50 IST daily  → Gita/VidaPulse (22:00)
+  #   - cron: '50 15 * * 1,2,3'  # 21:20 IST Mon-Wed → Corporate (21:30)
+  #   - cron: '50 2 * * *'       # 08:20 IST daily   → a morning funnel (08:30)
   workflow_dispatch: {}        # lets you run it manually from the Actions tab
 
 jobs:
