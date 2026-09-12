@@ -40,6 +40,8 @@ export function createApp() {
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true }));
 
+  // Bare domain opens the app (the unified dashboard), so the root URL just works.
+  app.get('/', (_req, res) => res.redirect('/api/v1/dashboard'));
   app.get('/health', (_req, res) => res.json({ status: 'ok', service: settings.service }));
   app.get('/live', (_req, res) => res.json({ status: 'alive' }));
   // Running build identity — lets a deploy be verified against the pushed commit.
