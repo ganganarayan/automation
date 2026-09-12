@@ -42,6 +42,15 @@ export function createApp() {
 
   app.get('/health', (_req, res) => res.json({ status: 'ok', service: settings.service }));
   app.get('/live', (_req, res) => res.json({ status: 'alive' }));
+  // Running build identity — lets a deploy be verified against the pushed commit.
+  // Railway injects RAILWAY_GIT_COMMIT_SHA; fall back to a generic dev marker.
+  const version = (_req, res) => res.json({
+    service: settings.service,
+    sha: process.env.RAILWAY_GIT_COMMIT_SHA || 'dev',
+    branch: process.env.RAILWAY_GIT_BRANCH || null,
+  });
+  app.get('/api/version', version);
+  app.get('/version', version);
   app.get('/ready', async (_req, res) => {
     try {
       await ping();
