@@ -33,6 +33,7 @@ import * as users from '../repositories/usersRepository.js';
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { buildProviders } from '../services/providerFactory.js';
+import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { keyOk, requiredKey, verifyKey, setAccessCookie, clearAccessCookie, ACCESS_KEY_STORE } from '../services/accessService.js';
 
 export function register(ctx) {
@@ -163,6 +164,27 @@ export function register(ctx) {
       res.redirect(backToFunnels(body));
     } catch (err) {
       next(err);
+    }
+  });
+
+  // Pull the connected social accounts from Post for Me so the funnel's account
+  // IDs can be picked with checkboxes instead of hand-typed JSON. Uses the key
+  // typed in the box if present, else the funnel's saved key. Returns JSON.
+  router.post('/admin/funnels/fetch-accounts', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const id = Number(req.body?.funnel_id);
+      let apiKey = (req.body?.api_key || '').toString().trim();
+      if (!apiKey && id) {
+        const cfg = await funnels.getConfig(id);
+        apiKey = cfg.postforme_api_key || '';
+      }
+      if (!apiKey) return res.json({ ok: false, error: 'Paste your Post for Me API key above (or Save it) first.' });
+      const provider = createPostForMeProvider({ apiKey }, log);
+      const data = await provider.listAccounts();
+      return res.json({ ok: true, accounts: normalizeAccounts(data) });
+    } catch (err) {
+      return res.json({ ok: false, error: err.message });
     }
   });
 
@@ -305,6 +327,15 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey
  .flowtoggle span{font-size:.72rem;color:#8a8aa2}
  .flowtoggle select{padding:.3rem .5rem}
  .flowarrow{text-align:center;color:#4a4a66;font-size:1rem;margin:-.2rem 0 .5rem}
+ /* selectable schedule + account picker */
+ input.pick,select.pick{width:auto;min-width:140px}
+ input[type=time].pick{min-width:120px}
+ .daychips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.2rem}
+ .daychip{display:inline-flex;align-items:center;gap:.3rem;background:#15151f;border:1px solid #2a2a44;border-radius:999px;padding:.3rem .7rem;font-size:.85rem;cursor:pointer;margin:0}
+ .daychip input{margin:0}
+ .acctlist{display:flex;flex-direction:column;gap:.3rem;margin:.4rem 0;max-height:260px;overflow:auto}
+ .acct{display:flex;align-items:center;gap:.5rem;background:#15151f;border:1px solid #24243a;border-radius:8px;padding:.4rem .7rem;font-size:.85rem;cursor:pointer;margin:0}
+ .acct b{color:#c7c7d9;text-transform:capitalize}
 </style>
 <div class="layout">
   <aside>
@@ -381,6 +412,41 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey
       el.style.color = j.ok ? '#5bd08a' : '#ff9a9a';
     }catch(e){ el.textContent='✗ '+e.message; el.style.color='#ff9a9a'; }
   }
+  function syncDays(gid){
+    const boxes=document.querySelectorAll('[data-daygroup="'+gid+'"]');
+    const vals=[]; boxes.forEach(b=>{ if(b.checked) vals.push(b.value); });
+    const h=document.getElementById(gid); if(h) h.value=vals.join(',');
+  }
+  function syncPfm(fid){
+    const boxes=document.querySelectorAll('[data-pfm="'+fid+'"]');
+    const ids=[]; const map={};
+    boxes.forEach(b=>{ if(b.checked){ ids.push(b.value); map[b.value]={platform:b.dataset.plat||'',account_name:b.dataset.name||''}; } });
+    const a=document.getElementById('pfmaccts-'+fid); if(a) a.value=JSON.stringify(ids);
+    const m=document.getElementById('pfmmap-'+fid); if(m) m.value=JSON.stringify(map);
+  }
+  function renderPfm(fid, accounts){
+    const box=document.getElementById('pfmlist-'+fid);
+    let selected=[]; try{ selected=JSON.parse(document.getElementById('pfmaccts-'+fid).value||'[]'); }catch(_){}
+    if(!accounts.length){ box.innerHTML='<span class="hint">No connected accounts found for that key.</span>'; return; }
+    box.innerHTML=accounts.map(function(x){
+      const ck=selected.indexOf(x.id)>=0?'checked':'';
+      return '<label class="acct"><input type="checkbox" value="'+esc2(x.id)+'" data-pfm="'+fid+'" data-plat="'+esc2(x.platform)+'" data-name="'+esc2(x.name)+'" onchange="syncPfm(\''+fid+'\')" '+ck+'> <b>'+esc2(x.platform)+'</b> — '+esc2(x.name)+'</label>';
+    }).join('');
+    syncPfm(fid);
+  }
+  async function fetchPfm(fid){
+    const st=document.getElementById('pfmstatus-'+fid);
+    const keyEl=document.getElementById('pfmkey-'+fid);
+    const api_key=keyEl?keyEl.value.trim():'';
+    st.textContent='Fetching…'; st.style.color='';
+    try{
+      const j=await post('funnels/fetch-accounts',{funnel_id:fid, api_key});
+      if(!j.ok){ st.textContent='✗ '+(j.error||'failed'); st.style.color='#ff9a9a'; return; }
+      renderPfm(fid, j.accounts||[]);
+      st.textContent='✓ '+(j.accounts||[]).length+' accounts — tick to include, then Save';
+      st.style.color='#5bd08a';
+    }catch(e){ st.textContent='✗ '+((e&&e.error)||(e&&e.message)||'failed'); st.style.color='#ff9a9a'; }
+  }
   const hash=(location.hash||'#users').slice(1);
   if(document.getElementById('panel-'+hash)) show(hash);
   const e=new URLSearchParams(location.search).get('error');
@@ -443,7 +509,12 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
   const cards = (funnelList || [])
     .map((f) => {
       const cfg = funnelConfigs[f.id] || {};
-      const fields = funnels.FUNNEL_FIELDS.map((field) => fieldRow(field, cfg)).join('');
+      const fields = funnels.FUNNEL_FIELDS.map((field) => {
+        if (field.key === 'postforme_api_key') return funnelKeyRow(field, cfg, f.id);
+        if (field.key === 'postforme_accounts') return pfmAccountsRow(cfg, f.id);
+        if (field.key === 'account_map') return ''; // folded into the accounts picker above
+        return fieldRow(field, cfg);
+      }).join('');
       return `<fieldset><legend>${esc(f.name)} ${f.active ? '' : '<span class="pill">paused</span>'}</legend>
         <form method="post" action="/api/v1/admin/funnels/config">
           <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
@@ -559,6 +630,35 @@ function appSection(app, tenantId, configMap, key) {
 function fieldRow(field, configMap) {
   const current = configMap[field.key];
   const has = current !== undefined && current !== null && current !== '';
+  if (field.type === 'time') {
+    const val = has ? current : (field.default || '');
+    return `<div class="field"><label>${esc(field.label)}</label>
+      <input type="time" name="set[${esc(field.key)}]" value="${esc(val)}" step="60" class="pick"></div>`;
+  }
+  if (field.type === 'select') {
+    const val = has ? current : (field.default || '');
+    const opts = (field.options || [])
+      .map((o) => {
+        const v = typeof o === 'string' ? o : o.value;
+        const l = typeof o === 'string' ? o : o.label;
+        return `<option value="${esc(v)}"${String(val) === String(v) ? ' selected' : ''}>${esc(l)}</option>`;
+      })
+      .join('');
+    return `<div class="field"><label>${esc(field.label)}</label>
+      <select name="set[${esc(field.key)}]" class="pick">${opts}</select></div>`;
+  }
+  if (field.type === 'weekdays') {
+    const gid = uniqueId('days');
+    const cur = String(has ? current : '').split(',').map((s) => s.trim()).filter(Boolean);
+    const days = [['1', 'Mon'], ['2', 'Tue'], ['3', 'Wed'], ['4', 'Thu'], ['5', 'Fri'], ['6', 'Sat'], ['7', 'Sun']];
+    const chips = days
+      .map(([v, l]) => `<label class="daychip"><input type="checkbox" value="${v}" data-daygroup="${gid}"${cur.includes(v) ? ' checked' : ''} onchange="syncDays('${gid}')"> ${l}</label>`)
+      .join('');
+    return `<div class="field"><label>${esc(field.label)}</label>
+      <input type="hidden" id="${gid}" name="set[${esc(field.key)}]" value="${esc(cur.join(','))}">
+      <div class="daychips">${chips}</div>
+      <p class="hint">Tick the days this funnel runs. All unchecked = every day.</p></div>`;
+  }
   if (field.type === 'smtp_test') {
     const prefill = configMap.smtp_from || configMap.smtp_user || '';
     return `<div class="field"><label>Send a test email</label>
@@ -609,6 +709,64 @@ button{width:100%;padding:.6rem;border:0;border-radius:8px;background:#2a2a44;co
   <input type="hidden" name="next" value="${esc(nextName)}">
   <input name="key" type="password" placeholder="Access key" autofocus autocomplete="current-password">
   <button type="submit">Sign in</button></form>`;
+}
+
+// Monotonic id source for widgets that need unique DOM ids within a page.
+let _uidSeq = 0;
+function uniqueId(prefix = 'u') {
+  _uidSeq += 1;
+  return `${prefix}-${_uidSeq.toString(36)}`;
+}
+
+// Funnel Post-for-Me API key: a normal secret input, but with a stable id so
+// the "Fetch accounts" button can read a freshly pasted key before it is saved.
+function funnelKeyRow(field, cfg, fid) {
+  const has = !!(cfg && cfg[field.key]);
+  return `<div class="field"><label>${esc(field.label)}</label>
+    <input id="pfmkey-${fid}" type="password" name="set[${esc(field.key)}]" autocomplete="off"
+      placeholder="${has ? '•••• (set — blank keeps current)' : 'paste your Post for Me API key'}"></div>`;
+}
+
+// Account picker: a Fetch button + checkbox list, backed by two hidden inputs
+// (the id array and the id→{platform,account_name} map) the page keeps in JSON.
+function pfmAccountsRow(cfg, fid) {
+  let ids = [];
+  let map = {};
+  try { ids = JSON.parse((cfg && cfg.postforme_accounts) || '[]'); } catch { ids = []; }
+  try { map = JSON.parse((cfg && cfg.account_map) || '{}'); } catch { map = {}; }
+  if (!Array.isArray(ids)) ids = [];
+  if (!map || typeof map !== 'object') map = {};
+  const pre = ids
+    .map((id) => {
+      const m = map[id] || {};
+      const plat = m.platform || '';
+      const name = m.account_name || id;
+      return `<label class="acct"><input type="checkbox" value="${esc(id)}" data-pfm="${fid}" data-plat="${esc(plat)}" data-name="${esc(name)}" onchange="syncPfm('${fid}')" checked> <b>${esc(plat)}</b> — ${esc(name)}</label>`;
+    })
+    .join('');
+  return `<div class="field"><label>Post for Me accounts</label>
+    <div class="row" style="gap:.4rem;align-items:center">
+      <button type="button" class="act" onclick="fetchPfm('${fid}')">↻ Fetch accounts from Post for Me</button>
+      <span id="pfmstatus-${fid}" class="hint"></span>
+    </div>
+    <div id="pfmlist-${fid}" class="acctlist">${pre || '<span class="hint">No accounts yet — paste your API key above, then click Fetch and tick the accounts.</span>'}</div>
+    <input type="hidden" id="pfmaccts-${fid}" name="set[postforme_accounts]" value="${esc(JSON.stringify(ids))}">
+    <input type="hidden" id="pfmmap-${fid}" name="set[account_map]" value="${esc(JSON.stringify(map))}">
+    <p class="hint">One click — no JSON. Tick the accounts this funnel posts to.</p></div>`;
+}
+
+// Flatten Post for Me's list response into { id, platform, name } rows.
+function normalizeAccounts(data) {
+  const arr = Array.isArray(data)
+    ? data
+    : (Array.isArray(data?.data) ? data.data : (Array.isArray(data?.accounts) ? data.accounts : []));
+  return arr
+    .map((a) => ({
+      id: String(a.id ?? a.account_id ?? a.uuid ?? ''),
+      platform: String(a.platform ?? a.provider ?? a.type ?? ''),
+      name: String(a.username ?? a.name ?? a.display_name ?? a.external_name ?? a.handle ?? a.id ?? ''),
+    }))
+    .filter((a) => a.id);
 }
 
 function esc(s) {

@@ -27,10 +27,19 @@ export const FUNNEL_FIELDS = [
   { key: 'approval_email', label: 'Approval email' },
   { key: 'cta_link', label: 'CTA / assessment link' },
   { key: 'audience_prefix', label: 'Audience prefix (caption line, optional)' },
-  { key: 'generate_time', label: 'Generate/approval time (HH:mm IST)', placeholder: '22:00' },
-  { key: 'generate_days', label: 'Days to run (1-7 Mon-Sun, comma-sep; blank = daily)', placeholder: 'e.g. 1,2,3' },
-  { key: 'publish_time', label: 'Publish time (HH:mm IST)', placeholder: '08:02' },
-  { key: 'image_size', label: 'Image size (square | portrait)', placeholder: 'square' },
+  { key: 'generate_time', label: 'Generate/approval time (IST)', type: 'time', default: '22:00' },
+  { key: 'generate_days', label: 'Days to run (blank = every day)', type: 'weekdays' },
+  { key: 'publish_time', label: 'Publish time (IST)', type: 'time', default: '08:02' },
+  {
+    key: 'image_size',
+    label: 'Image size',
+    type: 'select',
+    default: 'square',
+    options: [
+      { value: 'square', label: 'Square (1:1)' },
+      { value: 'portrait', label: 'Portrait (2:3)' },
+    ],
+  },
   { key: 'ig_webhook_url', label: 'IG-comment webhook URL (optional)' },
 ];
 
