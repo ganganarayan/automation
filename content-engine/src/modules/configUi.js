@@ -430,7 +430,7 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey
     if(!accounts.length){ box.innerHTML='<span class="hint">No connected accounts found for that key.</span>'; return; }
     box.innerHTML=accounts.map(function(x){
       const ck=selected.indexOf(x.id)>=0?'checked':'';
-      return '<label class="acct"><input type="checkbox" value="'+esc2(x.id)+'" data-pfm="'+fid+'" data-plat="'+esc2(x.platform)+'" data-name="'+esc2(x.name)+'" onchange="syncPfm(\''+fid+'\')" '+ck+'> <b>'+esc2(x.platform)+'</b> — '+esc2(x.name)+'</label>';
+      return '<label class="acct"><input type="checkbox" value="'+esc2(x.id)+'" data-pfm="'+fid+'" data-plat="'+esc2(x.platform)+'" data-name="'+esc2(x.name)+'" onchange="syncPfm('+fid+')" '+ck+'> <b>'+esc2(x.platform)+'</b> — '+esc2(x.name)+'</label>';
     }).join('');
     syncPfm(fid);
   }
