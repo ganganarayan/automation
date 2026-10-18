@@ -44,6 +44,17 @@ export function buildSaveOps(app, submitted) {
         if (trimmed !== '') sets.push({ key: field.key, value });
         continue;
       }
+      if (field.type === 'secret_json') {
+        if (trimmed === '') continue; // blank keeps current (never cleared via blank)
+        try {
+          JSON.parse(trimmed);
+        } catch {
+          errors.push(`${field.label || field.key}: invalid JSON`);
+          continue;
+        }
+        sets.push({ key: field.key, value: trimmed });
+        continue;
+      }
       if (trimmed === '') {
         dels.push(field.key);
         continue;

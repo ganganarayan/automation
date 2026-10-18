@@ -68,6 +68,11 @@ export async function forTenant(tenantId = 'default') {
 
   return {
     tenantId,
+    // Google Sheets/Drive identity: the service-account JSON set in the app
+    // (write-only in the UI) wins; env GOOGLE_SERVICE_ACCOUNT_JSON is a fallback.
+    google: {
+      serviceAccount: parseJson(pick('google_service_account_json', null), null) || settings.google.serviceAccount,
+    },
     sheets: {
       gita: pick('gita_sheet_id', settings.sheets.gita),
       vidapulse: pick('vidapulse_sheet_id', settings.sheets.vidapulse),

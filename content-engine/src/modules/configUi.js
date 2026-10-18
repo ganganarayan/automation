@@ -685,6 +685,17 @@ function fieldRow(field, configMap) {
       <input type="password" name="set[${esc(field.key)}]" autocomplete="off"
         placeholder="${has ? '•••• (set — blank keeps current)' : (field.placeholder ? esc(field.placeholder) : 'unset')}"></div>`;
   }
+  if (field.type === 'secret_json') {
+    // Write-only: never echo the JSON (it holds a private key). Surface only the
+    // service-account email so the user knows which identity to share sheets with.
+    let email = '';
+    if (has) { try { email = (JSON.parse(current) || {}).client_email || ''; } catch { email = ''; } }
+    return `<div class="field"><label>${esc(field.label)}</label>
+      ${email ? `<p class="hint">🟢 Configured. Share your sheets &amp; Drive folders (Editor) with: <b>${esc(email)}</b></p>` : ''}
+      <textarea name="set[${esc(field.key)}]" autocomplete="off"
+        placeholder="${has ? '•••• (set — paste new JSON to replace; blank keeps current)' : 'paste the service-account JSON here'}"></textarea>
+      ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
+  }
   if (field.type === 'json' || field.type === 'textarea') {
     return `<div class="field"><label>${esc(field.label)}</label>
       <textarea name="set[${esc(field.key)}]" placeholder="${field.placeholder ? esc(field.placeholder) : ''}">${esc(has ? current : '')}</textarea></div>`;

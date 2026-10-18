@@ -23,6 +23,17 @@ export const CONFIG_MANIFEST = {
     blurb: 'Content generation, approval, publishing, reports, dashboard.',
     groups: [
       {
+        title: 'Google (Sheets & Drive access)',
+        fields: [
+          {
+            key: 'google_service_account_json',
+            label: 'Service account JSON',
+            type: 'secret_json',
+            help: 'Paste the downloaded Google service-account JSON once. Then share each funnel\'s content sheet and Drive upload folder (Editor) with the service-account email shown above. Blank keeps the current value. (Env GOOGLE_SERVICE_ACCOUNT_JSON is only a fallback.)',
+          },
+        ],
+      },
+      {
         title: 'AI keys (shared by all funnels)',
         fields: [
           { key: 'openai_api_key', label: 'OpenAI API key', type: 'secret' },

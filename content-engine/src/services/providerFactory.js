@@ -44,10 +44,10 @@ export async function buildProviders(tenantId = 'default') {
     // mailbox (SMTP configured in the app; env is only a fallback).
     mail: createSmtpMailProvider(r.smtp, log),
 
-    // Platform-shared infrastructure (operator-managed; not per-tenant):
-    //  - Google service account: the account tenants share their Sheets/Drive with.
-    storage: createGoogleDriveProvider(settings.google, log),
-    sheets: createGoogleSheetsProvider(settings.google, log),
+    // Google Sheets/Drive identity — the service account configured in the app
+    // (tenant_config), falling back to the env default (see tenantSettings).
+    storage: createGoogleDriveProvider({ serviceAccount: r.google.serviceAccount }, log),
+    sheets: createGoogleSheetsProvider({ serviceAccount: r.google.serviceAccount }, log),
     wa: createWaGatewayClient(settings.waGateway, log), // platform service topology
 
     resolved: r,
