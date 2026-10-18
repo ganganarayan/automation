@@ -25,6 +25,9 @@ export function createGoogleSheetsProvider(cfg, log) {
         log.warn('Google service account not configured; returning no sheet rows');
         return [];
       },
+      async firstTabTitle() {
+        return 'Sheet1';
+      },
       async findRowIndex() {
         return -1;
       },
@@ -63,6 +66,12 @@ export function createGoogleSheetsProvider(cfg, log) {
 
   return {
     readTab,
+
+    /** Title of the first (leftmost) tab — used when a funnel sets no tab name. */
+    async firstTabTitle(sheetId) {
+      const res = await api.spreadsheets.get({ spreadsheetId: sheetId, fields: 'sheets.properties.title' });
+      return res.data.sheets?.[0]?.properties?.title || 'Sheet1';
+    },
 
     /** Return the 1-based sheet row index whose column `colName` equals value. */
     async findRowIndex(sheetId, tab, colName, value) {

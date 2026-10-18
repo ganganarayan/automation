@@ -121,7 +121,8 @@ h1{font-size:1.4rem}</style><h1>${esc(title)}</h1><p>${esc(body)}</p>`;
 function reviewPage(token, approval) {
   const p = approval.payload || {};
   const media = p.mediaUrl || p.thumbnailUrl || p.videoThumbnailUrl || '';
-  const caption = p.caption || '';
+  // Funnel posts store full/short captions (no single `caption`); show one.
+  const caption = p.caption || p.captionShort || p.captionFull || '';
   const videoUrl = p.videoUrl || '';
   const editableCaption = p.editableCaption === true;
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

@@ -39,6 +39,9 @@ const schema = z.object({
 
   APP_SECRET: z.string().optional().default('dev-secret-change-me'),
   PUBLIC_BASE_URL: z.string().optional().default(''),
+  // Railway injects this automatically; used as the public base URL fallback so
+  // approval-email links are absolute even when PUBLIC_BASE_URL is unset.
+  RAILWAY_PUBLIC_DOMAIN: z.string().optional().default(''),
 
   GOOGLE_SERVICE_ACCOUNT_JSON: z.string().optional().default(''),
 
@@ -123,7 +126,12 @@ function build(rawEnv) {
 
     database: Object.freeze({ url: e.DATABASE_URL }),
 
-    app: Object.freeze({ secret: e.APP_SECRET, publicBaseUrl: e.PUBLIC_BASE_URL.replace(/\/+$/, '') }),
+    app: Object.freeze({
+      secret: e.APP_SECRET,
+      // Prefer an explicit PUBLIC_BASE_URL; otherwise derive from Railway's
+      // public domain so emailed review links always have a host.
+      publicBaseUrl: (e.PUBLIC_BASE_URL || (e.RAILWAY_PUBLIC_DOMAIN ? `https://${e.RAILWAY_PUBLIC_DOMAIN}` : '')).replace(/\/+$/, ''),
+    }),
 
     google: Object.freeze({
       serviceAccount: e.GOOGLE_SERVICE_ACCOUNT_JSON

@@ -20,6 +20,7 @@ import { query } from '../core/db.js';
  */
 export const FUNNEL_FIELDS = [
   { key: 'sheet_id', label: 'Content sheet ID' },
+  { key: 'sheet_tab', label: 'Sheet tab name (blank = first tab)', placeholder: 'e.g. Sheet1 / Content' },
   { key: 'drive_folder_id', label: 'Drive folder ID (image uploads)' },
   { key: 'postforme_api_key', label: 'Post for Me API key', type: 'secret' },
   { key: 'postforme_accounts', label: 'Post for Me account IDs (JSON array)', type: 'json' },
@@ -123,6 +124,7 @@ export async function resolve(funnel) {
     name: funnel.name,
     active: funnel.active,
     sheetId: c.sheet_id || '',
+    sheetTab: c.sheet_tab || '', // blank = auto-detect the first tab
     driveFolder: c.drive_folder_id || '',
     postformeKey: c.postforme_api_key || '',
     accounts: json(c.postforme_accounts, []),

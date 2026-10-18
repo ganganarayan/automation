@@ -34,11 +34,28 @@ import { childLogger } from '../core/logger.js';
 import { settings } from '../settings/index.js';
 
 const KIND = 'funnel_image';
-const SHEET_TAB = 'Sheet1';
+const DEFAULT_TAB = 'Sheet1';
+
+/**
+ * Resolve the sheet tab for a funnel: its configured tab name, else the first
+ * (leftmost) tab of the spreadsheet. Returned ready for A1 notation — names with
+ * spaces/special chars are single-quoted so `${tab}!A1` and bare-title ranges work.
+ */
+async function tabFor(sheets, f) {
+  let title = f.sheetTab;
+  if (!title) {
+    try {
+      title = await sheets.firstTabTitle(f.sheetId);
+    } catch {
+      title = DEFAULT_TAB;
+    }
+  }
+  return /^[A-Za-z0-9_]+$/.test(title) ? title : `'${String(title).replace(/'/g, "''")}'`;
+}
 
 /** Read the first Ready row and extract the recognized fields. */
-async function nextReadyRow(sheets, sheetId) {
-  const rows = await sheets.readTab(sheetId, SHEET_TAB, { fresh: true });
+async function nextReadyRow(sheets, sheetId, tab) {
+  const rows = await sheets.readTab(sheetId, tab, { fresh: true });
   if (rows.length < 2) return null;
   for (const r of rows.slice(1)) {
     const fields = extractRow(rows[0], r);
@@ -47,7 +64,16 @@ async function nextReadyRow(sheets, sheetId) {
   return null;
 }
 
+/**
+ * Generate the post image with whichever AI key the tenant configured: OpenAI
+ * when present (honors the image size), otherwise Gemini. If neither is set the
+ * OpenAI path throws a clear "not configured" error.
+ */
 async function generate(providers, prompt, size) {
+  const r = providers.resolved || {};
+  if (!r.openai?.apiKey && r.gemini?.apiKey) {
+    return providers.llm.generateImageGemini({ prompt });
+  }
   return providers.llm.generateImage({ prompt, size });
 }
 
@@ -60,9 +86,10 @@ export async function runFunnel(funnelRow) {
     return;
   }
   const providers = await buildProviders(f.tenantId);
-  const row = await nextReadyRow(providers.sheets, f.sheetId);
+  const tab = await tabFor(providers.sheets, f);
+  const row = await nextReadyRow(providers.sheets, f.sheetId, tab);
   if (!row) {
-    log.info('no Ready row');
+    log.info({ tab }, 'no Ready row');
     return;
   }
 
@@ -125,7 +152,7 @@ export async function publish(approval) {
     request(f.igWebhookUrl, { method: 'POST', body: { funnel: f.name, match: p.matchKey }, label: 'ig.webhook', log, retries: 0 }).catch(() => {});
   }
 
-  await markSheetPosted(providers.sheets, f.sheetId, p.matchColName, p.matchKey, log);
+  await markSheetPosted(providers.sheets, f.sheetId, await tabFor(providers.sheets, f), p.matchColName, p.matchKey, log);
   await setStatus(approval.id, 'published');
   log.info({ match: p.matchKey, accounts: accounts.length, perPlatform: !!platformConfigurations }, 'published');
 }
@@ -169,16 +196,16 @@ export async function runAllActive() {
 
 // ---- helpers ---------------------------------------------------------------
 
-async function markSheetPosted(sheets, sheetId, matchColName, matchKey, log) {
+async function markSheetPosted(sheets, sheetId, tab, matchColName, matchKey, log) {
   try {
     const matchCol = matchColName || 'day';
-    const rowNumber = await sheets.findRowIndex(sheetId, SHEET_TAB, matchCol, matchKey);
+    const rowNumber = await sheets.findRowIndex(sheetId, tab, matchCol, matchKey);
     if (rowNumber <= 0) return;
-    const rows = await sheets.readTab(sheetId, SHEET_TAB, { fresh: true });
+    const rows = await sheets.readTab(sheetId, tab, { fresh: true });
     const header = rows[0].map((h) => String(h).trim().toLowerCase());
     const idx = header.indexOf('status');
     if (idx === -1) return;
-    await sheets.updateCells(sheetId, `${SHEET_TAB}!${colLetter(idx)}${rowNumber}`, [['Posted']]);
+    await sheets.updateCells(sheetId, `${tab}!${colLetter(idx)}${rowNumber}`, [['Posted']]);
   } catch (err) {
     log.warn({ err: err.message }, 'failed to mark sheet Posted');
   }
