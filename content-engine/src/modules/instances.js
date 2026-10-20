@@ -15,6 +15,7 @@
  *         POST /api/v1/admin/instances/:id/delete  delete (if not locked)
  */
 import * as instances from '../services/instanceService.js';
+import * as review from '../services/instanceReviewService.js';
 import { INSTANCE_STEPS, sumInstanceCost, costBreakdown, shortId, formatDuration } from '../utils/instanceSpec.js';
 import { formatIst } from '../utils/time.js';
 import { keyOk } from '../services/accessService.js';
@@ -76,6 +77,20 @@ export function register(ctx) {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
       const ok = await instances.remove(req.params.id);
       res.json({ ok, error: ok ? null : 'locked or not found' });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Send a checkpoint review email (script | final) for this instance. Same
+  // keyOk guard as the other UI actions; the service also exposes the
+  // admin-key /jobs/instance-review trigger for programmatic callers (slice 5).
+  router.post('/admin/instances/:id/send-review', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const checkpoint = String(req.query.checkpoint || req.body?.checkpoint || 'script');
+      const r = await review.requestReview({ tenantId: req.tenantId, instanceId: req.params.id, checkpoint });
+      res.json({ ok: true, reviewUrl: r.reviewUrl, emailedTo: r.approvalEmail || null });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -203,7 +218,12 @@ function detailPage(row, steps) {
         <a class="act" href="/api/v1/admin/instances">← All instances</a>
       </div>
     </div>
-    <p class="ro">Read-only review. ${row.locked ? 'Posted and locked.' : 'Approve / reject lands in the next slice.'}</p>
+    <p class="ro">Read-only here. ${row.locked ? 'Posted and locked.' : 'Approve or request a change from the emailed review link.'}</p>
+    ${row.locked ? '' : `<div class="row">
+      <button class="act" onclick="sendReview('script')">✉ Send script review</button>
+      <button class="act primary" onclick="sendReview('final')">✉ Send final review</button>
+      <span id="rvmsg" class="hint"></span>
+    </div>`}
 
     <table class="steps">
       <thead><tr><th>Step</th><th>Status</th><th>Output</th><th>Cost</th><th>Preview</th></tr></thead>
@@ -215,6 +235,14 @@ function detailPage(row, steps) {
     ${previewModal()}
   `, `
     const S = ${JSON.stringify(data)};
+    async function sendReview(cp){
+      const m=document.getElementById('rvmsg'); if(m) m.textContent='Sending…';
+      try{
+        const r=await fetch('/api/v1/admin/instances/${row.id}/send-review?checkpoint='+cp,{method:'POST'});
+        const j=await r.json();
+        if(m) m.textContent = j.ok ? ('Sent'+(j.emailedTo?(' to '+j.emailedTo):' — no approval email set, link only')) : ('Failed: '+(j.error||''));
+      }catch(e){ if(m) m.textContent='Failed: '+e.message; }
+    }
   `);
 }
 
@@ -282,6 +310,7 @@ function shell(title, inner, script) {
  .pill.bad{background:#3b1212;border-color:#6b1f1f;color:#ff9a9a}
  .pill.mut{background:#1c1c2a;color:#9a9ab0}
  .ro{color:#8a8aa2;font-size:.85rem;margin:.2rem 0 1rem}
+ .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.4rem 0 1rem}
  .steps .stepname{display:flex;align-items:center;gap:.5rem}
  .dot{width:9px;height:9px;border-radius:50%;background:#444;display:inline-block}
  .dot.done{background:#2ea043}.dot.running{background:#2d6cdf}.dot.failed{background:#d14}.dot.pending{background:#3a3a52}
