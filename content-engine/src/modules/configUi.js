@@ -356,7 +356,7 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey
  .planwrap{display:flex;gap:.5rem;align-items:center}
  .billing{background:#0d0d16;border:1px solid #24243a;border-radius:8px;padding:.5rem .7rem;margin:.3rem 0}
  a{color:#7aa2ff}
- a.act{display:inline-flex;align-items:center;text-decoration:none}
+ a.act{display:inline-flex;align-items:center;text-decoration:none;background:#2a2a44;color:#fff;border-radius:8px;padding:.45rem .9rem}
  .act.primary{background:#2d6cdf;color:#fff}
  .act.danger{background:#5a1d1d;color:#fff}
  .funnellist{display:flex;flex-direction:column;gap:.6rem}
