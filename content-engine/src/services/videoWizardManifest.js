@@ -104,8 +104,8 @@ export const WIZARD_STEPS = [
     id: 'animate',
     title: 'Image → video',
     icon: 'ti-movie',
-    desc: 'Animate each kept still into a short clip. Clips are saved to Drive, then stitched later.',
-    required: ['animation_api_key'],
+    desc: 'Animate each kept still into a short clip. Clips are saved to Drive, then stitched later. Fill the keys for the provider you pick.',
+    requiredFn: animateRequired,
     fields: [
       {
         key: 'animation_provider', label: 'Animation provider', type: 'select', default: 'kling',
@@ -115,12 +115,15 @@ export const WIZARD_STEPS = [
           { value: 'hailuo', label: 'Hailuo / MiniMax' },
         ],
       },
-      { key: 'animation_api_key', label: 'Provider API key', type: 'secret' },
+      { key: 'kling_access_key', label: 'Kling access key (Kling only)', type: 'secret' },
+      { key: 'kling_secret_key', label: 'Kling secret key (Kling only)', type: 'secret' },
+      { key: 'runway_api_key', label: 'Runway API key (Runway only)', type: 'secret' },
+      { key: 'hailuo_api_key', label: 'Hailuo / MiniMax API key (Hailuo only)', type: 'secret' },
+      { key: 'hailuo_group_id', label: 'Hailuo / MiniMax GroupId (Hailuo only)', placeholder: 'from the MiniMax console' },
       {
         key: 'clip_length', label: 'Clip length', type: 'select', default: '5',
         options: [
           { value: '5', label: '5 seconds' },
-          { value: '8', label: '8 seconds' },
           { value: '10', label: '10 seconds' },
         ],
       },
@@ -242,6 +245,18 @@ export const WIZARD_STEPS = [
   },
 ];
 
+/**
+ * Which keys the image→video step needs depends on the chosen provider:
+ * Kling signs a JWT (access key + secret), Runway/Hailuo use a bearer key, and
+ * Hailuo additionally needs the MiniMax GroupId to fetch the finished file.
+ */
+export function animateRequired(cfg) {
+  const provider = (cfg && cfg.animation_provider) || 'kling';
+  if (provider === 'runway') return ['runway_api_key'];
+  if (provider === 'hailuo') return ['hailuo_api_key', 'hailuo_group_id'];
+  return ['kling_access_key', 'kling_secret_key'];
+}
+
 /** Index of a step id, or -1. */
 export function stepIndexById(id) {
   return WIZARD_STEPS.findIndex((s) => s.id === id);
@@ -269,7 +284,10 @@ function keyFilled(key, cfg) {
 
 /** One boolean per step: all its required keys are filled (no required = done). */
 export function completeness(cfg) {
-  return WIZARD_STEPS.map((step) => (step.required || []).every((k) => keyFilled(k, cfg)));
+  return WIZARD_STEPS.map((step) => {
+    const keys = typeof step.requiredFn === 'function' ? step.requiredFn(cfg) : step.required || [];
+    return keys.every((k) => keyFilled(k, cfg));
+  });
 }
 
 export default { WIZARD_STEPS, stepIndexById, completeness };
