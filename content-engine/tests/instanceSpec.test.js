@@ -6,8 +6,16 @@ import {
   costBreakdown,
   addCostToSteps,
   patchStep,
+  shortId,
   formatDuration,
 } from '../src/utils/instanceSpec.js';
+
+describe('shortId', () => {
+  it('takes the first 8 chars and tolerates nullish', () => {
+    expect(shortId('7f3a9c2b-1111-2222-3333-444455556666')).toBe('7f3a9c2b');
+    expect(shortId(null)).toBe('');
+  });
+});
 
 describe('buildInitialSteps', () => {
   it('seeds every pipeline step pending with empty costs', () => {

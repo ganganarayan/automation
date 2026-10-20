@@ -13,6 +13,7 @@
 import { randomUUID } from 'node:crypto';
 import * as repo from '../repositories/instanceRepository.js';
 import { buildInitialSteps, addCostToSteps, patchStep, sumInstanceCost, costBreakdown } from '../utils/instanceSpec.js';
+import { costText, costImages, costAnimation, costTts, costTranscript } from '../utils/pricing.js';
 import { childLogger } from '../core/logger.js';
 
 /** Start a new instance for a funnel run. Returns the created row. */
@@ -88,5 +89,49 @@ export async function logRows(args) {
   return repo.logRows(args);
 }
 
+export async function remove(instanceId) {
+  return repo.remove(instanceId);
+}
+
+/**
+ * Create a sample instance with representative artifacts and real-formula costs,
+ * so the table / detail / preview UI can be seen before the stage workers exist.
+ * The media drive ids are placeholders (the embeds won't play real video until a
+ * run produces real files). Not locked, so it can be deleted.
+ */
+export async function createSample({ tenantId = 'default' } = {}) {
+  const at = new Date().toISOString();
+  const withAt = (c) => ({ ...c, at });
+  let steps = buildInitialSteps();
+
+  steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: 'Sample 90-second script.\nHook. Body. CTA: take the assessment.' } });
+  steps = addCostToSteps(steps, 'script', withAt(costText({ inputTokens: 3200, outputTokens: 420, model: 'gpt-5-mini' })));
+
+  const images = [0, 1, 2, 3].map((i) => ({ driveId: `SAMPLE_IMG_${i}`, prompt: `scene ${i + 1}` }));
+  steps = patchStep(steps, 'images', { status: 'done', artifacts: { images } });
+  steps = addCostToSteps(steps, 'images', withAt(costImages({ count: images.length, size: '1024x1536' })));
+
+  const clips = images.map((im, i) => ({ driveId: `SAMPLE_CLIP_${i}`, sourceImageId: im.driveId }));
+  steps = patchStep(steps, 'animate', { status: 'done', artifacts: { clips } });
+  steps = addCostToSteps(steps, 'animate', withAt(costAnimation({ provider: 'kling', seconds: 20 })));
+
+  steps = patchStep(steps, 'voiceover', { status: 'done', artifacts: { audio: { driveId: 'SAMPLE_AUDIO', durationSec: 47 } } });
+  steps = addCostToSteps(steps, 'voiceover', withAt(costTts({ provider: 'elevenlabs', chars: 1400 })));
+
+  steps = patchStep(steps, 'transcript', { status: 'done', artifacts: { text: '[00:00] Sample line one\n[00:06] Sample line two' } });
+  steps = addCostToSteps(steps, 'transcript', withAt(costTranscript({ provider: 'whisper', minutes: 0.8 })));
+
+  steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: { driveId: 'SAMPLE_REEL', durationSec: 47 } } });
+
+  const id = randomUUID();
+  const total = sumInstanceCost(steps);
+  await repo.create({ id, tenantId, funnelName: 'Sample', title: 'SAMPLE — delete me', status: 'final_review', steps });
+  await repo.saveSteps(id, steps, total);
+  await repo.setMeta(id, { durationSeconds: 47 });
+  return id;
+}
+
 export { parseSteps };
-export default { createForFunnel, recordCost, updateStep, costsFor, setMeta, get, list, logRows };
+export default {
+  createForFunnel, recordCost, updateStep, costsFor, setMeta, get, list, logRows, remove, createSample,
+};

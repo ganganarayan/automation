@@ -53,5 +53,21 @@ export function todayKeyIst(at = nowIst()) {
   return at.toFormat('yyyy-MM-dd');
 }
 
+/**
+ * Human timestamp in IST, Indian order: DD-MM-YYYY (with HH:MM when withTime).
+ * Accepts a Date (pg timestamptz), an ISO string, or a Luxon DateTime. Never
+ * leaves the locale to the runtime — the format is fixed and pinned to IST.
+ */
+export function formatIst(value, { withTime = true } = {}) {
+  if (!value) return '—';
+  let dt;
+  if (value instanceof Date) dt = DateTime.fromJSDate(value);
+  else if (DateTime.isDateTime(value)) dt = value;
+  else dt = DateTime.fromISO(String(value));
+  dt = dt.setZone(ZONE);
+  if (!dt.isValid) return '—';
+  return dt.toFormat(withTime ? 'dd-MM-yyyy HH:mm' : 'dd-MM-yyyy');
+}
+
 export { ZONE };
-export default { nowIst, currentHourIst, isWithinWindow, epochMs, randomGapMs, isoIst, todayKeyIst, ZONE };
+export default { nowIst, currentHourIst, isWithinWindow, epochMs, randomGapMs, isoIst, todayKeyIst, formatIst, ZONE };

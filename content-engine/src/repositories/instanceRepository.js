@@ -119,6 +119,12 @@ export async function setPostStatus(id, postStatus) {
   await query('UPDATE instances SET post_status = $2, updated_at = now() WHERE id = $1', [id, postStatus]);
 }
 
+/** Delete an instance. A locked (posted) instance is never deleted. */
+export async function remove(id) {
+  const { rowCount } = await query('DELETE FROM instances WHERE id = $1 AND locked = false', [id]);
+  return rowCount > 0;
+}
+
 export default {
-  create, get, list, logRows, saveSteps, setStatus, setMeta, bumpRound, lockAsPosted, setPostStatus,
+  create, get, list, logRows, saveSteps, setStatus, setMeta, bumpRound, lockAsPosted, setPostStatus, remove,
 };

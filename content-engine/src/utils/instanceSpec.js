@@ -73,6 +73,11 @@ export function patchStep(steps, stepKey, patch = {}) {
   });
 }
 
+/** The first 8 chars of an instance id, for compact display. */
+export function shortId(id) {
+  return String(id || '').slice(0, 8);
+}
+
 /** mm:ss from seconds (for the posted-log length column). */
 export function formatDuration(seconds) {
   const n = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -89,5 +94,6 @@ export default {
   costBreakdown,
   addCostToSteps,
   patchStep,
+  shortId,
   formatDuration,
 };

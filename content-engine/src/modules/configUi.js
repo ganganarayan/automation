@@ -415,6 +415,7 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey
   <aside>
     <div class="brand">⚙️ automation</div>
     ${menu}
+    <a class="dash" href="instances">Instances →</a>
     <a class="dash" href="../dashboard${key ? `?key=${encodeURIComponent(key)}` : ''}">← Dashboard</a>
   </aside>
   <main>
