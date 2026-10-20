@@ -27,6 +27,10 @@ export function createGoogleDriveProvider(cfg, log) {
         log.warn('Drive not configured; upload skipped');
         return { id: null, thumbnailUrl: null, downloadUrl: null };
       },
+      async uploadMedia() {
+        log.warn('Drive not configured; upload skipped');
+        return { id: null, thumbnailUrl: null, downloadUrl: null };
+      },
       shareAnyone: noop,
       async listFiles() {
         return [];
@@ -45,15 +49,20 @@ export function createGoogleDriveProvider(cfg, log) {
   const drive = google.drive({ version: 'v3', auth });
 
   return {
-    async uploadPng(folderId, name, buffer) {
+    /** Upload any media buffer (mp3 / mp4 / png / …) and share it. */
+    async uploadMedia(folderId, name, mimeType, buffer) {
       const res = await drive.files.create({
         requestBody: { name, parents: folderId ? [folderId] : undefined },
-        media: { mimeType: 'image/png', body: Readable.from(buffer) },
+        media: { mimeType: mimeType || 'application/octet-stream', body: Readable.from(buffer) },
         fields: 'id',
       });
       const id = res.data.id;
       await this.shareAnyone(id);
       return { id, thumbnailUrl: thumbUrl(id), downloadUrl: dlUrl(id) };
+    },
+
+    async uploadPng(folderId, name, buffer) {
+      return this.uploadMedia(folderId, name, 'image/png', buffer);
     },
 
     async shareAnyone(fileId) {

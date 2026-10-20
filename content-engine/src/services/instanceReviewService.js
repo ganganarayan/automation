@@ -39,6 +39,19 @@ export const KIND = 'instance_review';
 
 const log = childLogger({ module: 'instanceReview' });
 
+/**
+ * Pipeline hooks the stage runner (slice 5) registers so review decisions drive
+ * generation, without this service importing the runner (one-way imports, no
+ * cycle). Each is optional; absent => the slice-4 fallback behaviour.
+ *   afterScriptApprove({ instanceId })  -> run the stages, then requestReview('final')
+ *   beforeFinalLock({ instanceId })     -> post to Post-for-Me, return postRefs[]
+ *   regenerate({ instanceId, checkpoint, correction }) -> regenerate + re-send
+ */
+let pipeline = {};
+export function setPipelineHooks(hooks) {
+  pipeline = hooks || {};
+}
+
 // ---- artifact extraction ---------------------------------------------------
 
 function stepArtifact(steps, key, field) {
@@ -129,17 +142,27 @@ export async function onApprove(approval) {
     await instanceService.updateStep(instanceId, 'script', { status: 'done' });
     await instanceRepo.setStatus(instanceId, 'running');
     log.info({ instance: instanceId, round: p.round }, 'script approved — instance running');
-    // SEAM (slice 5): run image -> animate -> voiceover -> transcript -> stitch
-    // (writing artifacts + real cost), then requestReview({ instanceId,
-    // checkpoint: 'final' }). No-op now: the instance waits at 'running'.
-    // TODO(slice5): instanceService.runStages(instanceId).then(() =>
-    //   requestReview({ instanceId, checkpoint: 'final' }));
+    // Slice 5 hook: run image -> animate -> voiceover -> transcript -> stitch
+    // (writing artifacts + real cost), then requestReview('final'). Absent =>
+    // the instance simply waits at 'running'.
+    if (pipeline.afterScriptApprove) {
+      Promise.resolve(pipeline.afterScriptApprove({ instanceId })).catch((e) =>
+        log.error({ err: e.message, instance: instanceId }, 'afterScriptApprove failed'),
+      );
+    }
   } else if (p.checkpoint === 'final') {
-    // SEAM (slice 5): dispatch the reel to Post-for-Me at scheduled_for and
-    // capture the post refs before locking. No-op now: lock with empty refs.
     const postedAt = p.scheduledFor ? new Date(p.scheduledFor) : new Date();
-    const ok = await instanceRepo.lockAsPosted(instanceId, { postRefs: [], postedAt });
-    log.info({ instance: instanceId, locked: ok, postedAt }, 'final approved — posted + locked');
+    try {
+      // Slice 5 hook: dispatch the reel to Post-for-Me (at scheduled_for) and
+      // return the post refs. Post happens BEFORE the lock. Absent => lock with
+      // empty refs (slice-4 behaviour).
+      const refs = pipeline.beforeFinalLock ? ((await pipeline.beforeFinalLock({ instanceId })) || []) : [];
+      const ok = await instanceRepo.lockAsPosted(instanceId, { postRefs: refs, postedAt });
+      log.info({ instance: instanceId, locked: ok, refs: refs.length, postedAt }, 'final approved — posted + locked');
+    } catch (err) {
+      await instanceRepo.setStatus(instanceId, 'failed', `post failed: ${err.message}`);
+      log.error({ err: err.message, instance: instanceId }, 'final post failed — not locked');
+    }
   }
 }
 
@@ -156,12 +179,18 @@ export async function onRework(approval, note) {
   const round = await instanceRepo.bumpRound(instanceId);
   log.info({ instance: instanceId, checkpoint: p.checkpoint, round, correction }, 'rework requested');
 
-  // SEAM (slice 5): regenerate using `correction` — the script (script reject) or
-  // the downstream stages (final reject) — THEN re-send. For now re-send the same
-  // checkpoint so the loop (same instance_id, new round) is exercised end to end.
-  await requestReview({ tenantId: approval.tenant_id, instanceId, checkpoint: p.checkpoint }).catch((err) =>
-    log.error({ err: err.message, instance: instanceId }, 'rework re-send failed'),
-  );
+  // Slice 5 hook: regenerate using `correction` — the script (script reject) or
+  // the downstream stages (final reject) — and re-send. Absent => just re-send the
+  // same checkpoint so the loop (same instance_id, new round) still works.
+  if (pipeline.regenerate) {
+    Promise.resolve(pipeline.regenerate({ instanceId, checkpoint: p.checkpoint, correction })).catch((err) =>
+      log.error({ err: err.message, instance: instanceId }, 'regenerate failed'),
+    );
+  } else {
+    await requestReview({ tenantId: approval.tenant_id, instanceId, checkpoint: p.checkpoint }).catch((err) =>
+      log.error({ err: err.message, instance: instanceId }, 'rework re-send failed'),
+    );
+  }
 }
 
 /** Register the instance_review approval kind (approve / rework / review page). */
@@ -266,4 +295,4 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export default { KIND, requestReview, onApprove, onRework, registerKind, renderReview };
+export default { KIND, requestReview, onApprove, onRework, registerKind, renderReview, setPipelineHooks };

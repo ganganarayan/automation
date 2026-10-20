@@ -14,6 +14,7 @@
  * now) and the seam slice 5's stage workers call once a script or reel exists.
  */
 import * as review from '../services/instanceReviewService.js';
+import * as stageRunner from '../services/stageRunnerService.js';
 import { requireAdminKey } from '../middleware/auth.js';
 
 export function register(ctx) {
@@ -22,6 +23,8 @@ export function register(ctx) {
   // Wire approve (advance / post+lock) + rework (correction, new round) + the
   // hosted review page (script text, or the reel via Drive /preview).
   review.registerKind();
+  // Slice 5: let review decisions drive generation (run stages / post / regen).
+  stageRunner.registerPipeline();
 
   router.post('/jobs/instance-review', requireAdminKey, async (req, res, next) => {
     try {

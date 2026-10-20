@@ -31,15 +31,29 @@ export function createLlmProvider(cfg, log) {
 
   return {
     async generateText({ system, user, model }) {
+      const { text } = await this.generateTextDetailed({ system, user, model });
+      return text;
+    },
+
+    /** Like generateText but also returns the real token usage (for cost). */
+    async generateTextDetailed({ system, user, model }) {
       const client = requireOpenai();
+      const usedModel = model || cfg.openai.textModel;
       const res = await client.chat.completions.create({
-        model: model || cfg.openai.textModel,
+        model: usedModel,
         messages: [
           ...(system ? [{ role: 'system', content: system }] : []),
           { role: 'user', content: user },
         ],
       });
-      return res.choices?.[0]?.message?.content?.trim() || '';
+      return {
+        text: res.choices?.[0]?.message?.content?.trim() || '',
+        model: usedModel,
+        usage: {
+          inputTokens: res.usage?.prompt_tokens || 0,
+          outputTokens: res.usage?.completion_tokens || 0,
+        },
+      };
     },
 
     async generateJson({ system, user, model, maxTokens = 4000 }) {

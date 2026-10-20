@@ -26,6 +26,7 @@
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
 import * as instanceService from '../services/instanceService.js';
+import * as stageRunner from '../services/stageRunnerService.js';
 import { decideFunnelRun } from '../utils/videoSchedule.js';
 import { nowIst, formatIst } from '../utils/time.js';
 import { requireAdminKey } from '../middleware/auth.js';
@@ -72,11 +73,12 @@ export async function runDueVideo({ windowMin = 15, now = nowIst(), log } = {}) 
         'run-due-video: instance created (script_review)',
       );
 
-      // SEAM (slice 4/5): the instance sits at script_review with empty steps.
-      // Slice 5 kicks off script generation HERE (writing artifacts + real cost
-      // into the instance); slice 4 sends the script-review checkpoint email.
-      // Intentionally a no-op for now — slice 3 is scheduling + creation only.
-      // TODO(slice4/5): instanceService.startScriptStep(instance) / enqueue worker.
+      // Slice 5: generate the script, then open the script-review checkpoint
+      // (slice 4). Async + self-contained — a failure marks the instance failed,
+      // never the whole run. The remaining stages run after script approval.
+      stageRunner.runScriptAndReview({ instanceId: instance.id }).catch((e) =>
+        log?.error({ err: e.message, instance: instance.id }, 'run-due-video: script+review failed'),
+      );
     } catch (err) {
       log?.error({ err: err.message, funnel: funnel.name }, 'run-due-video: funnel failed');
     }
