@@ -28,6 +28,7 @@
  */
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
 import { FLOW_MANIFEST, hasFlow } from '../services/flowManifest.js';
+import { WIZARD_STEPS, completeness } from '../services/videoWizardManifest.js';
 import * as configService from '../services/configService.js';
 import * as users from '../repositories/usersRepository.js';
 import * as funnels from '../repositories/funnelsRepository.js';
@@ -188,6 +189,50 @@ export function register(ctx) {
     }
   });
 
+  // --- Video setup wizard (step-by-step; replaces the flat funnel form) ---
+  router.get('/admin/funnels/:id/setup', async (req, res, next) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).type('html').send(gatePage('/api/v1/admin/settings'));
+      const id = Number(req.params.id);
+      const funnel = await funnels.get(id);
+      if (!funnel) return res.redirect('/api/v1/admin/settings#funnels');
+      const cfg = await funnels.getConfig(id).catch(() => ({}));
+      let stepIndex = Number(req.query.step);
+      if (!Number.isInteger(stepIndex) || stepIndex < 0 || stepIndex >= WIZARD_STEPS.length) stepIndex = 0;
+      res.type('html').send(wizardPage({ funnel, cfg, stepIndex, complete: completeness(cfg) }));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/admin/funnels/:id/setup/save', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const id = Number(req.params.id);
+      const funnel = await funnels.get(id);
+      if (!funnel) return res.status(404).json({ ok: false, error: 'funnel not found' });
+      const stepIndex = Number(req.body?.step);
+      const step = WIZARD_STEPS[stepIndex];
+      if (!step) return res.status(400).json({ ok: false, error: 'bad step' });
+      const set = req.body?.set || {};
+      for (const field of step.fields) {
+        if (!(field.key in set)) continue;
+        const val = String(set[field.key] ?? '');
+        if (field.type === 'secret') {
+          if (val.trim() !== '') await funnels.setConfig(id, field.key, val);
+        } else if (val.trim() === '') {
+          await funnels.delConfig(id, field.key);
+        } else {
+          await funnels.setConfig(id, field.key, val.trim());
+        }
+      }
+      const cfg = await funnels.getConfig(id).catch(() => ({}));
+      res.json({ ok: true, complete: completeness(cfg) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   // --- Users: inline auto-save (JSON) ---
   router.post('/admin/users/role', async (req, res, next) => {
     try {
@@ -311,6 +356,13 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey
  .planwrap{display:flex;gap:.5rem;align-items:center}
  .billing{background:#0d0d16;border:1px solid #24243a;border-radius:8px;padding:.5rem .7rem;margin:.3rem 0}
  a{color:#7aa2ff}
+ a.act{display:inline-flex;align-items:center;text-decoration:none}
+ .act.primary{background:#2d6cdf;color:#fff}
+ .act.danger{background:#5a1d1d;color:#fff}
+ .funnellist{display:flex;flex-direction:column;gap:.6rem}
+ .funnelrow{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;background:#15151f;border:1px solid #24243a;border-radius:10px;padding:.8rem 1rem}
+ .funnelrow-name{font-weight:600}
+ .funnelrow-meta{font-size:.8rem;color:#8a8aa2;margin-top:.15rem}
  /* flowchart view */
  .flow{margin:.5rem 0}
  .flowphase{margin:0}
@@ -506,23 +558,19 @@ function usersPanel({ userList, hasKey, tenantId, key }) {
 }
 
 function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
+  const total = WIZARD_STEPS.length;
   const cards = (funnelList || [])
     .map((f) => {
       const cfg = funnelConfigs[f.id] || {};
-      const fields = funnels.FUNNEL_FIELDS.map((field) => {
-        if (field.key === 'postforme_api_key') return funnelKeyRow(field, cfg, f.id);
-        if (field.key === 'postforme_accounts') return pfmAccountsRow(cfg, f.id);
-        if (field.key === 'account_map') return ''; // folded into the accounts picker above
-        return fieldRow(field, cfg);
-      }).join('');
-      return `<fieldset><legend>${esc(f.name)} ${f.active ? '' : '<span class="pill">paused</span>'}</legend>
-        <form method="post" action="/api/v1/admin/funnels/config">
-          <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
-          <input type="hidden" name="funnel_id" value="${f.id}">
-          ${fields}
-          <button class="save" type="submit">Save changes</button>
-        </form>
-        <div class="row" style="margin-top:.5rem">
+      const done = completeness(cfg).filter(Boolean).length;
+      const ready = done === total;
+      return `<div class="funnelrow">
+        <div class="funnelrow-main">
+          <div class="funnelrow-name">${esc(f.name)} ${f.active ? '' : '<span class="pill">paused</span>'}</div>
+          <div class="funnelrow-meta">${ready ? '🟢 ready' : `🟡 ${done}/${total} steps set`}</div>
+        </div>
+        <div class="row" style="gap:.4rem;margin:0">
+          <a class="act primary" href="/api/v1/admin/funnels/${f.id}/setup">Set up →</a>
           <form method="post" action="/api/v1/admin/funnels/active" style="display:inline">
             <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
             <input type="hidden" name="funnel_id" value="${f.id}"><input type="hidden" name="active" value="${f.active ? 'false' : 'true'}">
@@ -534,13 +582,13 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
             <button class="act danger" type="submit">Delete</button>
           </form>
         </div>
-      </fieldset>`;
+      </div>`;
     })
     .join('');
 
   return `<section class="panel card" id="panel-funnels">
     <h2>Funnels</h2>
-    <p class="blurb">A funnel is a brand/campaign scope with its own content sheet, social accounts, and schedule — one shared template. The daily poster runs once per active funnel. Add as many as you like. The generated image is posted as-is (handle any layout in your image prompt).</p>
+    <p class="blurb">A funnel is a brand/campaign scope with its own content source, social accounts, and schedule. Add one, then open its step-by-step setup — one screen per stage, with Back / Save / Next always in view.</p>
     <fieldset><legend>Add a funnel</legend>
       <form method="post" action="/api/v1/admin/funnels" class="row">
         <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
@@ -548,8 +596,130 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
         <button class="act" type="submit">+ Add funnel</button>
       </form>
     </fieldset>
-    ${cards || '<p class="hint">No funnels yet — add one above.</p>'}
+    <div class="funnellist">${cards || '<p class="hint">No funnels yet — add one above.</p>'}</div>
   </section>`;
+}
+
+// ---- video setup wizard (full-page, one step per screen) -------------------
+
+function wizardPage({ funnel, cfg, stepIndex, complete }) {
+  const total = WIZARD_STEPS.length;
+  const step = WIZARD_STEPS[stepIndex];
+  const base = `/api/v1/admin/funnels/${funnel.id}/setup`;
+  const pct = Math.round(((stepIndex + 1) / total) * 100);
+
+  const rail = WIZARD_STEPS
+    .map((s, i) => {
+      const state = i === stepIndex ? 'current' : complete[i] ? 'done' : 'todo';
+      const marker = complete[i] && i !== stepIndex ? '✓' : String(i + 1);
+      return `<button type="button" class="wnav ${state}" data-step="${i}" onclick="nav(${i})">
+        <span class="wmark">${marker}</span><span class="wlabel">${esc(s.title)}</span></button>`;
+    })
+    .join('');
+
+  const fieldsHtml = step.fields
+    .map((field) => {
+      if (field.key === 'postforme_api_key') return funnelKeyRow(field, cfg, funnel.id);
+      if (field.key === 'postforme_accounts') return pfmAccountsRow(cfg, funnel.id);
+      if (field.key === 'account_map') return '';
+      return fieldRow(field, cfg);
+    })
+    .join('');
+
+  const isFirst = stepIndex === 0;
+  const isLast = stepIndex === total - 1;
+
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(funnel.name)} — video setup</title>
+<style>
+ :root{color-scheme:dark}*{box-sizing:border-box}
+ body{font-family:system-ui;margin:0;background:#0b0b12;color:#e8e8ef}
+ select,input,textarea{background:#0b0b12;color:#fff;border:1px solid #333;border-radius:8px;padding:.55rem;width:100%}
+ textarea{min-height:5rem;font-size:.9rem}
+ .shell{max-width:980px;margin:1.3rem auto;background:#12121b;border:1px solid #24243a;border-radius:14px;overflow:hidden}
+ .top{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.3rem;border-bottom:1px solid #24243a}
+ .top .brand{font-size:1.05rem;font-weight:700}
+ .top .sub{font-size:.8rem;color:#8a8aa2;margin-top:.1rem}
+ .stepno{text-align:right}.stepno .k{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#8a8aa2}
+ .stepno .v{font-size:1.1rem;font-weight:700}.stepno .v small{color:#6f6f88;font-weight:400}
+ .bar{height:3px;background:#1c1c2a}.bar>i{display:block;height:3px;background:#2d6cdf;width:${pct}%}
+ .body{display:grid;grid-template-columns:230px 1fr;min-height:360px}
+ .rail{border-right:1px solid #24243a;padding:.8rem .6rem;display:flex;flex-direction:column;gap:.15rem}
+ .wnav{display:flex;align-items:center;gap:.6rem;text-align:left;background:none;border:0;color:#9a9ab0;padding:.5rem .6rem;border-radius:8px;cursor:pointer;font-size:.86rem}
+ .wnav:hover{background:#1c1c2a}
+ .wnav .wmark{flex:0 0 22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:.72rem;border:1px solid #2a2a44;color:#8a8aa2}
+ .wnav.current{background:#15224a;color:#fff}.wnav.current .wmark{background:#2d6cdf;border-color:#2d6cdf;color:#fff}
+ .wnav.done{color:#c7c7d9}.wnav.done .wmark{background:#0a7d32;border-color:#0a7d32;color:#fff}
+ .main{padding:1.4rem 1.6rem}
+ .main h1{font-size:1.25rem;margin:0 0 .25rem;font-weight:600}
+ .main .desc{color:#9a9ab0;font-size:.88rem;margin:0 0 1.3rem;line-height:1.55}
+ .field{margin:0 0 1rem}.field label{display:block;margin:0 0 .3rem;font-size:.82rem;color:#c7c7d9}
+ .hint{color:#6f6f88;font-size:.78rem;margin:.25rem 0 0}
+ .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+ .daychips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.2rem}
+ .daychip{display:inline-flex;align-items:center;gap:.3rem;background:#15151f;border:1px solid #2a2a44;border-radius:999px;padding:.3rem .7rem;font-size:.85rem;cursor:pointer}
+ .daychip input{width:auto;margin:0}
+ input[type=time]{width:auto;min-width:130px}
+ .acctlist{display:flex;flex-direction:column;gap:.3rem;margin:.4rem 0;max-height:260px;overflow:auto}
+ .acct{display:flex;align-items:center;gap:.5rem;background:#15151f;border:1px solid #24243a;border-radius:8px;padding:.4rem .7rem;font-size:.85rem;cursor:pointer}
+ .acct input{width:auto;margin:0}.acct b{color:#c7c7d9;text-transform:capitalize}
+ .act{background:#2a2a44;color:#fff;border:0;border-radius:8px;padding:.5rem .9rem;cursor:pointer;font-size:.86rem;text-decoration:none;display:inline-flex;align-items:center;gap:.3rem}
+ .foot{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.9rem 1.3rem;border-top:1px solid #24243a;background:#12121b}
+ .foot .right{display:flex;gap:.6rem}
+ .btn{border:0;border-radius:9px;padding:.6rem 1.2rem;font-size:.92rem;cursor:pointer}
+ .btn.back{background:#1c1c2a;color:#c7c7d9}.btn.back[disabled]{opacity:.4;cursor:not-allowed}
+ .btn.save{background:#2a2a44;color:#fff}.btn.next{background:#2d6cdf;color:#fff}
+ .toast{position:static;margin-top:.8rem;font-size:.82rem;min-height:1rem}
+ a.back-link{color:#7aa2ff;font-size:.82rem;text-decoration:none;display:inline-block;margin:1rem auto 2rem;text-align:center;width:100%}
+</style>
+<div class="shell">
+  <div class="top">
+    <div><div class="brand">${esc(funnel.name)}</div><div class="sub">video setup${funnel.active ? '' : ' · paused'}</div></div>
+    <div class="stepno"><div class="k">Step</div><div class="v">${stepIndex + 1} <small>/ ${total}</small></div></div>
+  </div>
+  <div class="bar"><i></i></div>
+  <div class="body">
+    <nav class="rail">${rail}</nav>
+    <div class="main">
+      <h1>${esc(step.title)}</h1>
+      <p class="desc">${esc(step.desc)}</p>
+      <form id="wform" onsubmit="return false">${fieldsHtml}</form>
+      <div id="toast" class="toast"></div>
+    </div>
+  </div>
+  <div class="foot">
+    <button class="btn back" ${isFirst ? 'disabled' : ''} onclick="nav(${stepIndex - 1})">← Back</button>
+    <div class="right">
+      <button class="btn save" onclick="save()">Save</button>
+      <button class="btn next" onclick="${isLast ? 'finish()' : `nav(${stepIndex + 1})`}">${isLast ? 'Finish' : 'Save & Next →'}</button>
+    </div>
+  </div>
+</div>
+<a class="back-link" href="/api/v1/admin/settings#funnels">← All funnels</a>
+<script>
+ const BASE=${JSON.stringify(base)};
+ const SAVE_URL=BASE+'/save';
+ const ACCOUNTS_URL='/api/v1/admin/funnels/fetch-accounts';
+ const STEP=${stepIndex}, TOTAL=${total}, FID=${funnel.id};
+ function esc2(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+ function toast(msg,err){const t=document.getElementById('toast');t.textContent=msg;t.style.color=err?'#ff9a9a':'#5bd08a';if(!err)setTimeout(()=>{if(t.textContent===msg)t.textContent='';},1500);}
+ function collectSet(){const set={};document.querySelectorAll('#wform [name^="set["]').forEach(el=>{const m=el.name.match(/^set\\[(.+)\\]$/);if(m)set[m[1]]=el.value;});return set;}
+ function updateTicks(complete){if(!complete)return;document.querySelectorAll('.wnav').forEach(n=>{const i=Number(n.dataset.step);if(i===STEP)return;const mk=n.querySelector('.wmark');n.classList.toggle('done',!!complete[i]);n.classList.toggle('todo',!complete[i]);mk.textContent=complete[i]?'✓':String(i+1);});}
+ async function save(){
+   try{
+     const r=await fetch(SAVE_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({step:STEP,set:collectSet()})});
+     const j=await r.json().catch(()=>({}));
+     if(!r.ok||!j.ok){toast('Save failed'+(j.error?': '+j.error:''),true);return false;}
+     updateTicks(j.complete);toast('Saved');return true;
+   }catch(e){toast('Save failed: '+e.message,true);return false;}
+ }
+ async function nav(i){if(i<0||i>=TOTAL||i===STEP)return;const ok=await save();if(ok!==false)location.href=BASE+'?step='+i;}
+ async function finish(){const ok=await save();if(ok!==false)location.href='/api/v1/admin/settings#funnels';}
+ function syncDays(gid){const boxes=document.querySelectorAll('[data-daygroup="'+gid+'"]');const vals=[];boxes.forEach(b=>{if(b.checked)vals.push(b.value);});const h=document.getElementById(gid);if(h)h.value=vals.join(',');}
+ function syncPfm(fid){const boxes=document.querySelectorAll('[data-pfm="'+fid+'"]');const ids=[];const map={};boxes.forEach(b=>{if(b.checked){ids.push(b.value);map[b.value]={platform:b.dataset.plat||'',account_name:b.dataset.name||''};}});const a=document.getElementById('pfmaccts-'+fid);if(a)a.value=JSON.stringify(ids);const m=document.getElementById('pfmmap-'+fid);if(m)m.value=JSON.stringify(map);}
+ function renderPfm(fid,accounts){const box=document.getElementById('pfmlist-'+fid);let selected=[];try{selected=JSON.parse(document.getElementById('pfmaccts-'+fid).value||'[]');}catch(_){}if(!accounts.length){box.innerHTML='<span class="hint">No connected accounts found for that key.</span>';return;}box.innerHTML=accounts.map(function(x){const ck=selected.indexOf(x.id)>=0?'checked':'';return '<label class="acct"><input type="checkbox" value="'+esc2(x.id)+'" data-pfm="'+fid+'" data-plat="'+esc2(x.platform)+'" data-name="'+esc2(x.name)+'" onchange="syncPfm('+fid+')" '+ck+'> <b>'+esc2(x.platform)+'</b> — '+esc2(x.name)+'</label>';}).join('');syncPfm(fid);}
+ async function fetchPfm(fid){const st=document.getElementById('pfmstatus-'+fid);const keyEl=document.getElementById('pfmkey-'+fid);const api_key=keyEl?keyEl.value.trim():'';st.textContent='Fetching…';st.style.color='';try{const r=await fetch(ACCOUNTS_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({funnel_id:fid,api_key})});const j=await r.json();if(!j.ok){st.textContent='✗ '+(j.error||'failed');st.style.color='#ff9a9a';return;}renderPfm(fid,j.accounts||[]);st.textContent='✓ '+(j.accounts||[]).length+' accounts — tick to include, then Save';st.style.color='#5bd08a';}catch(e){st.textContent='✗ '+(e.message||'failed');st.style.color='#ff9a9a';}}
+</script>`;
 }
 
 function flowSection(app, tenantId, configMap, key) {
