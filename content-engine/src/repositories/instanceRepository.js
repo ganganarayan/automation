@@ -125,6 +125,29 @@ export async function remove(id) {
   return rowCount > 0;
 }
 
+/**
+ * Idempotency guard for scheduled runs: is there already a LIVE instance for this
+ * funnel whose scheduled_for falls on the given IST date (yyyy-MM-dd)? "Live"
+ * excludes only the dead-ends (failed / superseded) — a posted instance counts,
+ * since a post already exists for that date and must not be created twice.
+ * scheduled_for is a timestamptz; AT TIME ZONE converts it to the IST wall-clock
+ * date before comparison.
+ */
+export async function existsForFunnelOnDate(funnelId, dateKey, tenantId = 'default') {
+  if (!funnelId || !dateKey) return false;
+  const { rows } = await query(
+    `SELECT 1 FROM instances
+       WHERE tenant_id = $1 AND funnel_id = $2
+         AND status NOT IN ('failed', 'superseded')
+         AND scheduled_for IS NOT NULL
+         AND (scheduled_for AT TIME ZONE 'Asia/Kolkata')::date = $3::date
+       LIMIT 1`,
+    [tenantId, funnelId, dateKey],
+  );
+  return rows.length > 0;
+}
+
 export default {
   create, get, list, logRows, saveSteps, setStatus, setMeta, bumpRound, lockAsPosted, setPostStatus, remove,
+  existsForFunnelOnDate,
 };

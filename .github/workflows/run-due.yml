@@ -1,37 +1,53 @@
 name: Wake content-engine and run due funnels
 
 # Free external scheduler (GitHub Actions runs on UTC). It pings the
-# content-engine /run-due endpoint ~before the daily posting window, so the
+# content-engine run-due endpoints ~just before the daily generate window, so the
 # Railway service can sleep the rest of the day (SCHEDULER_MODE=external).
 #
-# Set two repo secrets (Settings → Secrets and variables → Actions):
-#   CONTENT_ENGINE_URL  e.g. https://content-engine-production-230f.up.railway.app
-#   RUN_DUE_KEY         the content-engine ADMIN_KEY
+# Two waker endpoints (each admin-guarded, idempotent, 202 + async):
+#   /api/v1/jobs/run-due        -> legacy image poster (funnel-posters module)
+#   /api/v1/jobs/run-due-video  -> video pipeline (creates one instance per due
+#                                  funnel at script_review, scheduled for its
+#                                  next publish time). Slice 3 of the video build.
 #
-# A generous window means the ping can be early/late and still catch every
-# evening funnel; each post is generated once and Post for Me publishes it at
-# the funnel's own scheduled time.
+# Set two repo secrets (Settings -> Secrets and variables -> Actions):
+#   CONTENT_ENGINE_URL  e.g. https://automation-staging.up.railway.app   (no trailing slash)
+#   RUN_DUE_KEY         the content-engine ADMIN_KEY (sent as the X-Admin-Key header)
+#
+# A generous ?window means the ping can be early/late and still catch every
+# funnel due around that time; each funnel is generated once per target post date
+# (the endpoints de-dupe), and the video instance targets TOMORROW's publish time
+# when generated the evening before.
 
 on:
-  # SCHEDULE DISABLED (user request, 2026-09-09): the daily cron is commented
-  # out so this workflow no longer wakes the app or triggers posting/emails.
-  # Re-enable by uncommenting the `schedule:` block below. The workflow can
-  # still be run by hand from the Actions tab via workflow_dispatch.
+  # SCHEDULE DISABLED (user request, 2026-09-09): the daily cron stays commented
+  # out so this workflow does not wake the app or trigger posting/emails on its
+  # own. Re-enable by uncommenting the `schedule:` block below; the workflow can
+  # still be run by hand from the Actions tab via workflow_dispatch meanwhile.
   #
   # schedule:
   #   # Fire ~10 min before each funnel's generate time (GitHub Actions cron is
-  #   # UTC). The endpoint runs only funnels due within ±15 min, then the app
-  #   # sleeps again. Add/adjust a line per distinct schedule.
-  #   - cron: '20 16 * * *'      # 21:50 IST daily  → Gita/VidaPulse (22:00)
-  #   - cron: '50 15 * * 1,2,3'  # 21:20 IST Mon-Wed → Corporate (21:30)
-  #   - cron: '50 2 * * *'       # 08:20 IST daily   → a morning funnel (08:30)
+  #   # UTC). The endpoints run only funnels due within ±window min, then the app
+  #   # sleeps again. Add/adjust a line per distinct generate time. Example:
+  #   - cron: '20 16 * * *'      # 21:50 IST daily    -> funnels generating 22:00
+  #   - cron: '50 15 * * 1,2,3'  # 21:20 IST Mon-Wed  -> funnels generating 21:30
   workflow_dispatch: {}        # lets you run it manually from the Actions tab
 
 jobs:
   run-due:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger run-due
+      # Video pipeline: wake + create instances for funnels due now.
+      - name: Trigger run-due-video
+        run: |
+          curl -fsS -X POST \
+            "${{ secrets.CONTENT_ENGINE_URL }}/api/v1/jobs/run-due-video?window=15" \
+            -H "X-Admin-Key: ${{ secrets.RUN_DUE_KEY }}" \
+            -w '\nHTTP %{http_code}\n'
+
+      # Legacy image poster (kept until the video pipeline fully replaces it).
+      # Remove this step once a funnel should only produce video, not image posts.
+      - name: Trigger run-due (legacy image poster)
         run: |
           curl -fsS -X POST \
             "${{ secrets.CONTENT_ENGINE_URL }}/api/v1/jobs/run-due?window=15" \
