@@ -18,12 +18,22 @@ import * as approvals from '../repositories/approvalRepository.js';
 import { settings } from '../settings/index.js';
 import { childLogger } from '../core/logger.js';
 
-const handlers = new Map(); // kind -> { onApprove(approval), onRework(approval, note) }
+const handlers = new Map(); // kind -> { onApprove(approval, body), onRework(approval, note, body), renderReview? }
 const log = childLogger({ module: 'approvals' });
 
-/** Register approve/rework handlers for a content kind. */
-export function onKind(kind, { onApprove, onRework }) {
-  handlers.set(kind, { onApprove, onRework });
+/**
+ * Register handlers for a content kind.
+ * @param {string} kind
+ * @param {object} h
+ * @param {(approval:object, body:object)=>any} [h.onApprove]
+ * @param {(approval:object, note:string, body:object)=>any} [h.onRework]
+ * @param {(approval:object, token:string)=>string} [h.renderReview] - custom
+ *        review page HTML (e.g. a multi-image keep/regenerate grid). When set,
+ *        the kind manages its own body validation (the generic note requirement
+ *        is skipped) and the submitted body reaches the handlers.
+ */
+export function onKind(kind, { onApprove, onRework, renderReview } = {}) {
+  handlers.set(kind, { onApprove, onRework, renderReview });
 }
 
 function sign(id) {
@@ -68,7 +78,11 @@ export function register(router) {
       if (approval.status === 'published' || approval.status === 'approved') {
         return res.type('html').send(page('Already handled', `This item is already ${approval.status}.`));
       }
-      res.type('html').send(reviewPage(req.params.token, approval));
+      const handler = handlers.get(approval.kind);
+      const html = handler?.renderReview
+        ? handler.renderReview(approval, req.params.token)
+        : reviewPage(req.params.token, approval);
+      res.type('html').send(html);
     } catch (err) {
       next(err);
     }
@@ -90,14 +104,18 @@ export function register(router) {
       if (decision === 'approve') {
         await approvals.setStatus(id, 'approved');
         res.type('html').send(page('Approved', 'Publishing now. You can close this tab.'));
-        Promise.resolve(handler?.onApprove?.(approval)).catch((e) =>
+        Promise.resolve(handler?.onApprove?.(approval, req.body)).catch((e) =>
           log.error({ err: e.message, id }, 'approve handler failed'),
         );
       } else if (decision === 'rework') {
-        if (!note.trim()) return res.status(400).type('html').send(page('Note required', 'Please describe what to change.'));
+        // Custom-kind handlers (with their own review page) validate their own
+        // body; the generic note requirement applies only to the default flow.
+        if (!note.trim() && !handler?.renderReview) {
+          return res.status(400).type('html').send(page('Note required', 'Please describe what to change.'));
+        }
         await approvals.reopenForRework(id, note);
         res.type('html').send(page('Rework requested', 'Regenerating and re-sending for approval.'));
-        Promise.resolve(handler?.onRework?.(approval, note)).catch((e) =>
+        Promise.resolve(handler?.onRework?.(approval, note, req.body)).catch((e) =>
           log.error({ err: e.message, id }, 'rework handler failed'),
         );
       } else {

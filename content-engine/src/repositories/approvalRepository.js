@@ -35,6 +35,11 @@ export async function consumeToken(id) {
   return rows[0] || null;
 }
 
+/** Replace the stored payload (e.g. to record the kept image selection). */
+export async function setPayload(id, payload) {
+  await query('UPDATE approvals SET payload = $2, updated_at = now() WHERE id = $1', [id, payload]);
+}
+
 export async function setStatus(id, status, note) {
   await query(
     `UPDATE approvals SET status = $2, note = COALESCE($3, note), updated_at = now() WHERE id = $1`,
@@ -62,4 +67,4 @@ export async function recent({ tenantId, limit = 50 }) {
   return rows;
 }
 
-export default { create, findById, consumeToken, setStatus, reopenForRework, recent };
+export default { create, findById, consumeToken, setPayload, setStatus, reopenForRework, recent };

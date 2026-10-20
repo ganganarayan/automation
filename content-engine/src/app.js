@@ -25,6 +25,7 @@ import * as funnelPosters from './modules/funnelPosters.js';
 import * as vidapulseRefill from './modules/vidapulseRefill.js';
 import * as delivery from './modules/delivery.js';
 import * as videoPipeline from './modules/videoPipeline.js';
+import * as imageGate from './modules/imageGate.js';
 import * as imageFactory from './modules/imageFactory.js';
 import * as dashboard from './modules/dashboard.js';
 import * as configUi from './modules/configUi.js';
@@ -77,6 +78,7 @@ export function createApp() {
     .add({ name: 'vidapulse-refill', enabled: settings.modules.vidapulseRefill, register: vidapulseRefill.register })
     .add({ name: 'delivery', enabled: settings.modules.delivery, register: delivery.register })
     .add({ name: 'video-pipeline', enabled: settings.modules.videoPipeline, register: videoPipeline.register })
+    .add({ name: 'image-gate', enabled: true, register: imageGate.register })
     .add({ name: 'image-factory', enabled: settings.modules.imageFactory, register: imageFactory.register })
     .add({ name: 'dashboard', enabled: settings.modules.dashboard, register: dashboard.register })
     .add({ name: 'config-ui', enabled: settings.modules.admin, register: configUi.register })

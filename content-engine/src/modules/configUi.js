@@ -29,6 +29,7 @@
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
 import { FLOW_MANIFEST, hasFlow } from '../services/flowManifest.js';
 import { WIZARD_STEPS, completeness } from '../services/videoWizardManifest.js';
+import * as imageGateService from '../services/imageGateService.js';
 import * as configService from '../services/configService.js';
 import * as users from '../repositories/usersRepository.js';
 import * as funnels from '../repositories/funnelsRepository.js';
@@ -228,6 +229,27 @@ export function register(ctx) {
       }
       const cfg = await funnels.getConfig(id).catch(() => ({}));
       res.json({ ok: true, complete: completeness(cfg) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Generate a small test batch of stills for a funnel and email the review.
+  router.post('/admin/funnels/:id/image-gate/test', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const id = Number(req.params.id);
+      try {
+        await imageGateService.precheck({ tenantId: req.tenantId, funnelId: id });
+      } catch (e) {
+        return res.json({ ok: false, error: e.message });
+      }
+      const topic = (req.body?.topic || '').toString();
+      const count = Number(req.body?.count) || 2;
+      imageGateService
+        .generateForFunnel({ tenantId: req.tenantId, funnelId: id, topic, count })
+        .catch((e) => log.error({ err: e.message, funnel: id }, 'image gate test failed'));
+      res.json({ ok: true, message: 'Generating — you’ll get a review email shortly.' });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -602,6 +624,21 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
 
 // ---- video setup wizard (full-page, one step per screen) -------------------
 
+// Step 3 only: generate a couple of real stills now and email them for the
+// keep/regenerate review, so the whole gate is testable before the worker.
+function imageGateTestBlock() {
+  return `<div class="igt">
+    <div class="igt-title">Test batch</div>
+    <p class="hint">Generate a couple of real stills now and email them for the keep / regenerate review. Uses your OpenAI key and this funnel's Drive folder.</p>
+    <div class="row">
+      <input id="igt-topic" placeholder="test topic (optional)" style="flex:1;min-width:200px">
+      <input id="igt-count" type="number" min="1" max="6" value="2" style="width:72px" title="how many">
+      <button type="button" class="act" onclick="imageGateTest()">Generate test batch</button>
+      <span id="igt-status" class="hint"></span>
+    </div>
+  </div>`;
+}
+
 function wizardPage({ funnel, cfg, stepIndex, complete }) {
   const total = WIZARD_STEPS.length;
   const step = WIZARD_STEPS[stepIndex];
@@ -655,6 +692,9 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
  .main .desc{color:#9a9ab0;font-size:.88rem;margin:0 0 1.3rem;line-height:1.55}
  .field{margin:0 0 1rem}.field label{display:block;margin:0 0 .3rem;font-size:.82rem;color:#c7c7d9}
  .hint{color:#6f6f88;font-size:.78rem;margin:.25rem 0 0}
+ .igt{margin-top:1.3rem;border-top:1px solid #24243a;padding-top:1rem}
+ .igt-title{font-size:.9rem;color:#c7c7d9;margin-bottom:.2rem}
+ .igt input{width:auto}
  .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
  .daychips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.2rem}
  .daychip{display:inline-flex;align-items:center;gap:.3rem;background:#15151f;border:1px solid #2a2a44;border-radius:999px;padding:.3rem .7rem;font-size:.85rem;cursor:pointer}
@@ -684,6 +724,7 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
       <h1>${esc(step.title)}</h1>
       <p class="desc">${esc(step.desc)}</p>
       <form id="wform" onsubmit="return false">${fieldsHtml}</form>
+      ${step.id === 'images' ? imageGateTestBlock() : ''}
       <div id="toast" class="toast"></div>
     </div>
   </div>
@@ -701,7 +742,20 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
  const SAVE_URL=BASE+'/save';
  const ACCOUNTS_URL='/api/v1/admin/funnels/fetch-accounts';
  const STEP=${stepIndex}, TOTAL=${total}, FID=${funnel.id};
+ const FUNNEL_BASE='/api/v1/admin/funnels/'+FID;
  function esc2(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+ async function imageGateTest(){
+   const st=document.getElementById('igt-status');
+   const topic=(document.getElementById('igt-topic')||{}).value||'';
+   const count=(document.getElementById('igt-count')||{}).value||'2';
+   st.textContent='Starting…';st.style.color='';
+   try{
+     const r=await fetch(FUNNEL_BASE+'/image-gate/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic,count})});
+     const j=await r.json();
+     st.textContent=j.ok?('✓ '+(j.message||'started')):('✗ '+(j.error||'failed'));
+     st.style.color=j.ok?'#5bd08a':'#ff9a9a';
+   }catch(e){st.textContent='✗ '+(e.message||'failed');st.style.color='#ff9a9a';}
+ }
  function toast(msg,err){const t=document.getElementById('toast');t.textContent=msg;t.style.color=err?'#ff9a9a':'#5bd08a';if(!err)setTimeout(()=>{if(t.textContent===msg)t.textContent='';},1500);}
  function collectSet(){const set={};document.querySelectorAll('#wform [name^="set["]').forEach(el=>{const m=el.name.match(/^set\\[(.+)\\]$/);if(m)set[m[1]]=el.value;});return set;}
  function updateTicks(complete){if(!complete)return;document.querySelectorAll('.wnav').forEach(n=>{const i=Number(n.dataset.step);if(i===STEP)return;const mk=n.querySelector('.wmark');n.classList.toggle('done',!!complete[i]);n.classList.toggle('todo',!complete[i]);mk.textContent=complete[i]?'✓':String(i+1);});}
