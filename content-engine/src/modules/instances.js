@@ -16,8 +16,12 @@
  */
 import * as instances from '../services/instanceService.js';
 import * as review from '../services/instanceReviewService.js';
+import * as readyPost from '../services/readyPostService.js';
+import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import { INSTANCE_STEPS, sumInstanceCost, costBreakdown, shortId, formatDuration } from '../utils/instanceSpec.js';
 import { formatIst } from '../utils/time.js';
+import { defaultSlotsIso, defaultCaption } from '../utils/readyPostSpec.js';
+import { driveThumbUrl } from '../utils/reviewSpec.js';
 import { keyOk } from '../services/accessService.js';
 
 export function register(ctx) {
@@ -36,6 +40,36 @@ export function register(ctx) {
       res.type('html').send(listPage(rows, status));
     } catch (err) {
       next(err);
+    }
+  });
+
+  // Ready-video direct post: pick uploaded, unposted videos from the funnel's
+  // Drive folder and post them via Post-for-Me, bypassing the whole pipeline.
+  // Registered before '/admin/instances/:id' so "ready" isn't read as an id.
+  router.get('/admin/instances/ready', async (req, res, next) => {
+    try {
+      if (!(await guardHtml(req, res))) return;
+      const funnelId = req.query.funnel ? String(req.query.funnel) : '';
+      const list = await funnelsRepo.listByTenant(req.tenantId);
+      if (!funnelId) return res.type('html').send(readyChooserPage(list));
+      const { funnel, resolved, videos } = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId });
+      const prefills = defaultSlotsIso(resolved.publishTime, videos.length).map((iso) => formatIst(iso));
+      res.type('html').send(readyPickerPage({ funnel, resolved, videos, prefills }));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/admin/instances/ready/post', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const funnelId = req.body?.funnelId;
+      const selections = Array.isArray(req.body?.selections) ? req.body.selections : [];
+      if (!funnelId) return res.status(400).json({ ok: false, error: 'funnelId required' });
+      const out = await readyPost.postSelections({ tenantId: req.tenantId, funnelId, selections });
+      res.json({ ok: true, ...out });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
     }
   });
 
@@ -156,6 +190,7 @@ function listPage(rows, status) {
       <h1>Instances</h1>
       <div class="toprow">
         <div class="tabs">${tabs}</div>
+        <a class="act primary" href="/api/v1/admin/instances/ready">📤 Post ready videos</a>
         <button class="act" onclick="sample()">+ Sample</button>
         <a class="act" href="/api/v1/admin/settings#funnels">← Settings</a>
       </div>
@@ -250,6 +285,80 @@ function btn(call, kind = '') {
   return `<button class="act ${kind}" onclick="${call}">▶ Preview</button>`;
 }
 
+// Ready-video: funnel chooser when none is in the query.
+function readyChooserPage(funnels) {
+  const items = (funnels || [])
+    .map((f) => `<a class="act" href="/api/v1/admin/instances/ready?funnel=${encodeURIComponent(f.id)}">${esc(f.name)}</a>`)
+    .join(' ');
+  return shell('Post ready videos', `
+    <div class="top">
+      <h1>Post ready videos</h1>
+      <div class="toprow"><a class="act" href="/api/v1/admin/instances">← All instances</a></div>
+    </div>
+    <p class="ro">Pick a funnel whose Drive folder holds the uploaded videos to post.</p>
+    <div class="row">${items || '<span class="hint">No funnels yet.</span>'}</div>
+  `, '');
+}
+
+// Ready-video: tick-select unposted Drive videos, caption + schedule each, post
+// in selection order via Post-for-Me (no generation, no review email).
+function readyPickerPage({ funnel, resolved, videos, prefills }) {
+  const defCap = defaultCaption(resolved);
+  const cards = (videos || [])
+    .map((v, i) => `<div class="card">
+      <div class="tile" onclick="openVideo('${esc(v.id)}')"><img src="${esc(driveThumbUrl(v.id, 'w400'))}" loading="lazy"><span class="playov">▶</span></div>
+      <label class="pick"><input type="checkbox" id="cb-${esc(v.id)}" onchange="toggle('${esc(v.id)}')"> <span class="ord" id="ord-${esc(v.id)}" data-id="${esc(v.id)}"></span> ${esc(v.name)}</label>
+      <input type="hidden" id="nm-${esc(v.id)}" value="${esc(v.name)}">
+      <div class="det" id="det-${esc(v.id)}">
+        <label class="fl">Caption<textarea id="cap-${esc(v.id)}" rows="3">${esc(defCap)}</textarea></label>
+        <label class="fl">Schedule (IST DD-MM-YYYY HH:MM)<input id="sch-${esc(v.id)}" value="${esc(prefills[i] || '')}"></label>
+      </div>
+    </div>`)
+    .join('');
+
+  return shell(`Post ready videos — ${shortId(String(funnel.id))}`, `
+    <div class="top">
+      <div>
+        <h1>Post ready videos — ${esc(funnel.name)}</h1>
+        <div class="sub">Uploaded, not-yet-posted videos in this funnel's Drive folder. Tick to select — they post in the order you tick, directly via Post for Me.</div>
+      </div>
+      <div class="toprow">
+        <a class="act" href="/api/v1/admin/instances/ready">↺ Change funnel</a>
+        <a class="act" href="/api/v1/admin/instances">← All instances</a>
+      </div>
+    </div>
+    ${!resolved.driveFolder ? '<p class="ro">⚠ This funnel has no Drive folder set.</p>' : ''}
+    <div class="grid">${cards || '<p class="hint">No unposted videos found in the Drive folder.</p>'}</div>
+    <div class="bar">
+      <button class="approve" onclick="postSel()">Post selected</button>
+      <span id="rmsg" class="hint"></span>
+    </div>
+    ${previewModal()}
+  `, `
+    const FUNNEL_ID = ${JSON.stringify(String(funnel.id))};
+    const order = [];
+    function msg(t){ const m=document.getElementById('rmsg'); if(m) m.textContent=t; }
+    function renumber(){ order.forEach((id,i)=>{ const b=document.getElementById('ord-'+id); if(b) b.textContent='#'+(i+1); }); document.querySelectorAll('.ord').forEach(b=>{ if(order.indexOf(b.dataset.id)<0) b.textContent=''; }); }
+    function toggle(id){
+      const cb=document.getElementById('cb-'+id), det=document.getElementById('det-'+id);
+      if(cb.checked){ if(order.indexOf(id)<0) order.push(id); det.classList.add('on'); }
+      else { const k=order.indexOf(id); if(k>=0) order.splice(k,1); det.classList.remove('on'); }
+      renumber();
+    }
+    async function postSel(){
+      if(!order.length){ msg('Tick at least one video.'); return; }
+      const selections = order.map(id=>({ driveId:id, name:document.getElementById('nm-'+id).value, caption:document.getElementById('cap-'+id).value, scheduledAt:document.getElementById('sch-'+id).value }));
+      msg('Posting '+selections.length+'…');
+      try{
+        const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections })});
+        const j=await r.json();
+        if(j.ok){ msg('Posted '+j.posted+(j.failed?(', '+j.failed+' failed'):'')+'. Opening the log…'); setTimeout(()=>location.href='/api/v1/admin/instances',1300); }
+        else msg('Failed: '+(j.error||''));
+      }catch(e){ msg('Failed: '+e.message); }
+    }
+  `);
+}
+
 function statusWord(s) {
   return { pending: 'pending', running: 'running', done: 'done', failed: 'failed', skipped: 'skipped' }[s] || s;
 }
@@ -330,6 +439,16 @@ function shell(title, inner, script) {
  .tile{position:relative;border:1px solid #24243a;border-radius:8px;overflow:hidden;cursor:pointer;aspect-ratio:2/3;background:#0b0b12}
  .tile img{width:100%;height:100%;object-fit:cover;display:block}
  .playov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#fff;background:rgba(0,0,0,.25)}
+ .card{border:1px solid #24243a;border-radius:10px;padding:.6rem;background:#12121b}
+ .card .tile{max-height:260px;margin:0 auto .5rem}
+ .pick{display:flex;align-items:center;gap:.4rem;font-size:.84rem;color:#e8e8ef;cursor:pointer}
+ .ord{color:#7aa2ff;font-weight:700;min-width:1.6em;display:inline-block}
+ .det{display:none;margin-top:.5rem}
+ .det.on{display:block}
+ .fl{display:flex;flex-direction:column;gap:.2rem;font-size:.74rem;color:#9a9ab0;margin-top:.45rem}
+ .fl textarea,.fl input{font:inherit;font-size:.82rem;background:#0b0b12;color:#e8e8ef;border:1px solid #24243a;border-radius:6px;padding:.4rem}
+ .bar{position:sticky;bottom:0;background:#0b0b12;border-top:1px solid #24243a;padding:.9rem 0;margin-top:1rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
+ .approve{background:#0a7d32;color:#fff;border:0;border-radius:8px;padding:.7rem 1.3rem;font-size:1rem;cursor:pointer}
 </style>
 <div class="wrap">${inner}</div>
 <script>${script || ''}</script>`;
