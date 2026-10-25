@@ -39,19 +39,32 @@ async function loadFunnel(funnelId) {
   const funnel = await funnels.get(Number(funnelId));
   if (!funnel) throw new Error(`funnel ${funnelId} not found`);
   const resolved = await funnels.resolve(funnel);
-  return { funnel, resolved };
+  const cfg = await funnels.getConfig(funnel.id).catch(() => ({}));
+  return { funnel, resolved, cfg };
 }
 
-/** The unposted videos in a funnel's Drive folder, newest first. */
+/** The Drive folder that holds a funnel's ready videos (direct-upload override,
+ *  else the funnel media folder). */
+function readyFolder(cfg, resolved) {
+  return (cfg && cfg.direct_drive_folder) || resolved.driveFolder || '';
+}
+
+/** The default caption for this funnel's direct posts. */
+function captionFor(cfg, resolved) {
+  return defaultCaption({ directCaption: cfg && cfg.direct_caption, audiencePrefix: resolved.audiencePrefix, ctaLink: resolved.ctaLink });
+}
+
+/** The unposted videos in a funnel's ready-videos Drive folder, newest first. */
 export async function listReadyVideos({ tenantId = 'default', funnelId }) {
-  const { funnel, resolved } = await loadFunnel(funnelId);
+  const { funnel, resolved, cfg } = await loadFunnel(funnelId);
   const providers = await buildProviders(funnel.tenant_id || tenantId);
-  if (!resolved.driveFolder) return { funnel, resolved, videos: [] };
-  const files = await providers.storage.listFiles(resolved.driveFolder);
+  const folder = readyFolder(cfg, resolved);
+  if (!folder) return { funnel, resolved, cfg, videos: [], defaultCaption: captionFor(cfg, resolved) };
+  const files = await providers.storage.listFiles(folder);
   const videos = filterReadyVideos(files)
     .map((f) => ({ id: f.id, name: f.name, createdTime: f.createdTime }))
     .sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
-  return { funnel, resolved, videos };
+  return { funnel, resolved, cfg, videos, defaultCaption: captionFor(cfg, resolved) };
 }
 
 /** Record one direct post as a posted instance (stages skipped, cost 0). */
@@ -77,7 +90,7 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
  * posted-summary email. Returns a per-item result list.
  */
 export async function postSelections({ tenantId = 'default', funnelId, selections }) {
-  const { funnel, resolved } = await loadFunnel(funnelId);
+  const { funnel, resolved, cfg } = await loadFunnel(funnelId);
   const providers = await buildProviders(funnel.tenant_id || tenantId);
   const clean = normalizeSelections(selections);
   if (!clean.length) throw new Error('no videos selected');
@@ -87,12 +100,20 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
   if (!accounts.length) throw new Error('This funnel has no Post for Me accounts configured');
   const publish = createPostForMeProvider({ apiKey: resolved.postformeKey }, log);
 
+  // YouTube needs a title. When any selected account is a YouTube one and the
+  // funnel has a direct_yt_title, pass it as a per-platform configuration (the
+  // caption serves as the YouTube description; IG/LinkedIn use the caption too).
+  const accountMap = resolved.accountMap || {};
+  const hasYoutube = accounts.some((id) => String((accountMap[id] || {}).platform || '').toLowerCase().includes('youtube'));
+  const ytTitle = String((cfg && cfg.direct_yt_title) || '').trim();
+  const platformConfigurations = hasYoutube && ytTitle ? { youtube: { title: ytTitle } } : undefined;
+
   const slots = defaultSlotsIso(resolved.publishTime, clean.length);
   const results = [];
   for (let i = 0; i < clean.length; i += 1) {
     const sel = clean[i];
     const scheduledIso = (sel.scheduledAt && parseIstDateTime(sel.scheduledAt)) || slots[i] || null;
-    const caption = sel.caption.trim() || defaultCaption(resolved);
+    const caption = sel.caption.trim() || captionFor(cfg, resolved);
     try {
       await providers.storage.shareAnyone(sel.driveId);
       const result = await publish.createPost({
@@ -100,6 +121,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
         caption,
         mediaUrl: dlUrl(sel.driveId),
         scheduledAt: scheduledIso || undefined,
+        platformConfigurations,
       });
       const ref = result && result.id ? result.id : null;
       const instanceId = await recordPostedInstance({ funnel, driveId: sel.driveId, caption, scheduledIso, ref });

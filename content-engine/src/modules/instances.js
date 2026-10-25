@@ -20,7 +20,7 @@ import * as readyPost from '../services/readyPostService.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import { INSTANCE_STEPS, sumInstanceCost, costBreakdown, shortId, formatDuration } from '../utils/instanceSpec.js';
 import { formatIst } from '../utils/time.js';
-import { defaultSlotsIso, defaultCaption } from '../utils/readyPostSpec.js';
+import { defaultSlotsIso } from '../utils/readyPostSpec.js';
 import { driveThumbUrl } from '../utils/reviewSpec.js';
 import { keyOk } from '../services/accessService.js';
 
@@ -52,9 +52,9 @@ export function register(ctx) {
       const funnelId = req.query.funnel ? String(req.query.funnel) : '';
       const list = await funnelsRepo.listByTenant(req.tenantId);
       if (!funnelId) return res.type('html').send(readyChooserPage(list));
-      const { funnel, resolved, videos } = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId });
+      const { funnel, resolved, videos, defaultCaption: defCap } = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId });
       const prefills = defaultSlotsIso(resolved.publishTime, videos.length).map((iso) => formatIst(iso));
-      res.type('html').send(readyPickerPage({ funnel, resolved, videos, prefills }));
+      res.type('html').send(readyPickerPage({ funnel, resolved, videos, prefills, defCap }));
     } catch (err) {
       next(err);
     }
@@ -302,8 +302,7 @@ function readyChooserPage(funnels) {
 
 // Ready-video: tick-select unposted Drive videos, caption + schedule each, post
 // in selection order via Post-for-Me (no generation, no review email).
-function readyPickerPage({ funnel, resolved, videos, prefills }) {
-  const defCap = defaultCaption(resolved);
+function readyPickerPage({ funnel, resolved, videos, prefills, defCap = '' }) {
   const cards = (videos || [])
     .map((v, i) => `<div class="card">
       <div class="tile" onclick="openVideo('${esc(v.id)}')"><img src="${esc(driveThumbUrl(v.id, 'w400'))}" loading="lazy"><span class="playov">▶</span></div>

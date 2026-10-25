@@ -42,9 +42,15 @@ export function parseIstDateTime(str) {
   return dt.isValid ? dt.toISO() : null;
 }
 
-/** The default caption: the funnel's audience prefix + CTA link. */
-export function defaultCaption({ audiencePrefix = '', ctaLink = '' } = {}) {
-  return [String(audiencePrefix || '').trim(), String(ctaLink || '').trim()].filter(Boolean).join('\n');
+/**
+ * The default caption: the funnel's configured direct-upload caption if set,
+ * else its audience prefix; the CTA link is appended when not already present.
+ */
+export function defaultCaption({ directCaption = '', audiencePrefix = '', ctaLink = '' } = {}) {
+  const body = String(directCaption || '').trim() || String(audiencePrefix || '').trim();
+  const link = String(ctaLink || '').trim();
+  if (link && !body.includes(link)) return [body, link].filter(Boolean).join('\n');
+  return body;
 }
 
 /**

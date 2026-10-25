@@ -655,12 +655,16 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
     })
     .join('');
 
+  const directOn = (cfg.research_mode || 'manual') === 'direct';
   const fieldsHtml = step.fields
     .map((field) => {
       if (field.key === 'postforme_api_key') return funnelKeyRow(field, cfg, funnel.id);
       if (field.key === 'postforme_accounts') return pfmAccountsRow(cfg, funnel.id);
       if (field.key === 'account_map') return '';
-      return fieldRow(field, cfg);
+      const html = fieldRow(field, cfg);
+      // Fields tagged group:'direct' only apply to the Direct-upload source — show
+      // them only when that source is chosen (toggled client-side on change).
+      return field.group === 'direct' ? `<div class="direct-only"${directOn ? '' : ' style="display:none"'}>${html}</div>` : html;
     })
     .join('');
 
@@ -770,6 +774,12 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
  }
  async function nav(i){if(i<0||i>=TOTAL||i===STEP)return;const ok=await save();if(ok!==false)location.href=BASE+'?step='+i;}
  async function finish(){const ok=await save();if(ok!==false)location.href='/api/v1/admin/settings#funnels';}
+ // Show the Direct-upload fields only when the content source is "direct".
+ (function(){
+   const sel=document.querySelector('#wform [name="set[research_mode]"]');
+   function sync(){const on=sel&&sel.value==='direct';document.querySelectorAll('.direct-only').forEach(e=>{e.style.display=on?'':'none';});}
+   if(sel){sel.addEventListener('change',sync);sync();}
+ })();
  function syncDays(gid){const boxes=document.querySelectorAll('[data-daygroup="'+gid+'"]');const vals=[];boxes.forEach(b=>{if(b.checked)vals.push(b.value);});const h=document.getElementById(gid);if(h)h.value=vals.join(',');}
  function syncPfm(fid){const boxes=document.querySelectorAll('[data-pfm="'+fid+'"]');const ids=[];const map={};boxes.forEach(b=>{if(b.checked){ids.push(b.value);map[b.value]={platform:b.dataset.plat||'',account_name:b.dataset.name||''};}});const a=document.getElementById('pfmaccts-'+fid);if(a)a.value=JSON.stringify(ids);const m=document.getElementById('pfmmap-'+fid);if(m)m.value=JSON.stringify(map);}
  function renderPfm(fid,accounts){const box=document.getElementById('pfmlist-'+fid);let selected=[];try{selected=JSON.parse(document.getElementById('pfmaccts-'+fid).value||'[]');}catch(_){}if(!accounts.length){box.innerHTML='<span class="hint">No connected accounts found for that key.</span>';return;}box.innerHTML=accounts.map(function(x){const ck=selected.indexOf(x.id)>=0?'checked':'';return '<label class="acct"><input type="checkbox" value="'+esc2(x.id)+'" data-pfm="'+fid+'" data-plat="'+esc2(x.platform)+'" data-name="'+esc2(x.name)+'" onchange="syncPfm('+fid+')" '+ck+'> <b>'+esc2(x.platform)+'</b> — '+esc2(x.name)+'</label>';}).join('');syncPfm(fid);}

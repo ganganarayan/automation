@@ -58,6 +58,14 @@ describe('defaultCaption', () => {
   it('joins audience prefix + cta', () => {
     expect(defaultCaption({ audiencePrefix: 'For founders', ctaLink: 'https://x.co/a' })).toBe('For founders\nhttps://x.co/a');
   });
+  it('prefers the direct-upload caption over the audience prefix', () => {
+    expect(defaultCaption({ directCaption: 'Watch this', audiencePrefix: 'For founders', ctaLink: 'https://x.co/a' }))
+      .toBe('Watch this\nhttps://x.co/a');
+  });
+  it('does not duplicate a link already in the caption', () => {
+    expect(defaultCaption({ directCaption: 'Watch this https://x.co/a', ctaLink: 'https://x.co/a' }))
+      .toBe('Watch this https://x.co/a');
+  });
   it('tolerates blanks', () => {
     expect(defaultCaption({ ctaLink: 'https://x.co/a' })).toBe('https://x.co/a');
     expect(defaultCaption({})).toBe('');

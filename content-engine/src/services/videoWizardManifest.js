@@ -42,9 +42,9 @@ export const WIZARD_STEPS = [
   },
   {
     id: 'research',
-    title: 'Topic & research',
+    title: 'Topic, Research & Content Source',
     icon: 'ti-bulb',
-    desc: 'Let the cloud research a topic and draft the day’s angle, or script it yourself.',
+    desc: 'Where the daily content comes from: fill the sheet yourself, let the cloud research a topic, or skip generation entirely and post ready videos straight from Drive.',
     required: [],
     fields: [
       {
@@ -52,10 +52,15 @@ export const WIZARD_STEPS = [
         options: [
           { value: 'manual', label: 'Manual — I fill the sheet' },
           { value: 'auto', label: 'Auto-research — the cloud picks the topic' },
+          { value: 'direct', label: 'Direct upload — post ready videos from Drive (no generation)' },
         ],
       },
       { key: 'research_topics', label: 'Topic seeds (one per line)', type: 'textarea', placeholder: 'e.g. Gita leadership for founders\ncorporate dharma training' },
       { key: 'research_count', label: 'How many days to plan ahead', placeholder: 'e.g. 7' },
+      // Direct-upload fields (shown only when the source is "Direct upload").
+      { key: 'direct_drive_folder', label: 'Direct upload — Drive folder of ready videos (blank = the funnel media folder)', group: 'direct' },
+      { key: 'direct_caption', label: 'Direct upload — caption (used for the Instagram & LinkedIn caption, and the YouTube description; the funnel CTA link is appended)', type: 'textarea', group: 'direct', placeholder: 'default caption for these posts' },
+      { key: 'direct_yt_title', label: 'Direct upload — YouTube title', group: 'direct', placeholder: 'title shown on YouTube' },
     ],
   },
   {
