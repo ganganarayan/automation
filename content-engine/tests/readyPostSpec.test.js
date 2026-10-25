@@ -81,6 +81,11 @@ describe('normalizeSelections', () => {
       { driveId: '', caption: 'skip' },
     ]);
     expect(out.map((s) => s.driveId)).toEqual(['c', 'a']);
-    expect(out[0]).toEqual({ driveId: 'c', name: 'c.mp4', caption: 'C', scheduledAt: '' });
+    expect(out[0]).toEqual({ driveId: 'c', name: 'c.mp4', caption: 'C', scheduledAt: '', now: false });
+  });
+  it('carries the post-now flag', () => {
+    const out = normalizeSelections([{ driveId: 'a', now: true }, { driveId: 'b' }]);
+    expect(out[0].now).toBe(true);
+    expect(out[1].now).toBe(false);
   });
 });

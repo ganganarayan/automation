@@ -72,7 +72,7 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
   const inst = await instanceService.createForFunnel({
     tenantId: funnel.tenant_id,
     funnel,
-    title: `Ready video — ${formatIst(scheduledIso, { withTime: false })}`,
+    title: `Ready video — ${scheduledIso ? formatIst(scheduledIso, { withTime: false }) : 'now'}`,
     scheduledFor: scheduledIso ? new Date(scheduledIso) : null,
   });
   let steps = buildInitialSteps();
@@ -112,7 +112,8 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
   const results = [];
   for (let i = 0; i < clean.length; i += 1) {
     const sel = clean[i];
-    const scheduledIso = (sel.scheduledAt && parseIstDateTime(sel.scheduledAt)) || slots[i] || null;
+    // "Post now" => no scheduled_at, so Post-for-Me publishes immediately.
+    const scheduledIso = sel.now ? null : ((sel.scheduledAt && parseIstDateTime(sel.scheduledAt)) || slots[i] || null);
     const caption = sel.caption.trim() || captionFor(cfg, resolved);
     try {
       await providers.storage.shareAnyone(sel.driveId);
@@ -150,7 +151,7 @@ async function sendPostedEmail({ providers, funnel, resolved, results }) {
     .map(
       (r) => `<tr>
         <td><a href="${esc(driveEmbedUrl(r.driveId))}" target="_blank" rel="noopener">▶ ${esc(r.name || 'video')}</a></td>
-        <td>${esc(formatIst(r.scheduledIso))}</td>
+        <td>${esc(r.scheduledIso ? formatIst(r.scheduledIso) : 'Now (immediate)')}</td>
         <td><pre style="white-space:pre-wrap;margin:0;font:inherit">${esc(r.caption)}</pre></td>
       </tr>`,
     )

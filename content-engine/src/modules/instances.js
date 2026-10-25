@@ -310,6 +310,7 @@ function readyPickerPage({ funnel, resolved, videos, prefills, defCap = '' }) {
       <input type="hidden" id="nm-${esc(v.id)}" value="${esc(v.name)}">
       <div class="det" id="det-${esc(v.id)}">
         <label class="fl">Caption<textarea id="cap-${esc(v.id)}" rows="3">${esc(defCap)}</textarea></label>
+        <label class="nowrow"><input type="checkbox" id="now-${esc(v.id)}" onchange="toggleNow('${esc(v.id)}')"> Post now (ignore schedule)</label>
         <label class="fl">Schedule (IST DD-MM-YYYY HH:MM)<input id="sch-${esc(v.id)}" value="${esc(prefills[i] || '')}"></label>
       </div>
     </div>`)
@@ -330,6 +331,7 @@ function readyPickerPage({ funnel, resolved, videos, prefills, defCap = '' }) {
     <div class="grid">${cards || '<p class="hint">No unposted videos found in the Drive folder.</p>'}</div>
     <div class="bar">
       <button class="approve" onclick="postSel()">Post selected</button>
+      <label class="nowrow"><input type="checkbox" id="allnow" onchange="allNow()"> Post all now (immediate)</label>
       <span id="rmsg" class="hint"></span>
     </div>
     ${previewModal()}
@@ -344,9 +346,11 @@ function readyPickerPage({ funnel, resolved, videos, prefills, defCap = '' }) {
       else { const k=order.indexOf(id); if(k>=0) order.splice(k,1); det.classList.remove('on'); }
       renumber();
     }
+    function toggleNow(id){ const n=document.getElementById('now-'+id), s=document.getElementById('sch-'+id); if(n&&s){ s.disabled=n.checked; s.style.opacity=n.checked?0.45:1; } }
+    function allNow(){ const on=document.getElementById('allnow').checked; document.querySelectorAll('input[id^="now-"]').forEach(n=>{ n.checked=on; toggleNow(n.id.slice(4)); }); }
     async function postSel(){
       if(!order.length){ msg('Tick at least one video.'); return; }
-      const selections = order.map(id=>({ driveId:id, name:document.getElementById('nm-'+id).value, caption:document.getElementById('cap-'+id).value, scheduledAt:document.getElementById('sch-'+id).value }));
+      const selections = order.map(id=>({ driveId:id, name:document.getElementById('nm-'+id).value, caption:document.getElementById('cap-'+id).value, scheduledAt:document.getElementById('sch-'+id).value, now:document.getElementById('now-'+id).checked }));
       msg('Posting '+selections.length+'…');
       try{
         const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections })});
@@ -445,6 +449,8 @@ function shell(title, inner, script) {
  .det{display:none;margin-top:.5rem}
  .det.on{display:block}
  .fl{display:flex;flex-direction:column;gap:.2rem;font-size:.74rem;color:#9a9ab0;margin-top:.45rem}
+ .nowrow{display:flex;align-items:center;gap:.4rem;font-size:.78rem;color:#c7c7d9;margin-top:.45rem;cursor:pointer}
+ .nowrow input{width:auto;margin:0}
  .fl textarea,.fl input{font:inherit;font-size:.82rem;background:#0b0b12;color:#e8e8ef;border:1px solid #24243a;border-radius:6px;padding:.4rem}
  .bar{position:sticky;bottom:0;background:#0b0b12;border-top:1px solid #24243a;padding:.9rem 0;margin-top:1rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
  .approve{background:#0a7d32;color:#fff;border:0;border-radius:8px;padding:.7rem 1.3rem;font-size:1rem;cursor:pointer}

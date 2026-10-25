@@ -69,6 +69,7 @@ export function normalizeSelections(selections) {
       name: String((s && s.name) || '').trim(),
       caption: String((s && s.caption) || ''),
       scheduledAt: s && s.scheduledAt ? String(s.scheduledAt).trim() : '',
+      now: !!(s && s.now), // post immediately (ignore the schedule)
     });
   }
   return out;

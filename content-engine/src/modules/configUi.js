@@ -937,7 +937,7 @@ function fieldRow(field, configMap) {
   }
   return `<div class="field"><label>${esc(field.label)}</label>
     <input type="text" name="set[${esc(field.key)}]" value="${esc(has ? current : '')}"
-      placeholder="${field.placeholder ? esc(field.placeholder) : 'env default'}"></div>`;
+      placeholder="${field.placeholder ? esc(field.placeholder) : ''}"></div>`;
 }
 
 function gatePage(next = '/api/v1/admin/settings', error = '') {
