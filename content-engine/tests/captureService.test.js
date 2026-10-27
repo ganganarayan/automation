@@ -34,9 +34,19 @@ function fakeLeads() {
 }
 
 function fakeRules(rules) {
+  const bind = [];
   return {
+    bind,
     async activeForPost({ platformPostId }) {
-      return rules.filter((r) => String(r.platform_post_id) === String(platformPostId) && r.active !== false);
+      return rules.filter((r) => r.platform_post_id != null && String(r.platform_post_id) === String(platformPostId) && r.active !== false);
+    },
+    async activeUnlinkedForPlatform({ platform }) {
+      return rules.filter((r) => r.platform_post_id == null && r.platform === platform && r.active !== false);
+    },
+    async bindNativePost({ ruleId, platformPostId, accountId }) {
+      bind.push({ ruleId, platformPostId, accountId });
+      const r = rules.find((x) => x.id === ruleId);
+      if (r) { r.platform_post_id = platformPostId; r.account_id = accountId; }
     },
   };
 }
@@ -143,6 +153,16 @@ describe('processCommentEvent', () => {
     const r = await processCommentEvent({ event: { ...baseEvent, text: 'hello there' } }, { rules, leads, senders, log: {} });
     expect(r.outcome).toBe('no_rule');
     expect(leads.rows.size).toBe(0);
+  });
+
+  it('learns the native post id from the first matching comment (unlinked rule)', async () => {
+    const unlinked = { ...RULE, id: 11, platform: 'instagram', platform_post_id: null };
+    const rules = fakeRules([unlinked]);
+    const senders = fakeSenders();
+    const r = await processCommentEvent({ event: baseEvent }, { rules, leads, senders, log: {}, rng: () => 0, ...TOKEN_DEPS });
+    expect(r.outcome).toBe('sent');
+    expect(senders.calls.dm).toBe(1);
+    expect(rules.bind).toEqual([{ ruleId: 11, platformPostId: 'media99', accountId: 'acct1' }]);
   });
 
   it('step-3 mode (senders:null) captures as pending, no send', async () => {

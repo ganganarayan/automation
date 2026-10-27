@@ -23,6 +23,22 @@ describe('extractRow', () => {
     expect(f.lockedSpecs).toBe('specs here');
   });
 
+  it('extracts the optional comment-to-DM columns', () => {
+    const header = ['day', 'image_prompt', 'caption', 'keyword', 'dm_text', 'dm_link', 'status'];
+    const row = ['7', 'a river', 'cap', 'guide', 'Here is your guide 🙏', 'https://x.co/g', 'Ready'];
+    const f = extractRow(header, row);
+    expect(f.dmKeyword).toBe('guide');
+    expect(f.dmText).toBe('Here is your guide 🙏');
+    expect(f.dmLink).toBe('https://x.co/g');
+  });
+
+  it('leaves the DM columns blank when absent', () => {
+    const f = extractRow(gitaHeader, gitaRow);
+    expect(f.dmKeyword).toBe('');
+    expect(f.dmText).toBe('');
+    expect(f.dmLink).toBe('');
+  });
+
   it('recognizes the Gita schema', () => {
     const f = extractRow(gitaHeader, gitaRow);
     expect(f.matchColName).toBe('day');

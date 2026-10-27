@@ -42,6 +42,11 @@ export const FUNNEL_FIELDS = [
     ],
   },
   { key: 'ig_webhook_url', label: 'IG-comment webhook URL (optional)' },
+  // Comment-to-DM defaults for this funnel (used when the content row has none).
+  { key: 'capture_keyword', label: 'Auto-DM keyword (blank = off)', placeholder: 'e.g. guide' },
+  { key: 'capture_dm_text', label: 'Auto-DM message', type: 'textarea' },
+  { key: 'capture_dm_link', label: 'Auto-DM link' },
+  { key: 'capture_public_replies', label: 'Public reply variants (one per line)', type: 'textarea' },
 ];
 
 export async function listByTenant(tenantId = 'default') {
@@ -137,6 +142,11 @@ export async function resolve(funnel) {
     publishTime: c.publish_time || '08:02',
     imageSize: (c.image_size || 'square').toLowerCase() === 'portrait' ? '1024x1536' : '1024x1024',
     igWebhookUrl: c.ig_webhook_url || '',
+    captureKeyword: (c.capture_keyword || '').trim(),
+    captureDmText: c.capture_dm_text || '',
+    captureDmLink: c.capture_dm_link || '',
+    capturePublicReplies: String(c.capture_public_replies || '')
+      .split('\n').map((s) => s.trim()).filter(Boolean),
   };
 }
 

@@ -30,6 +30,7 @@ import { createTranscriptProvider } from '../providers/transcriptProvider.js';
 import { createFfmpegProvider } from '../providers/ffmpegProvider.js';
 import { createAnimationProvider } from '../providers/animationProvider.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
+import * as captureRules from './captureRules.js';
 import { dlUrl } from '../providers/storageProvider.js';
 import { costText, costImages, costAnimation, costTts, costTranscript } from '../utils/pricing.js';
 import { mapImageSize } from '../utils/imageGateSpec.js';
@@ -242,6 +243,17 @@ export async function postInstance({ instanceId }) {
   const refs = result && result.id ? [result.id] : (Array.isArray(result) ? result.map((r) => r.id).filter(Boolean) : []);
   await instanceService.updateStep(instanceId, 'publish', { status: 'done', artifacts: { posts: refs }, finishedAt: new Date().toISOString() });
   log.info({ instance: instanceId, accounts: accountIds.length, refs: refs.length }, 'instance posted to Post-for-Me');
+
+  // Arm comment-to-DM for the pipeline path (funnel-level keyword/dm defaults).
+  if (refs[0] && resolved.captureKeyword) {
+    await captureRules.createForPublish({
+      tenantId: resolved.tenantId, funnelId: resolved.id, lane: resolved.name,
+      platforms: captureRules.dmPlatforms(accountIds, resolved.accountMap),
+      postformePostId: refs[0],
+      keyword: resolved.captureKeyword, dmText: resolved.captureDmText, dmLink: resolved.captureDmLink,
+      publicReplyVariants: resolved.capturePublicReplies, log,
+    }).catch((err) => log.warn({ err: err.message }, 'capture rule create failed (posted anyway)'));
+  }
   return refs;
 }
 

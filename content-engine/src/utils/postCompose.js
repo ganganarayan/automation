@@ -39,6 +39,10 @@ export function extractRow(rawHeader, row) {
   const iHashtags = locate(header, ['hashtags']);
   const iLocked = locate(header, ['locked text specs']);
   const iAudience = locate(header, ['audience']);
+  // Comment-to-DM columns (optional): a keyword on this post arms the auto-DM.
+  const iKeyword = locate(header, ['keyword', 'dm_keyword'], ['dm keyword']);
+  const iDmText = locate(header, ['dm_text', 'dm message'], ['dm text']);
+  const iDmLink = locate(header, ['dm_link'], ['dm link']);
   const get = (i) => (i === -1 ? '' : String(row[i] ?? '').trim());
 
   return {
@@ -55,6 +59,9 @@ export function extractRow(rawHeader, row) {
     hashtags: get(iHashtags),
     lockedSpecs: get(iLocked),
     audience: get(iAudience),
+    dmKeyword: get(iKeyword),
+    dmText: get(iDmText),
+    dmLink: get(iDmLink),
   };
 }
 

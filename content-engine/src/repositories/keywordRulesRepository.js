@@ -9,15 +9,17 @@
 import { query } from '../core/db.js';
 
 /**
- * Create (or idempotently update) a rule for a post+keyword. Publish-time rule
- * creation calls this; a re-publish of the same post updates the same row rather
- * than making a duplicate (UNIQUE tenant_id, platform_post_id, keyword).
+ * Create (or idempotently update) a rule at publish, keyed by the Post-for-Me
+ * post id + platform + keyword. The native platform_post_id and account_id are
+ * left NULL here and learned from the first matching comment (bindNativePost).
+ * A re-publish of the same Post-for-Me post updates the same row.
  */
 export async function upsert({
   tenantId = 'default',
   funnelId = null,
   platform,
-  platformPostId,
+  platformPostId = null,
+  accountId = null,
   postformePostId = null,
   lane = null,
   keyword,
@@ -29,13 +31,11 @@ export async function upsert({
 }) {
   const { rows } = await query(
     `INSERT INTO keyword_rules
-       (tenant_id, funnel_id, platform, platform_post_id, postforme_post_id, lane,
+       (tenant_id, funnel_id, platform, platform_post_id, account_id, postforme_post_id, lane,
         keyword, match_mode, dm_text, dm_link, public_reply_variants, active)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
-     ON CONFLICT (tenant_id, platform_post_id, keyword) DO UPDATE SET
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13)
+     ON CONFLICT (tenant_id, postforme_post_id, platform, keyword) DO UPDATE SET
        funnel_id = EXCLUDED.funnel_id,
-       platform = EXCLUDED.platform,
-       postforme_post_id = COALESCE(EXCLUDED.postforme_post_id, keyword_rules.postforme_post_id),
        lane = EXCLUDED.lane,
        match_mode = EXCLUDED.match_mode,
        dm_text = EXCLUDED.dm_text,
@@ -45,21 +45,44 @@ export async function upsert({
        updated_at = now()
      RETURNING *`,
     [
-      tenantId, funnelId, platform, platformPostId, postformePostId, lane,
+      tenantId, funnelId, platform, platformPostId, accountId, postformePostId, lane,
       keyword, matchMode, dmText, dmLink, JSON.stringify(publicReplyVariants || []), active,
     ],
   );
   return rows[0];
 }
 
-/** Active rules for a given post (the match set a comment is tested against). */
+/** Active rules already bound to a given native post (direct match). */
 export async function activeForPost({ tenantId = 'default', platformPostId }) {
+  if (!platformPostId) return [];
   const { rows } = await query(
     `SELECT * FROM keyword_rules
       WHERE tenant_id = $1 AND platform_post_id = $2 AND active = true`,
     [tenantId, platformPostId],
   );
   return rows;
+}
+
+/** Active rules for a platform not yet bound to a native post, newest first.
+ *  Used to learn the native post id from the first matching comment. */
+export async function activeUnlinkedForPlatform({ tenantId = 'default', platform }) {
+  const { rows } = await query(
+    `SELECT * FROM keyword_rules
+      WHERE tenant_id = $1 AND platform = $2 AND active = true AND platform_post_id IS NULL
+      ORDER BY created_at DESC`,
+    [tenantId, platform],
+  );
+  return rows;
+}
+
+/** Bind a rule to the native post + account learned from a comment (once). */
+export async function bindNativePost({ ruleId, platformPostId, accountId = null }) {
+  await query(
+    `UPDATE keyword_rules
+        SET platform_post_id = $2, account_id = COALESCE($3, account_id), updated_at = now()
+      WHERE id = $1 AND platform_post_id IS NULL`,
+    [ruleId, platformPostId, accountId],
+  );
 }
 
 /** All rules for the admin list, newest first. */
@@ -81,4 +104,4 @@ export async function setActive(id, active) {
   await query('UPDATE keyword_rules SET active = $2, updated_at = now() WHERE id = $1', [id, !!active]);
 }
 
-export default { upsert, activeForPost, listByTenant, get, setActive };
+export default { upsert, activeForPost, activeUnlinkedForPlatform, bindNativePost, listByTenant, get, setActive };

@@ -21,6 +21,7 @@ import * as instanceRepo from '../repositories/instanceRepository.js';
 import { buildProviders } from './providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { dlUrl } from '../providers/storageProvider.js';
+import * as captureRules from './captureRules.js';
 import { buildInitialSteps, patchStep } from '../utils/instanceSpec.js';
 import { formatIst } from '../utils/time.js';
 import { driveEmbedUrl } from '../utils/reviewSpec.js';
@@ -125,6 +126,16 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
         platformConfigurations,
       });
       const ref = result && result.id ? result.id : null;
+      // Arm comment-to-DM for this post (funnel-level keyword/dm defaults).
+      if (ref && resolved.captureKeyword) {
+        await captureRules.createForPublish({
+          tenantId: funnel.tenant_id, funnelId: funnel.id, lane: funnel.name,
+          platforms: captureRules.dmPlatforms(accounts, accountMap),
+          postformePostId: ref,
+          keyword: resolved.captureKeyword, dmText: resolved.captureDmText, dmLink: resolved.captureDmLink,
+          publicReplyVariants: resolved.capturePublicReplies, log,
+        }).catch((err) => log.warn({ err: err.message }, 'capture rule create failed (posted anyway)'));
+      }
       const instanceId = await recordPostedInstance({ funnel, driveId: sel.driveId, caption, scheduledIso, ref });
       try {
         await providers.storage.renameFile(sel.driveId, `POSTED - ${sel.name || sel.driveId}`);

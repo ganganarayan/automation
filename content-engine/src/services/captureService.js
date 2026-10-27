@@ -40,9 +40,17 @@ export async function processCommentEvent({ tenantId = 'default', event, now = n
     return { outcome: 'self' };
   }
 
-  // (3) Match against active rules for this post.
+  // (3) Match against active rules for this post. Rules are created at publish
+  // anchored to the Post-for-Me id with no native post id yet; the first matching
+  // comment teaches us the native post id (bindNativePost), so later comments
+  // match directly.
   const active = await rules.activeForPost({ tenantId, platformPostId: e.postId });
-  const rule = firstMatchingRule(e.text, active);
+  let rule = firstMatchingRule(e.text, active);
+  if (!rule && rules.activeUnlinkedForPlatform) {
+    const unlinked = await rules.activeUnlinkedForPlatform({ tenantId, platform: e.platform });
+    rule = firstMatchingRule(e.text, unlinked);
+    if (rule) await rules.bindNativePost({ ruleId: rule.id, platformPostId: e.postId, accountId: e.accountId });
+  }
   if (!rule) return { outcome: 'no_rule' };
 
   // (1/idempotency) Claim the comment. A duplicate webhook returns null here.

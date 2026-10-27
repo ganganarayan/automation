@@ -27,6 +27,7 @@ import { buildProviders } from './providerFactory.js';
 import * as approvalService from './approvalService.js';
 import { setStatus } from '../repositories/approvalRepository.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
+import * as captureRules from './captureRules.js';
 import { extractRow, composePrompt, composeCaptions, buildPlatformConfigs } from '../utils/postCompose.js';
 import { publishAtIst } from '../utils/scheduling.js';
 import { request } from '../core/httpClient.js';
@@ -109,6 +110,9 @@ export async function runFunnel(funnelRow) {
       captionShort: short,
       mediaUrl: upload.downloadUrl,
       thumbnailUrl: upload.thumbnailUrl,
+      dmKeyword: row.dmKeyword,
+      dmText: row.dmText,
+      dmLink: row.dmLink,
     },
   });
 
@@ -139,13 +143,29 @@ export async function publish(approval) {
   const scheduledAt = publishAtIst(f.publishTime, DateTime.now().setZone(settings.tz)).toISO();
   // LinkedIn gets the full caption, other platforms the short one (when distinct).
   const platformConfigurations = buildPlatformConfigs(p.captionFull, p.captionShort);
-  await publisher.createPost({
+  const result = await publisher.createPost({
     accountIds: accounts,
     caption: p.captionShort || p.captionFull,
     mediaUrl: p.mediaUrl,
     scheduledAt,
     platformConfigurations,
   });
+
+  // Arm comment-to-DM: the sheet row's keyword/dm_text/dm_link, else funnel defaults.
+  const ref = result && result.id ? result.id : null;
+  const keyword = (p.dmKeyword || f.captureKeyword || '').trim();
+  if (ref && keyword) {
+    await captureRules.createForPublish({
+      tenantId: f.tenantId, funnelId: f.id, lane: f.name,
+      platforms: captureRules.dmPlatforms(accounts, f.accountMap),
+      postformePostId: ref,
+      keyword,
+      dmText: p.dmText || f.captureDmText,
+      dmLink: p.dmLink || f.captureDmLink,
+      publicReplyVariants: f.capturePublicReplies,
+      log,
+    }).catch((err) => log.warn({ err: err.message }, 'capture rule create failed (posted anyway)'));
+  }
 
   // Optional IG-comment automation webhook (best-effort).
   if (f.igWebhookUrl) {
