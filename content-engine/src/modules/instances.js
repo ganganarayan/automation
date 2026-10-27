@@ -191,6 +191,7 @@ function listPage(rows, status) {
       <div class="toprow">
         <div class="tabs">${tabs}</div>
         <a class="act primary" href="/api/v1/admin/instances/ready">📤 Post ready videos</a>
+        <a class="act" href="/api/v1/admin/capture">🎯 Comment capture</a>
         <button class="act" onclick="sample()">+ Sample</button>
         <a class="act" href="/api/v1/admin/settings#funnels">← Settings</a>
       </div>
