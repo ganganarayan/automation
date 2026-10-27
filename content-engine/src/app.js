@@ -42,7 +42,12 @@ export function createApp() {
   app.use(requestId);
   app.use(tenantResolver);
   app.use(requestLogger);
-  app.use(express.json({ limit: '2mb' }));
+  // Keep the raw body alongside the parsed JSON so webhook signatures
+  // (e.g. Meta's X-Hub-Signature-256) can be verified over the exact bytes.
+  app.use(express.json({
+    limit: '2mb',
+    verify: (req, _res, buf) => { req.rawBody = buf; },
+  }));
   app.use(express.urlencoded({ extended: true }));
 
   // Bare domain opens the app (the unified dashboard), so the root URL just works.

@@ -54,6 +54,17 @@ export const CONFIG_MANIFEST = {
         ],
       },
       {
+        title: 'Comment capture (Meta — Instagram & Facebook auto-DM)',
+        fields: [
+          { key: 'meta_app_id', label: 'Meta app ID' },
+          { key: 'meta_app_secret', label: 'Meta app secret', type: 'secret', help: 'Used to verify the X-Hub-Signature-256 on every incoming webhook. Never leaves the server.' },
+          { key: 'meta_verify_token', label: 'Webhook verify token', type: 'generated_secret', help: 'Click Generate, then paste the SAME value into the Meta webhook setup screen. Meta echoes it back once to confirm the callback URL.' },
+          { key: 'meta_page_tokens', label: 'Page / IG access tokens (JSON: id → token)', type: 'json', help: 'Map each Facebook Page ID and Instagram account ID to its long-lived access token, e.g. {"178…":"EAAG…"}. Used to send the DM and public reply. (Step 4.)' },
+          { key: 'meta_self_ids', label: 'Our own account IDs (JSON array)', type: 'json', help: 'IG user IDs / Page IDs we post as. Comments FROM these are ignored so we never reply to ourselves.' },
+          { key: 'capture_abuse_words', label: 'Extra abuse words to block (comma / new line)', type: 'textarea', help: 'Merged with the built-in Hindi + Hinglish + English blocklist. A comment that matches gets logged but no DM is sent.' },
+        ],
+      },
+      {
         title: 'Email (SMTP — for approval & status notifications)',
         fields: [
           { key: 'smtp_host', label: 'SMTP host', placeholder: 'smtp.zoho.com / smtp.gmail.com' },

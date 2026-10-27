@@ -15,8 +15,14 @@
  */
 import * as rules from '../repositories/keywordRulesRepository.js';
 import * as leads from '../repositories/capturedLeadsRepository.js';
+import * as jobRunner from '../core/jobRunner.js';
+import * as captureService from '../services/captureService.js';
+import * as captureConfig from '../services/captureConfig.js';
+import { verifyMetaSignature, parseCommentEvents } from '../utils/captureSpec.js';
 import { keyOk } from '../services/accessService.js';
 import { formatIst } from '../utils/time.js';
+
+const JOB_TYPE = 'capture_comment';
 
 export function register(ctx) {
   const { router, log } = ctx;
@@ -68,7 +74,71 @@ export function register(ctx) {
     }
   });
 
-  log.info('capture admin registered at /api/v1/admin/capture');
+  // --- Meta webhook (Instagram + Facebook comments) -----------------------
+
+  // Verification handshake: Meta calls this once with the verify token we set in
+  // the app config and expects the challenge echoed back as plain text.
+  router.get('/webhook/meta-comments', async (req, res) => {
+    try {
+      const mode = req.query['hub.mode'];
+      const token = req.query['hub.verify_token'];
+      const challenge = req.query['hub.challenge'];
+      const cfg = await captureConfig.forTenant(req.tenantId);
+      if (mode === 'subscribe' && cfg.verifyToken && token === cfg.verifyToken) {
+        return res.status(200).type('text/plain').send(String(challenge ?? ''));
+      }
+      return res.sendStatus(403);
+    } catch {
+      return res.sendStatus(403);
+    }
+  });
+
+  // Event delivery: verify the signature over the RAW body, then 200 fast and
+  // hand each comment to the durable job queue (never block Meta's request).
+  router.post('/webhook/meta-comments', async (req, res) => {
+    let cfg;
+    try {
+      cfg = await captureConfig.forTenant(req.tenantId);
+    } catch {
+      return res.sendStatus(200); // acknowledge; nothing we can do without config
+    }
+    const ok = verifyMetaSignature(req.rawBody, req.headers['x-hub-signature-256'], cfg.appSecret);
+    if (!ok) {
+      req.log?.warn?.('capture: bad or missing webhook signature');
+      return res.sendStatus(403);
+    }
+    res.sendStatus(200); // ack immediately
+
+    try {
+      const events = parseCommentEvents(req.body);
+      for (const event of events) {
+        await jobRunner.enqueueJob({ tenantId: req.tenantId, type: JOB_TYPE, payload: { event } });
+      }
+      if (events.length) req.log?.info?.({ count: events.length }, 'capture: comment events queued');
+    } catch (err) {
+      req.log?.error?.({ err: err.message }, 'capture: failed to queue comment events');
+    }
+  });
+
+  // Durable handler: one comment at a time, with retry/backoff from the runner.
+  // senders:null here (step 3) -> a matched, fresh, clean comment is captured as
+  // dm_status 'pending'; the real DM + reply senders arrive in step 4.
+  jobRunner.registerHandler(
+    JOB_TYPE,
+    async (job) => {
+      const tenantId = job.tenant_id;
+      const event = job.payload?.event;
+      if (!event) return;
+      const cfg = await captureConfig.forTenant(tenantId);
+      await captureService.processCommentEvent(
+        { tenantId, event, selfIds: cfg.selfIds, abuseWords: cfg.abuseWords },
+        { rules, leads, senders: null, log },
+      );
+    },
+    { maxAttempts: 5, backoffSeconds: 60 },
+  );
+
+  log.info('capture admin registered at /api/v1/admin/capture (+ /webhook/meta-comments)');
 }
 
 // ---- rendering -------------------------------------------------------------
