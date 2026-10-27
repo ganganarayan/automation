@@ -18,6 +18,7 @@ import * as leads from '../repositories/capturedLeadsRepository.js';
 import * as jobRunner from '../core/jobRunner.js';
 import * as captureService from '../services/captureService.js';
 import * as captureConfig from '../services/captureConfig.js';
+import { captureSenders } from '../services/captureSenders.js';
 import { verifyMetaSignature, parseCommentEvents } from '../utils/captureSpec.js';
 import { keyOk } from '../services/accessService.js';
 import { formatIst } from '../utils/time.js';
@@ -63,11 +64,23 @@ export function register(ctx) {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
       const id = Number(req.params.id);
-      const row = await leads.remove(id);
-      // NOTE: deleting the live comment on Instagram/Facebook (Graph API DELETE
-      // /{comment-id}) lands with the senders in step 4 — the native comment id
-      // is row.comment_id. For now this removes the log row.
-      if (row) log.info({ commentId: row.comment_id }, 'capture lead deleted');
+      const row = await leads.get(id);
+      if (row) {
+        // Delete the live comment on Instagram/Facebook too (best-effort), then
+        // remove the log row regardless of whether the platform delete succeeds.
+        const cfg = await captureConfig.forTenant(req.tenantId);
+        const token = captureConfig.tokenFor(cfg, row.account_id);
+        if (token) {
+          try {
+            await captureSenders.deleteComment({ platform: row.platform, pageToken: token, commentId: row.comment_id });
+            log.info({ commentId: row.comment_id }, 'capture: live comment deleted');
+          } catch (err) {
+            log.warn({ err: err.message, commentId: row.comment_id }, 'capture: live comment delete failed (removing row anyway)');
+          }
+        }
+        await leads.remove(id);
+        log.info({ commentId: row.comment_id }, 'capture lead deleted');
+      }
       res.redirect('/api/v1/admin/capture');
     } catch (err) {
       next(err);
@@ -121,8 +134,9 @@ export function register(ctx) {
   });
 
   // Durable handler: one comment at a time, with retry/backoff from the runner.
-  // senders:null here (step 3) -> a matched, fresh, clean comment is captured as
-  // dm_status 'pending'; the real DM + reply senders arrive in step 4.
+  // The real DM + public-reply senders run here; a 5xx bubbles up and the runner
+  // retries with backoff, while a 4xx (e.g. 7-day window closed) is recorded and
+  // not retried (see captureSenders.isRetryableStatus).
   jobRunner.registerHandler(
     JOB_TYPE,
     async (job) => {
@@ -132,7 +146,7 @@ export function register(ctx) {
       const cfg = await captureConfig.forTenant(tenantId);
       await captureService.processCommentEvent(
         { tenantId, event, selfIds: cfg.selfIds, abuseWords: cfg.abuseWords },
-        { rules, leads, senders: null, log },
+        { rules, leads, senders: captureSenders, tokenFor: captureConfig.tokenFor, captureCfg: cfg, log },
       );
     },
     { maxAttempts: 5, backoffSeconds: 60 },

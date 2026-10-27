@@ -56,9 +56,12 @@ const RULE = {
 };
 
 const baseEvent = {
-  platform: 'instagram', verb: 'add', commentId: 'c1', postId: 'media99',
+  platform: 'instagram', verb: 'add', commentId: 'c1', accountId: 'acct1', postId: 'media99',
   commenterId: 'u1', commenterUsername: 'alice', text: 'I want this', createdAt: new Date(),
 };
+
+// Real usage resolves a per-account token; tests inject a constant one.
+const TOKEN_DEPS = { tokenFor: () => 'tok', captureCfg: {} };
 
 describe('processCommentEvent', () => {
   let leads;
@@ -67,7 +70,7 @@ describe('processCommentEvent', () => {
   it('a duplicate webhook produces exactly one DM', async () => {
     const rules = fakeRules([RULE]);
     const senders = fakeSenders();
-    const deps = { rules, leads, senders, log: {}, rng: () => 0 };
+    const deps = { rules, leads, senders, log: {}, rng: () => 0, ...TOKEN_DEPS };
 
     const first = await processCommentEvent({ event: baseEvent }, deps);
     const second = await processCommentEvent({ event: baseEvent }, deps); // same comment_id
@@ -104,12 +107,22 @@ describe('processCommentEvent', () => {
     const rules = fakeRules([RULE]);
     const senders = fakeSenders({ dmError: Object.assign(new Error('window closed'), { retryable: false }) });
 
-    const r = await processCommentEvent({ event: baseEvent }, { rules, leads, senders, log: {} });
+    const r = await processCommentEvent({ event: baseEvent }, { rules, leads, senders, log: {}, ...TOKEN_DEPS });
 
     expect(r.outcome).toBe('dm_failed');
     const lead = leads.rows.get('c1');
     expect(lead.dm_status).toBe('failed');
     expect(lead.error).toContain('window closed');
+  });
+
+  it('no access token for the account -> captured but not sent', async () => {
+    const rules = fakeRules([RULE]);
+    const senders = fakeSenders();
+    // tokenFor returns '' (no token configured for this account)
+    const r = await processCommentEvent({ event: baseEvent }, { rules, leads, senders, log: {}, tokenFor: () => '', captureCfg: {} });
+    expect(r.outcome).toBe('no_token');
+    expect(senders.calls.dm).toBe(0);
+    expect(leads.rows.get('c1').dm_status).toBe('failed');
   });
 
   it('an abusive comment is logged but never DMed', async () => {

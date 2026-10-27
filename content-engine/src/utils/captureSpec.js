@@ -163,6 +163,7 @@ export function parseCommentEvents(body) {
 
   for (const entry of body.entry) {
     const entryTime = entry?.time != null ? toDate(entry.time) : null;
+    const accountId = String(entry?.id || ''); // IG user id / Page id that owns the post
     for (const change of entry?.changes || []) {
       const field = change?.field;
       const v = change?.value || {};
@@ -172,6 +173,7 @@ export function parseCommentEvents(body) {
         out.push({
           platform: 'instagram',
           verb: 'add',
+          accountId,
           commentId: String(v.id || ''),
           postId: String(v.media?.id || v.media_id || ''),
           commenterId: String(from.id || ''),
@@ -184,6 +186,7 @@ export function parseCommentEvents(body) {
         out.push({
           platform: 'facebook',
           verb: v.verb || 'add',
+          accountId,
           commentId: String(v.comment_id || ''),
           postId: String(v.post_id || ''),
           commenterId: String(from.id || ''),

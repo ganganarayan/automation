@@ -106,6 +106,7 @@ describe('parseCommentEvents', () => {
     const body = {
       object: 'instagram',
       entry: [{
+        id: 'ig_acct_1',
         time: 1700000000,
         changes: [{
           field: 'comments',
@@ -115,6 +116,7 @@ describe('parseCommentEvents', () => {
     };
     const [e] = parseCommentEvents(body);
     expect(e).toMatchObject({ platform: 'instagram', commentId: 'ig_c1', postId: 'media99', commenterId: 'u1', commenterUsername: 'alice', text: 'want' });
+    expect(e.accountId).toBe('ig_acct_1'); // entry.id = the owning account (DM path + token key)
     expect(e.createdAt).toBeInstanceOf(Date); // fell back to entry.time
   });
   it('parses a Facebook page comment and ignores non-comment feed items', () => {

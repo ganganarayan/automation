@@ -51,6 +51,7 @@ export async function processCommentEvent({ tenantId = 'default', event, now = n
     ruleId: rule.id,
     platform: e.platform,
     commentId: e.commentId,
+    accountId: e.accountId,
     postId: e.postId,
     keyword: rule.keyword,
     lane: rule.lane,
@@ -84,13 +85,20 @@ export async function processCommentEvent({ tenantId = 'default', event, now = n
   // No senders yet (step 3): leave as pending for the real senders (step 4).
   if (!senders) return { outcome: 'captured_pending', leadId: lead.id };
 
-  const pageToken = tokenFor ? tokenFor(captureCfg, e.postId) : '';
+  // The DM is sent AS the account that owns the post; its token is keyed by that
+  // account id. No token -> we can't send; record and stop (not retryable).
+  const pageToken = tokenFor ? tokenFor(captureCfg, e.accountId) : '';
+  if (!pageToken) {
+    await leads.updateStatus(lead.id, { dmStatus: 'failed', error: `no access token for account ${e.accountId || '?'}` });
+    return { outcome: 'no_token', leadId: lead.id };
+  }
 
   // (5) Send the one private reply. A 4xx that means the window is closed is
   // non-retryable; 5xx bubbles up so the job runner retries with backoff.
   try {
     await senders.sendDm({
       platform: e.platform,
+      accountId: e.accountId,
       pageToken,
       recipientCommentId: e.commentId,
       commenterId: e.commenterId,

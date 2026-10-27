@@ -19,6 +19,7 @@ export async function insertIfNew({
   ruleId = null,
   platform,
   commentId,
+  accountId = null,
   postId = null,
   keyword = null,
   lane = null,
@@ -33,14 +34,14 @@ export async function insertIfNew({
 }) {
   const { rows } = await query(
     `INSERT INTO captured_leads
-       (tenant_id, rule_id, platform, comment_id, post_id, keyword, lane,
+       (tenant_id, rule_id, platform, comment_id, account_id, post_id, keyword, lane,
         commenter_id, commenter_username, comment_text, comment_created_at,
         abuse, dm_status, public_reply_status, error)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      ON CONFLICT (comment_id) DO NOTHING
      RETURNING *`,
     [
-      tenantId, ruleId, platform, commentId, postId, keyword, lane,
+      tenantId, ruleId, platform, commentId, accountId, postId, keyword, lane,
       commenterId, commenterUsername, commentText, commentCreatedAt,
       abuse, dmStatus, publicReplyStatus, error,
     ],
