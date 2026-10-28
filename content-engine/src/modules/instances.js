@@ -17,12 +17,17 @@
 import * as instances from '../services/instanceService.js';
 import * as review from '../services/instanceReviewService.js';
 import * as readyPost from '../services/readyPostService.js';
+import * as stageRunner from '../services/stageRunnerService.js';
+import * as jobRunner from '../core/jobRunner.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import { INSTANCE_STEPS, sumInstanceCost, costBreakdown, shortId, formatDuration } from '../utils/instanceSpec.js';
+import { MANUAL_STAGES, STAGE_LABEL, inputKind, canExecute } from '../utils/manualStepSpec.js';
 import { formatIst } from '../utils/time.js';
 import { defaultSlotsIso } from '../utils/readyPostSpec.js';
 import { driveThumbUrl } from '../utils/reviewSpec.js';
 import { keyOk } from '../services/accessService.js';
+
+const MANUAL_JOB = 'manual_stage';
 
 export function register(ctx) {
   const { router, log } = ctx;
@@ -85,16 +90,78 @@ export function register(ctx) {
     }
   });
 
+  // Manual-run funnel chooser: pick a funnel to start a hand-stepped run.
+  // Registered before '/:id' so "manual" isn't read as an instance id.
+  router.get('/admin/instances/manual', async (req, res, next) => {
+    try {
+      if (!(await guardHtml(req, res))) return;
+      const list = await funnelsRepo.listByTenant(req.tenantId);
+      res.type('html').send(manualChooserPage(list));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/admin/instances/manual/new', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const funnel = await funnelsRepo.get(Number(req.body?.funnelId));
+      if (!funnel) return res.status(404).json({ ok: false, error: 'funnel not found' });
+      const inst = await instances.createForFunnel({
+        tenantId: req.tenantId, funnel, title: `${funnel.name} — manual ${formatIst(new Date(), { withTime: false })}`, status: 'manual',
+      });
+      res.json({ ok: true, id: inst.id });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   router.get('/admin/instances/:id', async (req, res, next) => {
     try {
       if (!(await guardHtml(req, res))) return;
       const row = await instances.get(req.params.id);
       if (!row) return res.redirect('/api/v1/admin/instances');
-      res.type('html').send(detailPage(row, instances.parseSteps(row)));
+      const steps = instances.parseSteps(row);
+      const manual = row.status === 'manual' && !row.locked;
+      res.type('html').send(manual ? manualPage(row, steps) : detailPage(row, steps));
     } catch (err) {
       next(err);
     }
   });
+
+  // Manual stepper: execute ONE stage. Script "save edited text" is instant and
+  // runs inline; every other stage is queued on the job runner (image/animation/
+  // voiceover can take minutes) and the page auto-refreshes while it runs.
+  router.post('/admin/instances/:id/stage/:key/execute', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const { id, key } = req.params;
+      if (!MANUAL_STAGES.includes(key)) return res.status(400).json({ ok: false, error: 'unknown stage' });
+      const row = await instances.get(id);
+      if (!row) return res.status(404).json({ ok: false, error: 'not found' });
+      if (row.locked) return res.status(400).json({ ok: false, error: 'locked' });
+      const input = (req.body && req.body.input) || {};
+      await instances.updateStep(id, key, { status: 'running', startedAt: new Date().toISOString(), error: null });
+      if (key === 'script' && input.text && input.text.trim()) {
+        const r = await stageRunner.executeManualStage({ instanceId: id, stepKey: key, input });
+        return res.json(r);
+      }
+      await jobRunner.enqueueJob({ tenantId: req.tenantId, type: MANUAL_JOB, payload: { instanceId: id, stepKey: key, input } });
+      res.json({ ok: true, queued: true });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  jobRunner.registerHandler(
+    MANUAL_JOB,
+    async (job) => {
+      const { instanceId, stepKey, input } = job.payload || {};
+      if (!instanceId || !stepKey) return;
+      await stageRunner.executeManualStage({ instanceId, stepKey, input });
+    },
+    { maxAttempts: 1, backoffSeconds: 30 }, // manual: the operator retries, no auto-retry
+  );
 
   router.post('/admin/instances/sample', async (req, res) => {
     try {
@@ -143,6 +210,7 @@ const STATUS_LABEL = {
   posted: 'Posted',
   failed: 'Failed',
   superseded: 'Superseded',
+  manual: 'Manual',
 };
 
 function statusPill(status) {
@@ -191,6 +259,7 @@ function listPage(rows, status) {
       <div class="toprow">
         <div class="tabs">${tabs}</div>
         <a class="act primary" href="/api/v1/admin/instances/ready">📤 Post ready videos</a>
+        <a class="act" href="/api/v1/admin/instances/manual">🎛 Manual run</a>
         <a class="act" href="/api/v1/admin/capture">🎯 Comment capture</a>
         <button class="act" onclick="sample()">+ Sample</button>
         <a class="act" href="/api/v1/admin/settings#funnels">← Settings</a>
@@ -360,6 +429,118 @@ function readyPickerPage({ funnel, resolved, videos, prefills, defCap = '' }) {
         else msg('Failed: '+(j.error||''));
       }catch(e){ msg('Failed: '+e.message); }
     }
+  `);
+}
+
+// ---- manual stepper UI -----------------------------------------------------
+
+function manualChooserPage(funnels) {
+  const items = (funnels || [])
+    .map((f) => `<button class="act" onclick="startManual('${esc(String(f.id))}')">${esc(f.name)}</button>`)
+    .join(' ');
+  return shell('Manual run', `
+    <div class="top">
+      <h1>Manual run</h1>
+      <div class="toprow"><a class="act" href="/api/v1/admin/instances">← All instances</a></div>
+    </div>
+    <p class="ro">Pick a funnel to start a hand-stepped run — generate/preview/approve each stage, then post. Set <b>Manual stepper = On</b> in a funnel to also pause its scheduled daily runs for manual stepping; turn it off to go back to automatic.</p>
+    <div class="row">${items || '<span class="hint">No funnels yet.</span>'}</div>
+  `, `
+    async function startManual(fid){
+      const r=await fetch('/api/v1/admin/instances/manual/new',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({funnelId:fid})});
+      const j=await r.json();
+      if(j.ok) location.href='/api/v1/admin/instances/'+j.id; else alert(j.error||'failed');
+    }
+  `);
+}
+
+function manualCard(key, steps) {
+  const s = steps.find((x) => x.key === key) || { status: 'pending', artifacts: {} };
+  const a = s.artifacts || {};
+  const can = canExecute(steps, key);
+  const kind = inputKind(key);
+  const label = STAGE_LABEL[key] || key;
+
+  let preview = '';
+  if (key === 'script' && a.text) preview = btn(`openText('Script', S.script)`);
+  else if (key === 'images' && (a.images || []).length) preview = btn(`openGrid('Images', S.images, 'image')`);
+  else if (key === 'animate' && (a.clips || []).length) preview = btn(`openGrid('Clips', S.clips, 'video')`);
+  else if (key === 'voiceover' && a.audio) preview = btn(`openAudio(S.voiceover)`);
+  else if (key === 'transcript' && a.text) preview = btn(`openText('Transcript', S.transcript)`);
+  else if (key === 'stitch' && a.video) preview = btn(`openVideo(S.stitch)`, 'primary');
+  else if (key === 'publish' && (a.posts || []).length) preview = '<span class="hint">posted ✓</span>';
+
+  let inputHtml = '';
+  if (kind === 'script') inputHtml = `<textarea id="in-script" rows="6" placeholder="Click Generate to draft with AI, or paste/edit your own script, then Save.">${esc(a.text || '')}</textarea>`;
+  else if (kind === 'prompts') inputHtml = `<textarea id="in-images" rows="5" placeholder="One image prompt per line. Leave blank to auto-build from the script.">${esc((a.images || []).map((i) => i.prompt || '').join('\n'))}</textarea>`;
+  else if (kind === 'prompt') inputHtml = `<input id="in-animate" placeholder="Animation prompt (optional) — applied to every clip">`;
+  else if (kind === 'caption') inputHtml = `<textarea id="in-publish" rows="3" placeholder="Caption (blank = the funnel's caption + link). Executing this posts the reel."></textarea>`;
+
+  let actions;
+  if (key === 'script') {
+    actions = `<button class="act" onclick="genScript()" ${can ? '' : 'disabled'}>✨ Generate with AI</button>
+      <button class="act primary" onclick="exec('script')" ${can ? '' : 'disabled'}>Save script</button>`;
+  } else {
+    actions = `<button class="act primary" onclick="exec('${key}')" ${can ? '' : 'disabled'}>${key === 'publish' ? 'Post now' : 'Execute'}</button>`;
+  }
+
+  return `<div class="mcard">
+    <h3><span class="dot ${esc(s.status)}"></span>${esc(label)} <span class="hint">${esc(statusWord(s.status))}</span></h3>
+    ${s.error ? `<p class="ro">⚠ ${esc(s.error)}</p>` : ''}
+    ${inputHtml}
+    <div class="mrow">${actions} ${preview} <span id="msg-${esc(key)}" class="hint"></span></div>
+  </div>`;
+}
+
+function manualPage(row, steps) {
+  const total = sumInstanceCost(steps);
+  const data = {
+    script: (steps.find((s) => s.key === 'script')?.artifacts?.text) || '',
+    transcript: (steps.find((s) => s.key === 'transcript')?.artifacts?.text) || '',
+    images: ((steps.find((s) => s.key === 'images')?.artifacts?.images) || []).map((i) => i.driveId),
+    clips: ((steps.find((s) => s.key === 'animate')?.artifacts?.clips) || []).map((c) => c.driveId),
+    voiceover: (steps.find((s) => s.key === 'voiceover')?.artifacts?.audio?.driveId) || '',
+    stitch: finalVideoId(steps),
+  };
+  const running = (steps || []).some((s) => s.status === 'running');
+  const cards = MANUAL_STAGES.map((key) => manualCard(key, steps)).join('');
+
+  return shell(`Manual — ${shortId(row.id)}`, `
+    <div class="top">
+      <div><h1>${esc(row.title || 'Manual run')}</h1><div class="sub">${esc(row.funnel_name || '—')} · ${esc(shortId(row.id))} · 🎛 manual stepper</div></div>
+      <div class="toprow">${statusPill(row.status)}<a class="act" href="/api/v1/admin/instances">← All instances</a></div>
+    </div>
+    <p class="ro">Run each stage in order: edit the input where shown, <b>Execute</b>, <b>Preview</b>, then do the next. The final stage posts.${running ? ' <b>Running…</b> this page refreshes itself.' : ''}</p>
+    <div class="mcards">${cards}</div>
+    <p class="meta">Total AI cost ${esc(usd(total))} · created ${esc(formatIst(row.created_at))}</p>
+    <style>
+      .mcards{display:flex;flex-direction:column;gap:.7rem;margin:1rem 0}
+      .mcard{border:1px solid #24243a;border-radius:10px;padding:.7rem 1rem;background:#17172a}
+      .mcard h3{margin:0 0 .3rem;font-size:.95rem;display:flex;align-items:center;gap:.5rem}
+      .mcard textarea,.mcard input{width:100%;background:#0f0f1c;color:#e8e8f0;border:1px solid #2a2a44;border-radius:7px;padding:.5rem;font:inherit;margin:.3rem 0}
+      .mrow{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.3rem}
+      .mcard button[disabled]{opacity:.4;cursor:not-allowed}
+    </style>
+    ${previewModal()}
+  `, `
+    const S=${JSON.stringify(data)};
+    ${running ? 'setTimeout(function(){location.reload();},5000);' : ''}
+    function val(id){ const e=document.getElementById(id); return e?e.value:''; }
+    async function exec(key){
+      const m=document.getElementById('msg-'+key); if(m) m.textContent='Working…';
+      const input={};
+      if(key==='script') input.text=val('in-script');
+      else if(key==='images') input.prompts=val('in-images').split('\\n').map(function(s){return s.trim();}).filter(Boolean);
+      else if(key==='animate') input.prompt=val('in-animate');
+      else if(key==='publish') input.caption=val('in-publish');
+      try{
+        const r=await fetch('/api/v1/admin/instances/${row.id}/stage/'+key+'/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input:input})});
+        const j=await r.json();
+        if(j.ok) setTimeout(function(){location.reload();},1200);
+        else if(m) m.textContent='Failed: '+(j.error||'');
+      }catch(e){ if(m) m.textContent='Failed: '+e.message; }
+    }
+    function genScript(){ const t=document.getElementById('in-script'); if(t) t.value=''; exec('script'); }
   `);
 }
 

@@ -61,24 +61,29 @@ export async function runDueVideo({ windowMin = 15, now = nowIst(), log } = {}) 
         continue;
       }
 
+      const manual = !!cfg.manualStepper;
       const instance = await instanceService.createForFunnel({
         tenantId: funnel.tenant_id,
         funnel,
         title: `${funnel.name} — ${formatIst(scheduledFor, { withTime: false })}`,
         scheduledFor: scheduledFor.toJSDate(),
+        status: manual ? 'manual' : 'script_review',
       });
-      created.push({ funnel: funnel.name, instanceId: instance.id, scheduledFor: scheduledFor.toISO() });
+      created.push({ funnel: funnel.name, instanceId: instance.id, scheduledFor: scheduledFor.toISO(), manual });
       log?.info(
-        { funnel: funnel.name, instance: instance.id, scheduledFor: scheduledFor.toISO() },
-        'run-due-video: instance created (script_review)',
+        { funnel: funnel.name, instance: instance.id, scheduledFor: scheduledFor.toISO(), manual },
+        `run-due-video: instance created (${manual ? 'manual — awaiting operator' : 'script_review'})`,
       );
 
-      // Slice 5: generate the script, then open the script-review checkpoint
-      // (slice 4). Async + self-contained — a failure marks the instance failed,
-      // never the whole run. The remaining stages run after script approval.
-      stageRunner.runScriptAndReview({ instanceId: instance.id }).catch((e) =>
-        log?.error({ err: e.message, instance: instance.id }, 'run-due-video: script+review failed'),
-      );
+      // Auto funnels generate the script + open the script-review checkpoint now.
+      // Manual funnels pause here: the operator drives each stage in-app (the
+      // "manual stepper"); nothing runs until they click Execute. Turn Manual
+      // stepper OFF in the funnel to go back to this automatic path.
+      if (!manual) {
+        stageRunner.runScriptAndReview({ instanceId: instance.id }).catch((e) =>
+          log?.error({ err: e.message, instance: instance.id }, 'run-due-video: script+review failed'),
+        );
+      }
     } catch (err) {
       log?.error({ err: err.message, funnel: funnel.name }, 'run-due-video: funnel failed');
     }

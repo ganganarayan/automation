@@ -163,7 +163,8 @@ async function runTranscript(ctx, audioBuffer, audioDriveId) {
 
   await instanceService.updateStep(instance.id, 'transcript', { status: 'running', startedAt: new Date().toISOString() });
   const { text, minutes, durationSeconds, cues } = await tp.transcribe({ buffer: audioBuffer });
-  await instanceService.updateStep(instance.id, 'transcript', { status: 'done', artifacts: { text }, finishedAt: new Date().toISOString() });
+  // Persist cues too, so a manual stitch (run separately) can burn captions.
+  await instanceService.updateStep(instance.id, 'transcript', { status: 'done', artifacts: { text, cues: cues || [] }, finishedAt: new Date().toISOString() });
   await instanceService.recordCost(instance.id, 'transcript', costTranscript({ provider: tp.provider, minutes }));
   // Fill in the voiceover duration now that we know it (preserve the driveId).
   if (durationSeconds) {
@@ -224,7 +225,7 @@ export async function runStages({ instanceId }) {
 }
 
 /** Final-approve seam: post the reel to Post-for-Me; return the post refs. */
-export async function postInstance({ instanceId }) {
+export async function postInstance({ instanceId, captionOverride = '' }) {
   const { instance, cfg, resolved, providers } = await loadContext(instanceId);
   const steps = instanceService.parseSteps(instance);
   const stitch = steps.find((s) => s.key === 'stitch');
@@ -236,7 +237,8 @@ export async function postInstance({ instanceId }) {
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
 
   await providers.storage.shareAnyone(videoId);
-  const caption = [resolved.audiencePrefix, resolved.ctaLink].filter(Boolean).join('\n') || instance.title || '';
+  const caption = (captionOverride && captionOverride.trim())
+    || [resolved.audiencePrefix, resolved.ctaLink].filter(Boolean).join('\n') || instance.title || '';
   const scheduledAt = instance.scheduled_for ? new Date(instance.scheduled_for).toISOString() : undefined;
 
   const result = await publish.createPost({ accountIds, caption, mediaUrl: dlUrl(videoId), scheduledAt });
@@ -273,6 +275,117 @@ export async function regenerate({ instanceId, checkpoint, correction }) {
   }
 }
 
+// ---- manual stepper (run ONE stage at a time, from persisted artifacts) ----
+
+function stepArtifacts(instance, key) {
+  const s = instanceService.parseSteps(instance).find((x) => x.key === key);
+  return (s && s.artifacts) || {};
+}
+
+/** Images with optional per-scene prompt overrides (else derived from script). */
+async function manualImages(ctx, prompts) {
+  const { instance, cfg, resolved, providers } = ctx;
+  const folder = cfg.drive_folder_id || resolved.driveFolder || '';
+  const size = mapImageSize(cfg.image_size);
+  const overrides = Array.isArray(prompts) ? prompts.map((p) => String(p || '').trim()).filter(Boolean) : [];
+  const finalPrompts = overrides.length
+    ? overrides
+    : splitScriptToScenes(scriptTextOf(instance), clampSceneCount(cfg.image_count, 4)).map((sc) => sceneImagePrompt(sc, cfg.image_style));
+  const stamp = Date.now().toString(36);
+  await instanceService.updateStep(instance.id, 'images', { status: 'running', startedAt: new Date().toISOString(), error: null });
+  const images = [];
+  for (let i = 0; i < finalPrompts.length; i += 1) {
+    const buf = await providers.llm.generateImage({ prompt: finalPrompts[i], size });
+    const up = await providers.storage.uploadMedia(folder, buildMediaName('img', stamp, i, 'png'), 'image/png', buf);
+    images.push({ driveId: up.id, url: up.downloadUrl, prompt: finalPrompts[i] });
+  }
+  await instanceService.updateStep(instance.id, 'images', { status: 'done', artifacts: { images }, finishedAt: new Date().toISOString() });
+  await instanceService.recordCost(instance.id, 'images', costImages({ count: images.length, size }));
+  return images;
+}
+
+/** Animate the already-generated stills, with an optional prompt override. */
+async function manualAnimate(ctx, promptOverride) {
+  const { instance, cfg, resolved, providers } = ctx;
+  const folder = cfg.drive_folder_id || resolved.driveFolder || '';
+  const images = stepArtifacts(instance, 'images').images || [];
+  if (!images.length) throw new Error('no images to animate — run Images first');
+  const anim = createAnimationProvider(resolveAnimationConfig(cfg), log);
+  const stamp = Date.now().toString(36);
+  const override = String(promptOverride || '').trim();
+  await instanceService.updateStep(instance.id, 'animate', { status: 'running', startedAt: new Date().toISOString(), error: null });
+  const clips = [];
+  for (let i = 0; i < images.length; i += 1) {
+    const clipUrl = await anim.animateAndWait({ imageUrl: images[i].url, prompt: override || images[i].prompt });
+    const buf = await fetchBuffer(clipUrl);
+    const up = await providers.storage.uploadMedia(folder, buildMediaName('clip', stamp, i, 'mp4'), 'video/mp4', buf);
+    clips.push({ driveId: up.id, url: up.downloadUrl, sourceImageId: images[i].driveId });
+  }
+  await instanceService.updateStep(instance.id, 'animate', { status: 'done', artifacts: { clips }, finishedAt: new Date().toISOString() });
+  await instanceService.recordCost(instance.id, 'animate', costAnimation({ provider: anim.provider, seconds: totalClipSeconds(cfg.clip_length, clips.length) }));
+  return clips;
+}
+
+async function manualTranscript(ctx) {
+  const { instance, providers } = ctx;
+  const audioDriveId = stepArtifacts(instance, 'voiceover').audio?.driveId;
+  if (!audioDriveId) throw new Error('no voiceover to transcribe — run Voiceover first');
+  const audioBuffer = await providers.storage.download(audioDriveId);
+  return runTranscript(ctx, audioBuffer, audioDriveId);
+}
+
+async function manualStitch(ctx) {
+  const { instance, providers } = ctx;
+  const clips = stepArtifacts(instance, 'animate').clips || [];
+  if (!clips.length) throw new Error('no clips to stitch — run Image → video first');
+  const audioDriveId = stepArtifacts(instance, 'voiceover').audio?.driveId;
+  const audioBuffer = audioDriveId ? await providers.storage.download(audioDriveId) : null;
+  const cues = stepArtifacts(instance, 'transcript').cues || [];
+  return runStitch(ctx, clips, audioBuffer, cues);
+}
+
+/**
+ * Execute ONE stage for a manual run and persist its artifact — no auto-advance.
+ * Editable inputs: script.text (save edited script) or script.correction (regen);
+ * images.prompts[]; animate.prompt; publish.caption. On error the step is marked
+ * failed but the instance stays 'manual', so the operator can edit and retry.
+ */
+export async function executeManualStage({ instanceId, stepKey, input = {} }) {
+  const ctx = await loadContext(instanceId);
+  try {
+    if (stepKey === 'script') {
+      if (input.text && input.text.trim()) {
+        await instanceService.updateStep(instanceId, 'script', { status: 'done', artifacts: { text: input.text.trim() }, error: null, finishedAt: new Date().toISOString() });
+      } else {
+        await generateScript({ instanceId, correction: input.correction || '' });
+      }
+    } else if (stepKey === 'images') {
+      await manualImages(ctx, input.prompts);
+    } else if (stepKey === 'animate') {
+      await manualAnimate(ctx, input.prompt);
+    } else if (stepKey === 'voiceover') {
+      await runVoiceover(ctx);
+    } else if (stepKey === 'transcript') {
+      await manualTranscript(ctx);
+    } else if (stepKey === 'stitch') {
+      await manualStitch(ctx);
+    } else if (stepKey === 'publish') {
+      const refs = await postInstance({ instanceId, captionOverride: input.caption });
+      await instanceRepo.lockAsPosted(instanceId, { postRefs: refs, postedAt: new Date() });
+      await instanceRepo.setStatus(instanceId, 'posted');
+    } else {
+      throw new Error(`unknown stage ${stepKey}`);
+    }
+    return { ok: true };
+  } catch (err) {
+    log.error({ err: err.message, instance: instanceId, step: stepKey }, 'manual stage failed');
+    try {
+      await instanceService.updateStep(instanceId, stepKey, { status: 'failed', error: err.message, finishedAt: new Date().toISOString() });
+    } catch { /* best effort */ }
+    return { ok: false, error: err.message };
+  }
+}
+
 /** Register the pipeline hooks so review decisions drive generation. */
 export function registerPipeline() {
   review.setPipelineHooks({
@@ -289,5 +402,6 @@ export default {
   runStages,
   postInstance,
   regenerate,
+  executeManualStage,
   registerPipeline,
 };

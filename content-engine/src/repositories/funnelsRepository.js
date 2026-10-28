@@ -47,6 +47,16 @@ export const FUNNEL_FIELDS = [
   { key: 'capture_dm_text', label: 'Auto-DM message', type: 'textarea' },
   { key: 'capture_dm_link', label: 'Auto-DM link' },
   { key: 'capture_public_replies', label: 'Public reply variants (one per line)', type: 'textarea' },
+  {
+    key: 'manual_stepper',
+    label: 'Manual stepper',
+    type: 'select',
+    default: 'off',
+    options: [
+      { value: 'off', label: 'Off — scheduler runs the pipeline automatically' },
+      { value: 'on', label: 'On — step each stage by hand in the app' },
+    ],
+  },
 ];
 
 export async function listByTenant(tenantId = 'default') {
@@ -147,6 +157,7 @@ export async function resolve(funnel) {
     captureDmLink: c.capture_dm_link || '',
     capturePublicReplies: String(c.capture_public_replies || '')
       .split('\n').map((s) => s.trim()).filter(Boolean),
+    manualStepper: (c.manual_stepper || 'off').toLowerCase() === 'on',
   };
 }
 
