@@ -729,7 +729,23 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
       <h1>${esc(step.title)}</h1>
       <p class="desc">${esc(step.desc)}</p>
       <form id="wform" onsubmit="return false">${fieldsHtml}</form>
-      ${step.id === 'images' ? imageGateTestBlock() : ''}
+      ${cfg.manual_stepper === 'on' ? `<div class="igt">
+        <div class="igt-title">🎛 Manual mode is on for this funnel</div>
+        <p class="hint">This screen is the setup. To actually build a video stage-by-stage — Generate/edit each prompt → Execute → Preview → Approve → next → post — start a manual run. Each run opens a page with one card per stage (Script, Images, Image→video, Voiceover, Transcript, Final reel, Post), each with its input, an Execute button, and a Preview.</p>
+        <div class="row">
+          <button type="button" class="act" onclick="startManualRun()">▶ Start a manual run of this funnel</button>
+          <a class="act" href="/api/v1/admin/instances/manual">All manual runs</a>
+        </div>
+      </div>
+      <script>
+        async function startManualRun(){
+          try{
+            const r=await fetch('/api/v1/admin/instances/manual/new',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({funnelId:${funnel.id}})});
+            const j=await r.json();
+            if(j.ok) location.href='/api/v1/admin/instances/'+j.id; else alert(j.error||'failed');
+          }catch(e){ alert(e.message); }
+        }
+      </script>` : ''}
       <div id="toast" class="toast"></div>
     </div>
   </div>

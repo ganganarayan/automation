@@ -35,6 +35,13 @@ export const WIZARD_STEPS = [
       { key: 'approval_email', label: 'Approval email' },
       { key: 'cta_link', label: 'CTA / assessment link' },
       { key: 'audience_prefix', label: 'Audience prefix (caption line, optional)' },
+      {
+        key: 'manual_stepper', label: 'Run mode', type: 'select', default: 'off',
+        options: [
+          { value: 'off', label: 'Automatic — the scheduler runs the whole pipeline' },
+          { value: 'on', label: 'Manual — I run each stage by hand (Execute → Preview → Approve → next)' },
+        ],
+      },
       { key: 'generate_time', label: 'Generate/approval time (IST)', type: 'time', default: '22:00' },
       { key: 'generate_days', label: 'Days to run (blank = every day)', type: 'weekdays' },
       { key: 'publish_time', label: 'Publish time (IST)', type: 'time', default: '08:02' },
@@ -246,6 +253,11 @@ export const WIZARD_STEPS = [
       { key: 'postforme_api_key', label: 'Post for Me API key', type: 'secret' },
       { key: 'postforme_accounts', label: 'Post for Me accounts', type: 'json' },
       { key: 'account_map', label: 'Account map', type: 'json' },
+      // Comment-to-DM for this funnel's Instagram/Facebook posts (optional).
+      { key: 'capture_keyword', label: 'Auto-DM keyword on comments (blank = off)', placeholder: 'e.g. guide' },
+      { key: 'capture_dm_text', label: 'Auto-DM message', type: 'textarea' },
+      { key: 'capture_dm_link', label: 'Auto-DM link' },
+      { key: 'capture_public_replies', label: 'Public reply variants (one per line)', type: 'textarea' },
     ],
   },
 ];
