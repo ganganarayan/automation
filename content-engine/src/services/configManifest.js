@@ -65,6 +65,17 @@ export const CONFIG_MANIFEST = {
         ],
       },
       {
+        title: 'LinkedIn → WhatsApp relay (notify me; no auto-reply)',
+        fields: [
+          { key: 'linkedin_imap_user', label: 'Gmail address to watch (blank = SMTP user)' },
+          { key: 'linkedin_imap_pass', label: 'Gmail app password (blank = SMTP password)', type: 'secret', help: 'A Gmail app password (same kind as SMTP). The relay reads this mailbox over IMAP, it never sends from it.' },
+          { key: 'linkedin_imap_host', label: 'IMAP host', placeholder: 'imap.gmail.com' },
+          { key: 'linkedin_imap_mailbox', label: 'Mailbox / label to watch', placeholder: 'INBOX (or a Gmail label like LinkedIn)' },
+          { key: 'linkedin_wa_instance', label: 'WhatsApp (Evolution) instance name' },
+          { key: 'linkedin_wa_to', label: 'WhatsApp number to notify (with country code)' },
+        ],
+      },
+      {
         title: 'Email (SMTP — for approval & status notifications)',
         fields: [
           { key: 'smtp_host', label: 'SMTP host', placeholder: 'smtp.zoho.com / smtp.gmail.com' },

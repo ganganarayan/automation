@@ -53,3 +53,13 @@ jobs:
             "${{ secrets.CONTENT_ENGINE_URL }}/api/v1/jobs/run-due?window=15" \
             -H "X-Admin-Key: ${{ secrets.RUN_DUE_KEY }}" \
             -w '\nHTTP %{http_code}\n'
+
+      # LinkedIn -> WhatsApp relay: poll Gmail for new LinkedIn notifications and
+      # relay them to WhatsApp. Safe to run often; add a frequent cron line above
+      # (e.g. '*/15 * * * *') if you want near-real-time relays while asleep.
+      - name: Trigger poll-linkedin
+        run: |
+          curl -fsS -X POST \
+            "${{ secrets.CONTENT_ENGINE_URL }}/api/v1/jobs/poll-linkedin" \
+            -H "X-Admin-Key: ${{ secrets.RUN_DUE_KEY }}" \
+            -w '\nHTTP %{http_code}\n'
