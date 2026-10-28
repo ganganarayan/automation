@@ -15,9 +15,70 @@
  * Field types: 'text' (default) | 'secret' (masked) | 'json' | 'textarea'.
  */
 
-export const APPS = ['content-engine', 'tracking-bridge'];
+export const APPS = ['api-keys', 'content-engine', 'tracking-bridge'];
 
 export const CONFIG_MANIFEST = {
+  // Every provider credential lives HERE, once, for the whole tenant. Funnels
+  // never store keys — a funnel only picks which provider/model to use for each
+  // action, and the key is taken from this page.
+  'api-keys': {
+    label: 'API Keys',
+    blurb: 'All provider keys in one place. Funnels choose the provider/model; the key comes from here.',
+    groups: [
+      {
+        title: 'AI — text & image models',
+        fields: [
+          { key: 'openai_api_key', label: 'OpenAI API key', type: 'secret' },
+          { key: 'image_model', label: 'OpenAI image model', placeholder: 'gpt-image-2' },
+          { key: 'text_model', label: 'OpenAI text model', placeholder: 'gpt-5-mini' },
+          { key: 'gemini_api_key', label: 'Gemini API key', type: 'secret' },
+          { key: 'gemini_image_model', label: 'Gemini image model', placeholder: 'models/gemini-3.1-flash-image' },
+        ],
+      },
+      {
+        title: 'Animation (image → video)',
+        fields: [
+          { key: 'kling_access_key', label: 'Kling access key', type: 'secret' },
+          { key: 'kling_secret_key', label: 'Kling secret key', type: 'secret' },
+          { key: 'runway_api_key', label: 'Runway API key', type: 'secret' },
+          { key: 'hailuo_api_key', label: 'Hailuo / MiniMax API key', type: 'secret' },
+          { key: 'hailuo_group_id', label: 'Hailuo / MiniMax GroupId', placeholder: 'from the MiniMax console' },
+        ],
+      },
+      {
+        title: 'Voice & transcript',
+        fields: [
+          { key: 'elevenlabs_api_key', label: 'ElevenLabs API key', type: 'secret' },
+          { key: 'heygen_api_key', label: 'HeyGen API key', type: 'secret' },
+          { key: 'transcript_api_key', label: 'Whisper / TurboScribe API key (blank = use the OpenAI key)', type: 'secret' },
+        ],
+      },
+      {
+        title: 'Publishing & video',
+        fields: [
+          { key: 'postforme_api_key', label: 'Post for Me API key', type: 'secret', help: 'One key for every funnel. Each funnel still picks which connected accounts it posts to.' },
+          { key: 'json2video_api_key', label: 'JSON2Video API key', type: 'secret' },
+        ],
+      },
+      {
+        title: 'Meta (comment → DM)',
+        fields: [
+          { key: 'meta_app_id', label: 'Meta app ID' },
+          { key: 'meta_app_secret', label: 'Meta app secret', type: 'secret', help: 'Verifies the X-Hub-Signature-256 on every incoming webhook.' },
+          { key: 'meta_verify_token', label: 'Webhook verify token', type: 'generated_secret', help: 'Click Generate, then paste the SAME value into the Meta webhook setup screen.' },
+          { key: 'meta_page_tokens', label: 'Page / IG access tokens (JSON: id → token)', type: 'json' },
+        ],
+      },
+      {
+        title: 'Gmail (LinkedIn relay)',
+        fields: [
+          { key: 'linkedin_imap_pass', label: 'Gmail app password (blank = use the SMTP password)', type: 'secret' },
+        ],
+      },
+    ],
+    modules: [],
+  },
+
   'content-engine': {
     label: 'content-engine',
     blurb: 'Content generation, approval, publishing, reports, dashboard.',
@@ -34,17 +95,6 @@ export const CONFIG_MANIFEST = {
         ],
       },
       {
-        title: 'AI keys (shared by all funnels)',
-        fields: [
-          { key: 'openai_api_key', label: 'OpenAI API key', type: 'secret' },
-          { key: 'image_model', label: 'OpenAI image model', placeholder: 'gpt-image-2' },
-          { key: 'text_model', label: 'OpenAI text model', placeholder: 'gpt-5-mini' },
-          { key: 'gemini_api_key', label: 'Gemini API key', type: 'secret' },
-          { key: 'gemini_image_model', label: 'Gemini image model', placeholder: 'models/gemini-3.1-flash-image' },
-          { key: 'json2video_api_key', label: 'JSON2Video API key', type: 'secret' },
-        ],
-      },
-      {
         title: 'Reports & Instagram automation',
         fields: [
           { key: 'report_email', label: 'Report email' },
@@ -56,19 +106,14 @@ export const CONFIG_MANIFEST = {
       {
         title: 'Comment capture (Meta — Instagram & Facebook auto-DM)',
         fields: [
-          { key: 'meta_app_id', label: 'Meta app ID' },
-          { key: 'meta_app_secret', label: 'Meta app secret', type: 'secret', help: 'Used to verify the X-Hub-Signature-256 on every incoming webhook. Never leaves the server.' },
-          { key: 'meta_verify_token', label: 'Webhook verify token', type: 'generated_secret', help: 'Click Generate, then paste the SAME value into the Meta webhook setup screen. Meta echoes it back once to confirm the callback URL.' },
-          { key: 'meta_page_tokens', label: 'Page / IG access tokens (JSON: id → token)', type: 'json', help: 'Map each Facebook Page ID and Instagram account ID to its long-lived access token, e.g. {"178…":"EAAG…"}. Used to send the DM and public reply. (Step 4.)' },
-          { key: 'meta_self_ids', label: 'Our own account IDs (JSON array)', type: 'json', help: 'IG user IDs / Page IDs we post as. Comments FROM these are ignored so we never reply to ourselves.' },
+          { key: 'meta_self_ids', label: 'Our own account IDs (JSON array)', type: 'json', help: 'IG user IDs / Page IDs we post as. Comments FROM these are ignored so we never reply to ourselves. (Meta app ID/secret, verify token and page tokens live under API Keys.)' },
           { key: 'capture_abuse_words', label: 'Extra abuse words to block (comma / new line)', type: 'textarea', help: 'Merged with the built-in Hindi + Hinglish + English blocklist. A comment that matches gets logged but no DM is sent.' },
         ],
       },
       {
         title: 'LinkedIn → WhatsApp relay (notify me; no auto-reply)',
         fields: [
-          { key: 'linkedin_imap_user', label: 'Gmail address to watch (blank = SMTP user)' },
-          { key: 'linkedin_imap_pass', label: 'Gmail app password (blank = SMTP password)', type: 'secret', help: 'A Gmail app password (same kind as SMTP). The relay reads this mailbox over IMAP, it never sends from it.' },
+          { key: 'linkedin_imap_user', label: 'Gmail address to watch (blank = SMTP user)', help: 'The Gmail app password for this mailbox lives under API Keys.' },
           { key: 'linkedin_imap_host', label: 'IMAP host', placeholder: 'imap.gmail.com' },
           { key: 'linkedin_imap_mailbox', label: 'Mailbox / label to watch', placeholder: 'INBOX (or a Gmail label like LinkedIn)' },
           { key: 'linkedin_wa_instance', label: 'WhatsApp (Evolution) instance name' },

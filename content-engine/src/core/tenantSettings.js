@@ -113,6 +113,20 @@ export async function forTenant(tenantId = 'default') {
       imageModel: pick('gemini_image_model', settings.gemini.imageModel),
     },
     postformeKey: pick('postforme_api_key', settings.postforme.apiKey),
+    // Central provider credentials (API Keys page). Funnels pick the provider;
+    // the key is always taken from here, never from funnel_config.
+    animation: {
+      klingAccessKey: pick('kling_access_key', ''),
+      klingSecretKey: pick('kling_secret_key', ''),
+      runwayApiKey: pick('runway_api_key', ''),
+      hailuoApiKey: pick('hailuo_api_key', ''),
+      hailuoGroupId: pick('hailuo_group_id', ''),
+    },
+    tts: {
+      elevenlabsApiKey: pick('elevenlabs_api_key', ''),
+      heygenApiKey: pick('heygen_api_key', ''),
+    },
+    transcriptKey: pick('transcript_api_key', ''),
     video: {
       json2videoApiKey: pick('json2video_api_key', settings.video.json2videoApiKey),
     },

@@ -33,6 +33,7 @@ import * as imageGateService from '../services/imageGateService.js';
 import * as configService from '../services/configService.js';
 import * as users from '../repositories/usersRepository.js';
 import * as funnels from '../repositories/funnelsRepository.js';
+import * as tenantSettings from '../core/tenantSettings.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { buildProviders } from '../services/providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
@@ -175,13 +176,13 @@ export function register(ctx) {
   router.post('/admin/funnels/fetch-accounts', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      const id = Number(req.body?.funnel_id);
       let apiKey = (req.body?.api_key || '').toString().trim();
-      if (!apiKey && id) {
-        const cfg = await funnels.getConfig(id);
-        apiKey = cfg.postforme_api_key || '';
+      if (!apiKey) {
+        // The Post for Me key is central now (Settings → API Keys), not per funnel.
+        const t = await tenantSettings.forTenant(req.tenantId);
+        apiKey = t.postformeKey || '';
       }
-      if (!apiKey) return res.json({ ok: false, error: 'Paste your Post for Me API key above (or Save it) first.' });
+      if (!apiKey) return res.json({ ok: false, error: 'No Post for Me API key — set it once under Settings → API Keys, then come back and Fetch.' });
       const provider = createPostForMeProvider({ apiKey }, log);
       const data = await provider.listAccounts();
       return res.json({ ok: true, accounts: normalizeAccounts(data) });

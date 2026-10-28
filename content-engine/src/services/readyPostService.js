@@ -96,10 +96,12 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
   const clean = normalizeSelections(selections);
   if (!clean.length) throw new Error('no videos selected');
 
-  if (!resolved.postformeKey) throw new Error('This funnel has no Post for Me API key (set it in settings)');
+  // The Post for Me key is central (API Keys page); the funnel picks the accounts.
+  const postformeKey = providers.resolved.postformeKey || '';
+  if (!postformeKey) throw new Error('No Post for Me API key — set it once under Settings → API Keys');
   const accounts = Array.isArray(resolved.accounts) ? resolved.accounts : [];
   if (!accounts.length) throw new Error('This funnel has no Post for Me accounts configured');
-  const publish = createPostForMeProvider({ apiKey: resolved.postformeKey }, log);
+  const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
 
   // YouTube needs a title. When any selected account is a YouTube one and the
   // funnel has a direct_yt_title, pass it as a per-platform configuration (the

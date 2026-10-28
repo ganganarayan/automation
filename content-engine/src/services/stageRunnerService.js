@@ -67,6 +67,40 @@ async function loadContext(instanceId) {
   return { instance, funnel, cfg, resolved, providers };
 }
 
+/**
+ * Keys always come from the central API Keys page (tenant settings); the funnel
+ * only chooses the provider/model. These three helpers are the single place that
+ * marries a funnel's choice to its credential.
+ */
+function withAnimationKeys(cfg, t) {
+  const a = (t && t.animation) || {};
+  return {
+    ...cfg,
+    kling_access_key: a.klingAccessKey || '',
+    kling_secret_key: a.klingSecretKey || '',
+    runway_api_key: a.runwayApiKey || '',
+    hailuo_api_key: a.hailuoApiKey || '',
+    hailuo_group_id: a.hailuoGroupId || '',
+  };
+}
+
+function ttsKeyFor(cfg, t) {
+  const k = (t && t.tts) || {};
+  return String(cfg.tts_provider || 'elevenlabs').toLowerCase() === 'heygen'
+    ? (k.heygenApiKey || '')
+    : (k.elevenlabsApiKey || '');
+}
+
+/** Generate one still with the funnel's chosen image model (auto | openai | gemini). */
+async function genImage(providers, cfg, prompt, size) {
+  const choice = String(cfg.image_provider || 'auto').toLowerCase();
+  const r = providers.resolved || {};
+  if (choice === 'gemini') return providers.llm.generateImageGemini({ prompt });
+  if (choice === 'openai') return providers.llm.generateImage({ prompt, size });
+  if (!r.openai?.apiKey && r.gemini?.apiKey) return providers.llm.generateImageGemini({ prompt });
+  return providers.llm.generateImage({ prompt, size });
+}
+
 function scriptTextOf(instance) {
   const steps = instanceService.parseSteps(instance);
   const s = steps.find((x) => x.key === 'script');
@@ -112,7 +146,7 @@ async function runImages(ctx) {
   const images = [];
   for (let i = 0; i < scenes.length; i += 1) {
     const prompt = sceneImagePrompt(scenes[i], cfg.image_style);
-    const buf = await providers.llm.generateImage({ prompt, size });
+    const buf = await genImage(providers, cfg, prompt, size);
     const up = await providers.storage.uploadMedia(folder, buildMediaName('img', stamp, i, 'png'), 'image/png', buf);
     images.push({ driveId: up.id, url: up.downloadUrl, prompt });
   }
@@ -125,8 +159,7 @@ async function runImages(ctx) {
 async function runAnimate(ctx, images) {
   const { instance, cfg, resolved, providers } = ctx;
   const folder = cfg.drive_folder_id || resolved.driveFolder || '';
-  const animCfg = resolveAnimationConfig(cfg);
-  const anim = createAnimationProvider(animCfg, log);
+  const anim = createAnimationProvider(resolveAnimationConfig(withAnimationKeys(cfg, providers.resolved)), log);
   const stamp = Date.now().toString(36);
 
   await instanceService.updateStep(instance.id, 'animate', { status: 'running', startedAt: new Date().toISOString() });
@@ -146,7 +179,7 @@ async function runAnimate(ctx, images) {
 async function runVoiceover(ctx) {
   const { instance, cfg, resolved, providers } = ctx;
   const folder = cfg.drive_folder_id || resolved.driveFolder || '';
-  const tts = createTtsProvider({ provider: cfg.tts_provider, apiKey: cfg.tts_api_key, voiceId: cfg.voice_id }, log);
+  const tts = createTtsProvider({ provider: cfg.tts_provider, apiKey: ttsKeyFor(cfg, providers.resolved), voiceId: cfg.voice_id }, log);
 
   await instanceService.updateStep(instance.id, 'voiceover', { status: 'running', startedAt: new Date().toISOString() });
   const { buffer, chars } = await tts.synthesize({ text: scriptTextOf(instance) });
@@ -159,7 +192,7 @@ async function runVoiceover(ctx) {
 /** Transcribe the voiceover for timed captions, record transcription cost. */
 async function runTranscript(ctx, audioBuffer, audioDriveId) {
   const { instance, cfg, providers } = ctx;
-  const tp = createTranscriptProvider({ apiKey: cfg.transcript_api_key || providers.resolved.openai.apiKey }, log);
+  const tp = createTranscriptProvider({ apiKey: providers.resolved.transcriptKey || providers.resolved.openai.apiKey }, log);
 
   await instanceService.updateStep(instance.id, 'transcript', { status: 'running', startedAt: new Date().toISOString() });
   const { text, minutes, durationSeconds, cues } = await tp.transcribe({ buffer: audioBuffer });
@@ -233,7 +266,7 @@ export async function postInstance({ instanceId, captionOverride = '' }) {
   if (!videoId) throw new Error('no final reel to post');
 
   const accountIds = Array.isArray(resolved.accounts) ? resolved.accounts : [];
-  const postformeKey = resolved.postformeKey || cfg.postforme_api_key || '';
+  const postformeKey = providers.resolved.postformeKey || '';
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
 
   await providers.storage.shareAnyone(videoId);
@@ -295,7 +328,7 @@ async function manualImages(ctx, prompts) {
   await instanceService.updateStep(instance.id, 'images', { status: 'running', startedAt: new Date().toISOString(), error: null });
   const images = [];
   for (let i = 0; i < finalPrompts.length; i += 1) {
-    const buf = await providers.llm.generateImage({ prompt: finalPrompts[i], size });
+    const buf = await genImage(providers, cfg, finalPrompts[i], size);
     const up = await providers.storage.uploadMedia(folder, buildMediaName('img', stamp, i, 'png'), 'image/png', buf);
     images.push({ driveId: up.id, url: up.downloadUrl, prompt: finalPrompts[i] });
   }
@@ -310,7 +343,7 @@ async function manualAnimate(ctx, promptOverride) {
   const folder = cfg.drive_folder_id || resolved.driveFolder || '';
   const images = stepArtifacts(instance, 'images').images || [];
   if (!images.length) throw new Error('no images to animate — run Images first');
-  const anim = createAnimationProvider(resolveAnimationConfig(cfg), log);
+  const anim = createAnimationProvider(resolveAnimationConfig(withAnimationKeys(cfg, providers.resolved)), log);
   const stamp = Date.now().toString(36);
   const override = String(promptOverride || '').trim();
   await instanceService.updateStep(instance.id, 'animate', { status: 'running', startedAt: new Date().toISOString(), error: null });

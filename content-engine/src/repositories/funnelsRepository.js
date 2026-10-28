@@ -22,7 +22,6 @@ export const FUNNEL_FIELDS = [
   { key: 'sheet_id', label: 'Content sheet ID' },
   { key: 'sheet_tab', label: 'Sheet tab name (blank = first tab)', placeholder: 'e.g. Sheet1 / Content' },
   { key: 'drive_folder_id', label: 'Drive folder ID (image uploads)' },
-  { key: 'postforme_api_key', label: 'Post for Me API key', type: 'secret' },
   { key: 'postforme_accounts', label: 'Post for Me account IDs (JSON array)', type: 'json' },
   { key: 'account_map', label: 'Account map (JSON id → {platform,account_name})', type: 'json' },
   { key: 'approval_email', label: 'Approval email' },
@@ -141,7 +140,8 @@ export async function resolve(funnel) {
     sheetId: c.sheet_id || '',
     sheetTab: c.sheet_tab || '', // blank = auto-detect the first tab
     driveFolder: c.drive_folder_id || '',
-    postformeKey: c.postforme_api_key || '',
+    // NOTE: no postformeKey here — the Post for Me key is central (API Keys page,
+    // tenant settings). A funnel only chooses WHICH connected accounts it posts to.
     accounts: json(c.postforme_accounts, []),
     accountMap: json(c.account_map, {}),
     approvalEmail: c.approval_email || '',

@@ -132,7 +132,8 @@ export async function publish(approval) {
   const f = await funnels.resolve(funnelRow);
   const log = childLogger({ module: 'funnelPoster', tenant_id: f.tenantId, funnel: f.name });
   const providers = await buildProviders(f.tenantId);
-  const publisher = createPostForMeProvider({ apiKey: f.postformeKey || providers.resolved.postformeKey }, log);
+  // Post for Me key is central (API Keys page); the funnel only picks accounts.
+  const publisher = createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log);
 
   const accounts = f.accounts || [];
   if (!accounts.length) {

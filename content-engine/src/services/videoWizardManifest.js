@@ -101,6 +101,14 @@ export const WIZARD_STEPS = [
           { value: 'square', label: 'Square (1:1)' },
         ],
       },
+      {
+        key: 'image_provider', label: 'Image model', type: 'select', default: 'auto',
+        options: [
+          { value: 'auto', label: 'Auto — OpenAI if its key is set, else Gemini' },
+          { value: 'openai', label: 'OpenAI' },
+          { value: 'gemini', label: 'Gemini' },
+        ],
+      },
       { key: 'image_count', label: 'Images per video', placeholder: 'e.g. 12' },
       { key: 'image_style', label: 'Image style prompt', type: 'textarea', placeholder: 'look, palette, composition, consistency notes' },
       {
@@ -116,7 +124,7 @@ export const WIZARD_STEPS = [
     id: 'animate',
     title: 'Image → video',
     icon: 'ti-movie',
-    desc: 'Animate each kept still into a short clip. Clips are saved to Drive, then stitched later. Fill the keys for the provider you pick.',
+    desc: 'Animate each kept still into a short clip. Clips are saved to Drive, then stitched later. Pick the provider — its key comes from the API Keys page.',
     requiredFn: animateRequired,
     fields: [
       {
@@ -127,11 +135,6 @@ export const WIZARD_STEPS = [
           { value: 'hailuo', label: 'Hailuo / MiniMax' },
         ],
       },
-      { key: 'kling_access_key', label: 'Kling access key (Kling only)', type: 'secret' },
-      { key: 'kling_secret_key', label: 'Kling secret key (Kling only)', type: 'secret' },
-      { key: 'runway_api_key', label: 'Runway API key (Runway only)', type: 'secret' },
-      { key: 'hailuo_api_key', label: 'Hailuo / MiniMax API key (Hailuo only)', type: 'secret' },
-      { key: 'hailuo_group_id', label: 'Hailuo / MiniMax GroupId (Hailuo only)', placeholder: 'from the MiniMax console' },
       {
         key: 'clip_length', label: 'Clip length', type: 'select', default: '5',
         options: [
@@ -171,7 +174,6 @@ export const WIZARD_STEPS = [
           { value: 'heygen', label: 'HeyGen' },
         ],
       },
-      { key: 'tts_api_key', label: 'Clone provider API key', type: 'secret' },
       { key: 'voice_id', label: 'Voice ID', placeholder: 'the cloned voice to use' },
     ],
   },
@@ -190,7 +192,6 @@ export const WIZARD_STEPS = [
           { value: 'turboscribe', label: 'TurboScribe' },
         ],
       },
-      { key: 'transcript_api_key', label: 'Transcription API key (Whisper / TurboScribe)', type: 'secret' },
       {
         key: 'captions', label: 'On-screen captions', type: 'select', default: 'on',
         options: [
@@ -247,10 +248,9 @@ export const WIZARD_STEPS = [
     id: 'publish',
     title: 'Publish',
     icon: 'ti-send',
-    desc: 'Once approved, the reel is posted to this funnel’s channels through Post for Me.',
-    required: ['postforme_api_key', 'postforme_accounts'],
+    desc: 'Once approved, the reel is posted to this funnel’s channels through Post for Me. The API key lives on the API Keys page — here you only pick which connected accounts this funnel posts to.',
+    required: ['postforme_accounts'],
     fields: [
-      { key: 'postforme_api_key', label: 'Post for Me API key', type: 'secret' },
       { key: 'postforme_accounts', label: 'Post for Me accounts', type: 'json' },
       { key: 'account_map', label: 'Account map', type: 'json' },
       // Comment-to-DM for this funnel's Instagram/Facebook posts (optional).
@@ -263,15 +263,12 @@ export const WIZARD_STEPS = [
 ];
 
 /**
- * Which keys the image→video step needs depends on the chosen provider:
- * Kling signs a JWT (access key + secret), Runway/Hailuo use a bearer key, and
- * Hailuo additionally needs the MiniMax GroupId to fetch the finished file.
+ * The image→video step no longer holds any credentials — the provider's keys
+ * live on the central API Keys page — so the funnel only has to pick a provider.
+ * Kept as a function so per-provider funnel requirements can return here later.
  */
-export function animateRequired(cfg) {
-  const provider = (cfg && cfg.animation_provider) || 'kling';
-  if (provider === 'runway') return ['runway_api_key'];
-  if (provider === 'hailuo') return ['hailuo_api_key', 'hailuo_group_id'];
-  return ['kling_access_key', 'kling_secret_key'];
+export function animateRequired() {
+  return [];
 }
 
 /** Index of a step id, or -1. */
