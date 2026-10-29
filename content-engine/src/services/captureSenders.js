@@ -73,6 +73,32 @@ export function createCaptureSenders({ request: req = realRequest, version = DEF
       );
     },
 
+    /** A normal message inside the open 24h window (not a private reply). */
+    async sendMessage({ accountId, pageToken, recipientId, text, link }) {
+      const body = link && !String(text || '').includes(link) ? `${text}
+${link}` : (text || '');
+      return call(
+        `${GRAPH}/${version}/${encodeURIComponent(accountId)}/messages`,
+        { method: 'POST', headers: auth(pageToken), body: { recipient: { id: recipientId }, message: { text: body } } },
+        'capture.sendMessage',
+      );
+    },
+
+    /**
+     * Does this person follow the business? Instagram only, and ONLY readable
+     * once they have messaged us (Meta requires profile consent — a comment
+     * alone returns an error). Returns { follows: true|false|null, username }.
+     */
+    async getUserProfile({ pageToken, userId }) {
+      const data = await call(
+        `${GRAPH}/${version}/${encodeURIComponent(userId)}?fields=name,username,is_user_follow_business`,
+        { method: 'GET', headers: auth(pageToken) },
+        'capture.userProfile',
+      );
+      const follows = typeof data?.is_user_follow_business === 'boolean' ? data.is_user_follow_business : null;
+      return { follows, username: data?.username || null, name: data?.name || null };
+    },
+
     /** Delete a comment on the platform (used by the admin delete button). */
     async deleteComment({ pageToken, commentId }) {
       return call(

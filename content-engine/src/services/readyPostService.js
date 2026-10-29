@@ -135,7 +135,9 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
           platforms: captureRules.dmPlatforms(accounts, accountMap),
           postformePostId: ref,
           keyword: resolved.captureKeyword, dmText: resolved.captureDmText, dmLink: resolved.captureDmLink,
-          publicReplyVariants: resolved.capturePublicReplies, log,
+          publicReplyVariants: resolved.capturePublicReplies,
+          requireFollow: resolved.captureRequireFollow, followupText: resolved.captureFollowupText,
+          notFollowingText: resolved.captureNotFollowingText, log,
         }).catch((err) => log.warn({ err: err.message }, 'capture rule create failed (posted anyway)'));
       }
       const instanceId = await recordPostedInstance({ funnel, driveId: sel.driveId, caption, scheduledIso, ref });

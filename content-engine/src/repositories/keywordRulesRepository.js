@@ -27,13 +27,17 @@ export async function upsert({
   dmText = '',
   dmLink = null,
   publicReplyVariants = [],
+  requireFollow = false,
+  followupText = null,
+  notFollowingText = null,
   active = true,
 }) {
   const { rows } = await query(
     `INSERT INTO keyword_rules
        (tenant_id, funnel_id, platform, platform_post_id, account_id, postforme_post_id, lane,
-        keyword, match_mode, dm_text, dm_link, public_reply_variants, active)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13)
+        keyword, match_mode, dm_text, dm_link, public_reply_variants, active,
+        require_follow, followup_text, not_following_text)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16)
      ON CONFLICT (tenant_id, postforme_post_id, platform, keyword) DO UPDATE SET
        funnel_id = EXCLUDED.funnel_id,
        lane = EXCLUDED.lane,
@@ -42,11 +46,15 @@ export async function upsert({
        dm_link = EXCLUDED.dm_link,
        public_reply_variants = EXCLUDED.public_reply_variants,
        active = EXCLUDED.active,
+       require_follow = EXCLUDED.require_follow,
+       followup_text = EXCLUDED.followup_text,
+       not_following_text = EXCLUDED.not_following_text,
        updated_at = now()
      RETURNING *`,
     [
       tenantId, funnelId, platform, platformPostId, accountId, postformePostId, lane,
       keyword, matchMode, dmText, dmLink, JSON.stringify(publicReplyVariants || []), active,
+      !!requireFollow, followupText, notFollowingText,
     ],
   );
   return rows[0];

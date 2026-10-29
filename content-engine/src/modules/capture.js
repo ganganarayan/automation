@@ -19,11 +19,12 @@ import * as jobRunner from '../core/jobRunner.js';
 import * as captureService from '../services/captureService.js';
 import * as captureConfig from '../services/captureConfig.js';
 import { captureSenders } from '../services/captureSenders.js';
-import { verifyMetaSignature, parseCommentEvents } from '../utils/captureSpec.js';
+import { verifyMetaSignature, parseCommentEvents, parseMessageEvents } from '../utils/captureSpec.js';
 import { keyOk } from '../services/accessService.js';
 import { formatIst } from '../utils/time.js';
 
 const JOB_TYPE = 'capture_comment';
+const REPLY_JOB = 'capture_reply';
 
 export function register(ctx) {
   const { router, log } = ctx;
@@ -127,7 +128,14 @@ export function register(ctx) {
       for (const event of events) {
         await jobRunner.enqueueJob({ tenantId: req.tenantId, type: JOB_TYPE, payload: { event } });
       }
-      if (events.length) req.log?.info?.({ count: events.length }, 'capture: comment events queued');
+      // Replies to our DMs drive the follow gate (and open the 24h window).
+      const replies = parseMessageEvents(req.body);
+      for (const event of replies) {
+        await jobRunner.enqueueJob({ tenantId: req.tenantId, type: REPLY_JOB, payload: { event } });
+      }
+      if (events.length || replies.length) {
+        req.log?.info?.({ comments: events.length, replies: replies.length }, 'capture: events queued');
+      }
     } catch (err) {
       req.log?.error?.({ err: err.message }, 'capture: failed to queue comment events');
     }
@@ -152,12 +160,44 @@ export function register(ctx) {
     { maxAttempts: 5, backoffSeconds: 60 },
   );
 
+  // Follow gate: someone replied to our DM, so we may now read follower status.
+  jobRunner.registerHandler(
+    REPLY_JOB,
+    async (job) => {
+      const tenantId = job.tenant_id;
+      const event = job.payload?.event;
+      if (!event) return;
+      const cfg = await captureConfig.forTenant(tenantId);
+      await captureService.processMessageEvent(
+        { tenantId, event, selfIds: cfg.selfIds },
+        { rules, leads, senders: captureSenders, tokenFor: captureConfig.tokenFor, captureCfg: cfg, log },
+      );
+    },
+    { maxAttempts: 5, backoffSeconds: 60 },
+  );
+
   log.info('capture admin registered at /api/v1/admin/capture (+ /webhook/meta-comments)');
 }
 
 // ---- rendering -------------------------------------------------------------
 
 const PLATFORM_LABEL = { instagram: 'Instagram', facebook: 'Facebook' };
+
+const FOLLOWUP_LABEL = {
+  pending: '⏳ awaiting reply',
+  running: '⏳ sending',
+  delivered: '🟢 link delivered',
+  nudged: '🟡 asked to follow',
+  skipped: '⚪ skipped',
+  failed: '🔴 failed',
+};
+
+/** Follow-up state + what we learned about following (only known after a reply). */
+function followupCell(l) {
+  const base = FOLLOWUP_LABEL[l.followup_status] || esc(l.followup_status || '—');
+  const f = l.follows === true ? ' · follows' : l.follows === false ? ' · not following' : '';
+  return `${base}${f ? `<br><span class="muted">${esc(f.replace(' · ', ''))}</span>` : ''}`;
+}
 
 function dmStatusDot(status) {
   const map = {
@@ -180,7 +220,7 @@ function capturePage(ruleRows, leadRows) {
 
   const leadsHtml = leadRows.length
     ? leadRows.map(leadRow).join('')
-    : `<tr><td colspan="7" class="empty">No leads captured yet.</td></tr>`;
+    : `<tr><td colspan="8" class="empty">No leads captured yet.</td></tr>`;
 
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -225,7 +265,7 @@ function capturePage(ruleRows, leadRows) {
 
   <h2>Captured leads</h2>
   <div class="card"><table>
-    <thead><tr><th>Platform</th><th>Keyword</th><th>Lane</th><th>Username</th><th>Comment time</th><th>DM status</th><th></th></tr></thead>
+    <thead><tr><th>Platform</th><th>Keyword</th><th>Lane</th><th>Username</th><th>Comment time</th><th>DM status</th><th>Follow-up</th><th></th></tr></thead>
     <tbody>${leadsHtml}</tbody>
   </table></div>
 </main>
@@ -239,7 +279,7 @@ function ruleRow(r) {
     <td>${esc(r.lane || '—')}</td>
     <td class="kw">${esc(r.keyword)}</td>
     <td><span class="pill">${esc(r.match_mode)}</span></td>
-    <td class="txt">${esc(truncate(r.dm_text, 140))}${r.dm_link ? `<br><span class="muted">${esc(r.dm_link)}</span>` : ''}<br><span class="muted">${variants} reply variant${variants === 1 ? '' : 's'}</span></td>
+    <td class="txt">${esc(truncate(r.dm_text, 140))}${r.dm_link ? `<br><span class="muted">${esc(r.dm_link)}</span>` : ''}<br><span class="muted">${variants} reply variant${variants === 1 ? '' : 's'}${r.require_follow ? ' · 🔒 follow required' : ''}</span></td>
     <td><span class="pill ${r.active ? 'on' : 'off'}">${r.active ? 'ON' : 'OFF'}</span></td>
     <td><form class="inline" method="post" action="/api/v1/admin/capture/rules/${r.id}/toggle">
       <button class="btn-toggle" type="submit">${r.active ? 'Turn off' : 'Turn on'}</button>
@@ -255,6 +295,7 @@ function leadRow(l) {
     <td>${esc(l.commenter_username || l.commenter_id || '—')}</td>
     <td>${esc(formatIst(l.comment_created_at))}</td>
     <td>${dmStatusDot(l.dm_status)}${l.error ? `<br><span class="muted">${esc(truncate(l.error, 80))}</span>` : ''}</td>
+    <td>${followupCell(l)}</td>
     <td><form class="inline" method="post" action="/api/v1/admin/capture/leads/${l.id}/delete"
           onsubmit="return confirm('Delete this lead${''}? (removes the log row)')">
       <button class="btn-del" type="submit">Delete</button>

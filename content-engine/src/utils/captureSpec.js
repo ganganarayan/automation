@@ -200,6 +200,38 @@ export function parseCommentEvents(body) {
   return out.filter((e) => e.commentId);
 }
 
+/**
+ * Flatten a Meta webhook body into INBOUND message events (someone replying to
+ * our DM). Echoes — messages we sent — are dropped, as are delivery/read
+ * receipts. A reply is what grants profile consent and opens the 24h window.
+ */
+export function parseMessageEvents(body) {
+  const out = [];
+  if (!body || !Array.isArray(body.entry)) return out;
+  const platform = body.object === 'instagram' ? 'instagram' : body.object === 'page' ? 'facebook' : '';
+  if (!platform) return out;
+
+  for (const entry of body.entry) {
+    const accountId = String(entry?.id || '');
+    for (const m of entry?.messaging || []) {
+      const msg = m?.message;
+      if (!msg) continue;            // delivery / read receipt
+      if (msg.is_echo) continue;     // our own outbound message
+      const senderId = String(m?.sender?.id || '');
+      if (!senderId) continue;
+      out.push({
+        platform,
+        accountId,
+        senderId,
+        messageId: String(msg.mid || ''),
+        text: msg.text || '',
+        at: toDate(m.timestamp),
+      });
+    }
+  }
+  return out;
+}
+
 export default {
   normalize,
   matchKeyword,
@@ -213,4 +245,5 @@ export default {
   pickVariant,
   verifyMetaSignature,
   parseCommentEvents,
+  parseMessageEvents,
 };

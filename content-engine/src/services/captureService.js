@@ -140,4 +140,74 @@ export async function processCommentEvent({ tenantId = 'default', event, now = n
   return { outcome: 'sent', leadId: lead.id };
 }
 
-export default { processCommentEvent };
+/**
+ * Process an inbound REPLY to one of our DMs — the follow gate.
+ *
+ * Meta only grants profile consent once the person messages us, so this is the
+ * first (and only) moment we can read follower status. It is also when the 24h
+ * window opens, so the follow-up is a normal message, not a second private
+ * reply. One follow-up per lead, claimed atomically.
+ *
+ * The gate withholds ONLY on a definite "not following": an unknown/failed
+ * check fails open and delivers, so an API hiccup never costs a real lead.
+ * Facebook is never gated (Graph API removed the page-follow check in v2.2).
+ */
+export async function processMessageEvent({ tenantId = 'default', event, selfIds = [] }, deps) {
+  const { rules, leads, senders = null, log = console, tokenFor, captureCfg } = deps;
+  const e = event || {};
+  if (e.senderId && selfIds.map(String).includes(String(e.senderId))) return { outcome: 'self' };
+
+  const lead = await leads.findAwaitingFollowup({ tenantId, accountId: e.accountId, commenterId: e.senderId });
+  if (!lead) return { outcome: 'no_lead' };            // a reply we never prompted
+
+  const claimed = await leads.claimFollowup(lead.id);
+  if (!claimed) return { outcome: 'already_handled' }; // duplicate reply webhook
+
+  const rule = rules.get ? await rules.get(lead.rule_id) : null;
+
+  if (!senders) {
+    await leads.setFollowup(lead.id, { status: 'pending', repliedAt: e.at });
+    return { outcome: 'deferred', leadId: lead.id };
+  }
+
+  const pageToken = tokenFor ? tokenFor(captureCfg, e.accountId) : '';
+  if (!pageToken) {
+    await leads.setFollowup(lead.id, { status: 'failed', repliedAt: e.at, error: `no access token for account ${e.accountId || '?'}` });
+    return { outcome: 'no_token', leadId: lead.id };
+  }
+
+  let follows = null;
+  const gate = !!(rule && rule.require_follow) && e.platform === 'instagram';
+  if (gate) {
+    try {
+      const prof = await senders.getUserProfile({ accountId: e.accountId, pageToken, userId: e.senderId });
+      follows = typeof prof?.follows === 'boolean' ? prof.follows : null;
+    } catch (err) {
+      follows = null; // unknown -> fail open
+      log.warn?.({ err: err.message, leadId: lead.id }, 'capture: follow check failed, delivering anyway');
+    }
+  }
+
+  const deliver = !gate || follows !== false;
+  const text = deliver
+    ? (rule?.followup_text || rule?.dm_text || '')
+    : (rule?.not_following_text || 'Follow the account and reply here — I will send it straight over.');
+  const link = deliver ? (rule?.dm_link || null) : null;
+
+  try {
+    await senders.sendMessage({ accountId: e.accountId, pageToken, recipientId: e.senderId, text, link });
+    await leads.setFollowup(lead.id, { status: deliver ? 'delivered' : 'nudged', follows, repliedAt: e.at });
+    log.info?.({ leadId: lead.id, follows, deliver }, 'capture: follow-up sent');
+    return { outcome: deliver ? 'delivered' : 'nudged', leadId: lead.id, follows };
+  } catch (err) {
+    if (err && err.retryable) {
+      // back to pending so the runner's retry can claim it again
+      await leads.setFollowup(lead.id, { status: 'pending', repliedAt: e.at, error: `followup retry: ${err.message}` });
+      throw err;
+    }
+    await leads.setFollowup(lead.id, { status: 'failed', follows, repliedAt: e.at, error: `followup: ${err.message}` });
+    return { outcome: 'followup_failed', leadId: lead.id };
+  }
+}
+
+export default { processCommentEvent, processMessageEvent };

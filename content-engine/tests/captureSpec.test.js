@@ -10,6 +10,7 @@ import {
   pickVariant,
   verifyMetaSignature,
   parseCommentEvents,
+  parseMessageEvents,
 } from '../src/utils/captureSpec.js';
 
 describe('normalize', () => {
@@ -136,5 +137,32 @@ describe('parseCommentEvents', () => {
   it('returns [] for junk', () => {
     expect(parseCommentEvents(null)).toEqual([]);
     expect(parseCommentEvents({ object: 'instagram' })).toEqual([]);
+  });
+});
+
+describe('parseMessageEvents', () => {
+  it('parses an inbound Instagram reply', () => {
+    const body = {
+      object: 'instagram',
+      entry: [{ id: 'ig_acct_1', messaging: [{ sender: { id: 'u1' }, recipient: { id: 'ig_acct_1' }, timestamp: 1700000000000, message: { mid: 'm1', text: 'yes please' } }] }],
+    };
+    const [e] = parseMessageEvents(body);
+    expect(e).toMatchObject({ platform: 'instagram', accountId: 'ig_acct_1', senderId: 'u1', text: 'yes please' });
+  });
+  it('drops our own echoes and delivery receipts', () => {
+    const body = {
+      object: 'instagram',
+      entry: [{ id: 'a', messaging: [
+        { sender: { id: 'a' }, message: { mid: 'm1', text: 'ours', is_echo: true } },
+        { sender: { id: 'u2' }, delivery: { mids: ['m1'] } },
+      ] }],
+    };
+    expect(parseMessageEvents(body)).toEqual([]);
+  });
+  it('parses a Facebook page message and ignores junk', () => {
+    const body = { object: 'page', entry: [{ id: 'p1', messaging: [{ sender: { id: 'u3' }, message: { mid: 'm2', text: 'hi' } }] }] };
+    expect(parseMessageEvents(body)[0]).toMatchObject({ platform: 'facebook', accountId: 'p1', senderId: 'u3' });
+    expect(parseMessageEvents(null)).toEqual([]);
+    expect(parseMessageEvents({ object: 'other', entry: [] })).toEqual([]);
   });
 });

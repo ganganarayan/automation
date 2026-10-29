@@ -157,6 +157,9 @@ export async function resolve(funnel) {
     captureDmLink: c.capture_dm_link || '',
     capturePublicReplies: String(c.capture_public_replies || '')
       .split('\n').map((s) => s.trim()).filter(Boolean),
+    captureRequireFollow: (c.capture_require_follow || 'off').toLowerCase() === 'on',
+    captureFollowupText: c.capture_followup_text || '',
+    captureNotFollowingText: c.capture_not_following_text || '',
     manualStepper: (c.manual_stepper || 'off').toLowerCase() === 'on',
   };
 }

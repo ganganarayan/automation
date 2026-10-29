@@ -42,6 +42,9 @@ export async function createForPublish({
   dmText = '',
   dmLink = null,
   publicReplyVariants = [],
+  requireFollow = false,
+  followupText = '',
+  notFollowingText = '',
   matchMode = 'word',
   log,
 }, deps = {}) {
@@ -55,6 +58,7 @@ export async function createForPublish({
       const r = await rules.upsert({
         tenantId, funnelId, platform, postformePostId, lane,
         keyword: kw, matchMode, dmText, dmLink, publicReplyVariants, active: true,
+        requireFollow, followupText, notFollowingText,
       });
       made.push(r);
     } catch (err) {

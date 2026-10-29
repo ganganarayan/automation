@@ -286,7 +286,9 @@ export async function postInstance({ instanceId, captionOverride = '' }) {
       platforms: captureRules.dmPlatforms(accountIds, resolved.accountMap),
       postformePostId: refs[0],
       keyword: resolved.captureKeyword, dmText: resolved.captureDmText, dmLink: resolved.captureDmLink,
-      publicReplyVariants: resolved.capturePublicReplies, log,
+      publicReplyVariants: resolved.capturePublicReplies,
+      requireFollow: resolved.captureRequireFollow, followupText: resolved.captureFollowupText,
+      notFollowingText: resolved.captureNotFollowingText, log,
     }).catch((err) => log.warn({ err: err.message }, 'capture rule create failed (posted anyway)'));
   }
   return refs;

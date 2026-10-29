@@ -164,6 +164,8 @@ export async function publish(approval) {
       dmText: p.dmText || f.captureDmText,
       dmLink: p.dmLink || f.captureDmLink,
       publicReplyVariants: f.capturePublicReplies,
+      requireFollow: f.captureRequireFollow, followupText: f.captureFollowupText,
+      notFollowingText: f.captureNotFollowingText,
       log,
     }).catch((err) => log.warn({ err: err.message }, 'capture rule create failed (posted anyway)'));
   }

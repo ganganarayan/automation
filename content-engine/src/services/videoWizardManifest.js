@@ -258,6 +258,15 @@ export const WIZARD_STEPS = [
       { key: 'capture_dm_text', label: 'Auto-DM message', type: 'textarea' },
       { key: 'capture_dm_link', label: 'Auto-DM link' },
       { key: 'capture_public_replies', label: 'Public reply variants (one per line)', type: 'textarea' },
+      {
+        key: 'capture_require_follow', label: 'Require them to follow before sending the link', type: 'select', default: 'off',
+        options: [
+          { value: 'off', label: 'Off — send the link to everyone who replies' },
+          { value: 'on', label: 'On — only followers get the link (Instagram only)' },
+        ],
+      },
+      { key: 'capture_followup_text', label: 'Follow-up sent when they reply (and qualify)', type: 'textarea' },
+      { key: 'capture_not_following_text', label: 'Message when they do NOT follow yet', type: 'textarea' },
     ],
   },
 ];

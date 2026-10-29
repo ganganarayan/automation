@@ -72,6 +72,50 @@ export async function getByCommentId(commentId) {
   return rows[0] || null;
 }
 
+/**
+ * The lead a reply belongs to: the most recent DM we sent this person from this
+ * account that is still awaiting its follow-up.
+ */
+export async function findAwaitingFollowup({ tenantId = 'default', accountId, commenterId }) {
+  const { rows } = await query(
+    `SELECT * FROM captured_leads
+      WHERE tenant_id = $1 AND commenter_id = $3
+        AND ($2::text IS NULL OR account_id IS NULL OR account_id = $2)
+        AND dm_status = 'sent' AND followup_status = 'pending'
+      ORDER BY dm_sent_at DESC NULLS LAST, created_at DESC
+      LIMIT 1`,
+    [tenantId, accountId || null, String(commenterId)],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Claim the follow-up atomically. Returns the row only to the FIRST caller, so
+ * a duplicate reply webhook can never produce a second follow-up message.
+ */
+export async function claimFollowup(id) {
+  const { rows } = await query(
+    `UPDATE captured_leads SET followup_status = 'running', updated_at = now()
+      WHERE id = $1 AND followup_status = 'pending' RETURNING *`,
+    [id],
+  );
+  return rows[0] || null;
+}
+
+/** Record the outcome of the follow-up (and what we learned about following). */
+export async function setFollowup(id, { status, follows, repliedAt, error } = {}) {
+  await query(
+    `UPDATE captured_leads
+        SET followup_status = COALESCE($2, followup_status),
+            follows         = COALESCE($3, follows),
+            replied_at      = COALESCE($4, replied_at),
+            error           = COALESCE($5, error),
+            updated_at      = now()
+      WHERE id = $1`,
+    [id, status ?? null, follows ?? null, repliedAt ?? null, error ?? null],
+  );
+}
+
 /** Leads for the admin table, newest first. */
 export async function listByTenant({ tenantId = 'default', limit = 200 } = {}) {
   const { rows } = await query(
@@ -88,4 +132,4 @@ export async function remove(id) {
   return rows[0] || null;
 }
 
-export default { insertIfNew, updateStatus, get, getByCommentId, listByTenant, remove };
+export default { insertIfNew, updateStatus, findAwaitingFollowup, claimFollowup, setFollowup, get, getByCommentId, listByTenant, remove };
