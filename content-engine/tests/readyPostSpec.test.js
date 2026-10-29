@@ -111,7 +111,7 @@ describe('normalizeSelections', () => {
       { driveId: '', caption: 'skip' },
     ]);
     expect(out.map((s) => s.driveId)).toEqual(['c', 'a']);
-    expect(out[0]).toEqual({ driveId: 'c', name: 'c.mp4', caption: 'C', scheduledAt: '', now: false, copy: null, costs: [] });
+    expect(out[0]).toEqual({ driveId: 'c', name: 'c.mp4', caption: 'C', scheduledAt: '', now: false, copy: null, costs: [], thumbs: {} });
   });
   it('carries AI copy and keeps only numeric cost entries', () => {
     const out = normalizeSelections([{ driveId: 'a', copy: { title: 'T' }, costs: [{ costUsd: 0.01 }, { costUsd: 'x' }, null] }]);

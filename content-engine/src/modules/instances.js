@@ -563,7 +563,8 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
       <input type="hidden" id="nm-${esc(v.id)}" value="${esc(v.name)}">
       <div class="det" id="det-${esc(v.id)}">
         <label class="fl">Transcript / text (optional — paste to skip transcription; blank = the app transcribes the video)<textarea id="tx-${esc(v.id)}" rows="4"></textarea></label>
-        <div class="nowrow"><button class="act" id="gb-${esc(v.id)}" onclick="gen('${esc(v.id)}')">✨ Generate copy</button> <span class="hint" id="gs-${esc(v.id)}"></span></div>
+        <div class="nowrow"><button class="act" id="gb-${esc(v.id)}" onclick="gen('${esc(v.id)}')">✨ Generate transcript + Thumbnail</button> <span class="hint" id="gs-${esc(v.id)}"></span></div>
+        <div class="thumbs" id="th-${esc(v.id)}"></div>
         <label class="fl">YouTube title<input id="ti-${esc(v.id)}" maxlength="100"></label>
         <label class="fl">Description — YouTube · LinkedIn · Facebook (link appended)<textarea id="de-${esc(v.id)}" rows="7"></textarea></label>
         <label class="fl">Instagram caption<textarea id="ig-${esc(v.id)}" rows="6"></textarea></label>
@@ -581,7 +582,7 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
     <div class="top">
       <div>
         <h1>Ready video + AI copy — ${esc(funnel.name)}</h1>
-        <div class="sub">Tick a video, optionally paste its transcript, then ✨ Generate copy: the app transcribes it (unless you pasted text) and writes its YouTube title, description (also LinkedIn &amp; Facebook), Instagram caption and a short Threads / X post. Edit, then post — in the order you ticked.</div>
+        <div class="sub">Tick a video, optionally paste its transcript, then ✨ Generate transcript + Thumbnail: the app transcribes it (unless you pasted text), writes its YouTube title, description (also LinkedIn &amp; Facebook), Instagram caption and a short Threads / X post, and designs a thumbnail for each platform (no thumbnail = the video's first frame). Edit, then post — in the order you ticked.</div>
       </div>
       <div class="toprow">
         <a class="act" href="/api/v1/admin/instances/ready-ai">↺ Change funnel</a>
@@ -599,7 +600,7 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
     ${previewModal()}
   `, `
     const FUNNEL_ID = ${JSON.stringify(String(funnel.id))};
-    const order = [], costs = {}, busy = {}, done = {};
+    const order = [], costs = {}, busy = {}, done = {}, thumbs = {};
     const $ = (p,id)=>document.getElementById(p+'-'+id);
     function msg(t){ const m=document.getElementById('rmsg'); if(m) m.textContent=t; }
     function renumber(){ order.forEach((id,i)=>{ const b=$('ord',id); if(b) b.textContent='#'+(i+1); }); document.querySelectorAll('.ord').forEach(b=>{ if(order.indexOf(b.dataset.id)<0) b.textContent=''; }); }
@@ -613,13 +614,16 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
     async function gen(id){
       if(busy[id]) return;
       const pasted=$('tx',id).value.trim();
-      busy[id]=true; $('gs',id).textContent=pasted?'Writing copy from your text…':'Transcribing + writing copy… (about 20–60 s)';
+      busy[id]=true; $('gs',id).textContent=(pasted?'Writing copy from your text':'Transcribing + writing copy')+' + designing thumbnails… (about 1–2 min)';
       try{
         const r=await fetch('/api/v1/admin/instances/ready-ai/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, driveId:id, name:$('nm',id).value, transcript:pasted, accessToken: await driveToken() })});
         const j=await r.json();
         if(!j.ok) throw new Error(j.error||'failed');
         $('ti',id).value=j.copy.title; $('de',id).value=j.copy.description; $('ig',id).value=j.copy.igCaption; $('sh',id).value=j.copy.short; cnt(id);
-        if(j.transcript) $('tx',id).value=j.transcript; $('gb',id).textContent='✨ Regenerate copy';
+        if(j.transcript) $('tx',id).value=j.transcript; $('gb',id).textContent='✨ Regenerate transcript + Thumbnail';
+        thumbs[id]=j.thumbs||{};
+        $('th',id).innerHTML=Object.keys(thumbs[id]).map(k=>'<a href="'+thumbs[id][k]+'" target="_blank" rel="noopener" title="'+k+'"><img src="'+thumbs[id][k]+'"><span>'+k+'</span></a>').join('')
+          +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':' — the first frame will be used')+'</div>':'');
         costs[id]=(costs[id]||[]).concat(j.costs||[]); done[id]=true;
         const usd=(costs[id]||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
         $('gs',id).textContent=(j.transcribed?'✓ Transcribed + copy written':(j.transcript?'✓ Copy written from your text':'✓ No speech found — copy written from the file name'))+' · $'+usd.toFixed(4);
@@ -631,11 +635,11 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
       if(!order.length){ msg('Tick at least one video.'); return; }
       if(order.some(id=>busy[id])){ msg('Wait for the copy to finish generating.'); return; }
       const nogen=order.filter(id=>!done[id]);
-      if(nogen.length){ msg('Generate copy first for '+nogen.map(id=>$('ord',id).textContent).join(', ')+'.'); return; }
+      if(nogen.length){ msg('Press ✨ Generate transcript + Thumbnail first for '+nogen.map(id=>$('ord',id).textContent).join(', ')+'.'); return; }
       const missing=order.filter(id=>!$('ti',id).value.trim()||!$('de',id).value.trim()||!$('ig',id).value.trim()||!$('sh',id).value.trim());
       if(missing.length){ msg('Fill every copy field for '+missing.map(id=>$('ord',id).textContent).join(', ')+'.'); return; }
       const selections = order.map(id=>({ driveId:id, name:$('nm',id).value, caption:'', scheduledAt:$('sch',id).value, now:allNow||$('now',id).checked,
-        copy:{ title:$('ti',id).value, description:$('de',id).value, igCaption:$('ig',id).value, short:$('sh',id).value }, costs:costs[id]||[] }));
+        copy:{ title:$('ti',id).value, description:$('de',id).value, igCaption:$('ig',id).value, short:$('sh',id).value }, costs:costs[id]||[], thumbs:thumbs[id]||{} }));
       const nowCount=selections.filter(s=>s.now).length;
       if(nowCount && !confirm(nowCount+' video(s) will go live on every channel right now. Continue?')) return;
       msg((nowCount===selections.length?'Posting now ':'Scheduling ')+selections.length+'…');
@@ -853,6 +857,9 @@ ${NAV_CSS}
  .ord{color:#7aa2ff;font-weight:700;min-width:1.6em;display:inline-block}
  .det{display:none;margin-top:.5rem}
  .det.on{display:block}
+ .thumbs{display:flex;flex-wrap:wrap;gap:.4rem;margin:.4rem 0}
+ .thumbs a{display:flex;flex-direction:column;align-items:center;font-size:.7rem;color:inherit;text-decoration:none}
+ .thumbs img{height:72px;border-radius:4px;border:1px solid #444}
  .fl{display:flex;flex-direction:column;gap:.2rem;font-size:.74rem;color:#9a9ab0;margin-top:.45rem}
  .nowrow{display:flex;align-items:center;gap:.4rem;font-size:.78rem;color:#c7c7d9;margin-top:.45rem;cursor:pointer}
  .nowrow input{width:auto;margin:0}

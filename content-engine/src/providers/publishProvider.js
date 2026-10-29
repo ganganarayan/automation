@@ -5,6 +5,7 @@
  * Responsibility:
  *               - createPost({ accounts, caption, mediaUrl, scheduledAt, perAccountCaption }): result
  *               - listAccounts(): connected accounts
+ *               - uploadMedia(buffer, contentType): public media_url (Post for Me storage)
  * Dependencies: httpClient, errors.
  */
 import { request } from '../core/httpClient.js';
@@ -52,6 +53,19 @@ export function createPostForMeProvider(cfg, log) {
       });
       if (!res.ok) throw new ExternalAPIError(`Post for Me create failed (${res.status})`, { details: res.text?.slice(0, 500) });
       return res.data;
+    },
+
+    /** Upload a file (e.g. a thumbnail) to Post for Me's storage; returns its public URL. */
+    async uploadMedia(buffer, contentType = 'image/jpeg') {
+      const headers = requireKey();
+      const res = await request(`${BASE}/media/create-upload-url`, {
+        method: 'POST', headers, body: {}, label: 'postforme.createUploadUrl', log, retries: 1,
+      });
+      const { media_url: mediaUrl, upload_url: uploadUrl } = res.data || {};
+      if (!res.ok || !uploadUrl || !mediaUrl) throw new ExternalAPIError(`Post for Me upload URL failed (${res.status})`);
+      const put = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body: buffer });
+      if (!put.ok) throw new ExternalAPIError(`Post for Me upload failed (${put.status})`);
+      return mediaUrl;
     },
 
     async listAccounts() {

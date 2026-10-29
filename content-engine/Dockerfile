@@ -13,7 +13,8 @@ FROM node:20-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 # ffmpeg: the final-reel stitch runs the binary locally (providers/ffmpegProvider).
-RUN apk add --no-cache libc6-compat ffmpeg && addgroup -S app && adduser -S app -G app
+# Noto fonts (+ Devanagari): text drawn on the generated thumbnails.
+RUN apk add --no-cache libc6-compat ffmpeg fontconfig font-noto font-noto-devanagari && addgroup -S app && adduser -S app -G app
 
 COPY --chown=app:app --from=deps /app/node_modules ./node_modules
 COPY --chown=app:app package.json ./

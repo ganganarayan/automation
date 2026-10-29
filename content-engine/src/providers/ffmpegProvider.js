@@ -8,7 +8,8 @@
  * Responsibility:
  *               - createFfmpegProvider({ bin }, log)
  *                 => { stitch({ clipBuffers, audioBuffer, width, height, srtText }):
- *                      { buffer, durationSeconds } }
+ *                      { buffer, durationSeconds },
+ *                    extractAudio(...), extractFrame({ videoBuffer | url }): jpg Buffer }
  *               The pure argv building + SRT live in utils/stageSpec; this runs it
  *               in a scratch dir and reads the result back.
  * Dependencies: node:child_process / fs / os / path, utils/stageSpec,
@@ -84,6 +85,32 @@ export function createFfmpegProvider(cfg = {}, log) {
         // No audio stream => ffmpeg writes nothing; treat as a silent video.
         if (err.stderr && /does not contain any stream|Output file is empty|matches no streams/i.test(String(err.stderr))) return Buffer.alloc(0);
         throw new ExternalAPIError(`ffmpeg audio extract failed: ${err.stderr ? String(err.stderr).slice(0, 300) : err.message}`);
+      } finally {
+        await rm(dir, { recursive: true, force: true }).catch(() => {});
+      }
+    },
+
+    /**
+     * Grab one video frame as a JPEG — from video bytes, or straight from a
+     * public URL (ffmpeg range-reads only what it needs). Tries `atSec`, then
+     * the very first frame for clips shorter than that.
+     */
+    async extractFrame({ videoBuffer, url = '', ext = 'mp4', atSec = 1 }) {
+      const dir = await mkdtemp(join(tmpdir(), 'frm-'));
+      try {
+        let input = url;
+        if (videoBuffer && videoBuffer.length) {
+          input = join(dir, `in.${ext}`);
+          await writeFile(input, videoBuffer);
+        }
+        if (!input) throw new ExternalAPIError('extractFrame needs video bytes or a URL');
+        const outPath = join(dir, 'frame.jpg');
+        for (const at of [atSec, 0]) {
+          await run(bin, ['-y', '-ss', String(at), '-i', input, '-frames:v', '1', '-q:v', '2', outPath], { maxBuffer: 64 * 1024 * 1024, timeout: 120000 }).catch(() => {});
+          const buf = await readFile(outPath).catch(() => null);
+          if (buf && buf.length) return buf;
+        }
+        throw new ExternalAPIError('ffmpeg could not read a frame from the video');
       } finally {
         await rm(dir, { recursive: true, force: true }).catch(() => {});
       }

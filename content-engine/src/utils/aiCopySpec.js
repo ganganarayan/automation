@@ -17,6 +17,8 @@
  * Dependencies: none.
  */
 
+import { thumbMedia } from './thumbSpec.js';
+
 export const LIMITS = {
   title: 100, // YouTube title
   description: 3000, // LinkedIn's cap (YouTube allows 5000)
@@ -41,6 +43,8 @@ export function copySystemPrompt({ brief = '', audience = '', keyword = '' } = {
     '  "description": a 3-6 short-paragraph post that works as the YouTube description and as a LinkedIn and Facebook post. Hook first line, value in the middle, a clear call to action at the end. Up to 5 relevant hashtags on the last line. No links (the app appends the link).',
     `  "igCaption": an Instagram caption: hook line, 2-4 short lines of value, ${keyword ? `a call to action telling people to comment "${keyword}" to get the link in their DMs` : 'a "link in bio" call to action'}, then 8-15 relevant hashtags. No links.`,
     '  "short": one punchy post for X and Threads, max 220 characters, at most 2 hashtags. No links.',
+    '  "thumbText": the thumbnail hook — 2 to 6 bold, curiosity-driven words drawn from the video. No hashtags, no emojis, no quotes.',
+    '  "thumbPrompt": an English prompt for an image model to create the thumbnail artwork: describe one vivid, emotionally striking scene that captures the core idea of the video (subject, setting, mood, lighting, colours, camera angle). No text, letters or logos in the image.',
     'Stay faithful to what is actually said in the video; never invent claims, numbers or names.',
     'Write in the same language as the transcript.',
     brief ? `Brand / voice brief:\n${brief}` : '',
@@ -74,6 +78,8 @@ export function normalizeCopy(raw) {
     description: clip(str(o.description), LIMITS.description),
     igCaption: clip(str(o.igCaption ?? o.ig_caption ?? o.caption), LIMITS.igCaption),
     short: str(o.short ?? o.shortPost ?? o.short_post),
+    thumbText: clip(str(o.thumbText ?? o.thumb_text ?? o.thumbnailText).replace(/[#"“”]/g, ''), 60),
+    thumbPrompt: clip(str(o.thumbPrompt ?? o.thumb_prompt ?? o.imagePrompt), 1500),
   };
 }
 
@@ -118,7 +124,7 @@ export function platformKey(label) {
  * platform info at all, every supported platform is configured.
  * @returns {{ caption: string, platformConfigurations: object }}
  */
-export function platformConfigsFor(copy, { accountIds = [], accountMap = {}, ctaLink = '' } = {}) {
+export function platformConfigsFor(copy, { accountIds = [], accountMap = {}, ctaLink = '', videoUrl = '', thumbs = {} } = {}) {
   const c = normalizeCopy(copy);
   const longText = withLink(c.description, ctaLink);
   const all = {
@@ -133,7 +139,11 @@ export function platformConfigsFor(copy, { accountIds = [], accountMap = {}, cta
   const present = new Set((accountIds || []).map((id) => platformKey((accountMap[id] || {}).platform)).filter(Boolean));
   const keys = present.size ? [...present] : Object.keys(all);
   const platformConfigurations = {};
-  for (const k of keys) if (all[k]) platformConfigurations[k] = all[k];
+  for (const k of keys) {
+    if (!all[k]) continue;
+    // Each platform gets its own designed thumbnail, else the first frame.
+    platformConfigurations[k] = videoUrl ? { ...all[k], media: [thumbMedia(videoUrl, thumbs && thumbs[k])] } : all[k];
+  }
   return { caption: longText, platformConfigurations };
 }
 

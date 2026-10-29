@@ -33,8 +33,10 @@ import { createGoogleDriveProvider } from '../providers/storageProvider.js';
 import { createPublicDriveProvider, publicDlUrl } from '../providers/publicDriveProvider.js';
 import * as captureRules from './captureRules.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
-import { costText, costTranscript } from '../utils/pricing.js';
-import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor } from '../utils/aiCopySpec.js';
+import { costText, costTranscript, costImages } from '../utils/pricing.js';
+import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey } from '../utils/aiCopySpec.js';
+import { THUMB_SPECS, thumbSvg, thumbImagePrompt } from '../utils/thumbSpec.js';
+import sharp from 'sharp';
 import { formatIst } from '../utils/time.js';
 import { driveEmbedUrl } from '../utils/reviewSpec.js';
 import {
@@ -132,10 +134,11 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
 
   // A pasted transcript / text skips the download + transcription entirely.
   let transcript = String(pasted || '').trim();
-  const audio = transcript ? Buffer.alloc(0) : await createFfmpegProvider({}, log).extractAudio({
-    videoBuffer: await driveFor(providers, accessToken).download(driveId),
-    ext: ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase(),
-  });
+  const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
+  const ffmpeg = createFfmpegProvider({}, log);
+  let video = null; // downloaded only when transcription (or a non-public file) needs it
+  const getVideo = async () => video || (video = await driveFor(providers, accessToken).download(driveId));
+  const audio = transcript ? Buffer.alloc(0) : await ffmpeg.extractAudio({ videoBuffer: await getVideo(), ext });
   if (audio.length) {
     if (audio.length > WHISPER_MAX_BYTES) throw new Error('video audio is too long to transcribe (over ~70 minutes)');
     const tp = createTranscriptProvider({ apiKey: providers.resolved.transcriptKey || providers.resolved.openai.apiKey }, log);
@@ -153,7 +156,71 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   const copy = normalizeCopy(data);
   if (!copy.title && !copy.description) throw new Error('the model returned empty copy — try again');
   log.info({ funnel: funnel.name, driveId, words: transcript.split(/\s+/).filter(Boolean).length }, 'ready video copy generated');
-  return { copy, transcript, costs, transcribed: audio.length > 0 };
+
+  // Thumbnails: one design per platform. A failure here never loses the copy —
+  // those platforms just fall back to the video's first frame.
+  let thumbs = {};
+  let thumbError = '';
+  try {
+    const platforms = thumbPlatforms(resolved);
+    // AI artwork from the image prompt — one landscape and (if needed) one
+    // portrait image, cropped per platform. A failed image falls back to a frame.
+    const imageModel = /^gpt-image/.test(String(providers.resolved.openai?.imageModel || '')) ? providers.resolved.openai.imageModel : 'gpt-image-1';
+    const art = {};
+    const needs = [['landscape', '1536x1024'], ['portrait', '1024x1536']]
+      .filter(([o]) => platforms.some((k) => (THUMB_SPECS[k].h > THUMB_SPECS[k].w) === (o === 'portrait')));
+    for (const [orientation, size] of needs) {
+      try {
+        art[orientation] = await providers.llm.generateImage({ prompt: thumbImagePrompt(copy.thumbPrompt || copy.title, orientation), size, model: imageModel });
+        costs.push({ step: 'images', ...costImages({ count: 1, size, model: imageModel }) });
+      } catch (err) {
+        log.warn({ err: err.message, orientation }, 'thumbnail artwork failed (using a video frame)');
+        thumbError = `artwork: ${err.message}`;
+      }
+    }
+    let frame = null;
+    if (needs.some(([o]) => !art[o])) {
+      frame = video
+        ? await ffmpeg.extractFrame({ videoBuffer: video, ext })
+        : await ffmpeg.extractFrame({ url: publicDlUrl(driveId) }).catch(async () => ffmpeg.extractFrame({ videoBuffer: await getVideo(), ext }));
+    }
+    thumbs = await renderThumbs({ providers, platforms, art, frame, text: copy.thumbText || copy.title });
+  } catch (err) {
+    thumbError = err.message;
+    log.warn({ err: err.message, driveId }, 'thumbnail generation failed (first frame will be used)');
+  }
+  return { copy, transcript, costs, transcribed: audio.length > 0, thumbs, thumbError };
+}
+
+/**
+ * Render each platform's thumbnail design (its crop of the AI artwork, else the
+ * video frame) and upload it to Post for Me. Returns { platform: publicUrl }.
+ */
+async function renderThumbs({ providers, platforms, art, frame, text }) {
+  const postformeKey = providers.resolved.postformeKey || '';
+  if (!postformeKey) throw new Error('No Post for Me API key — set it under Settings → API Keys');
+  const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
+  const out = {};
+  for (const k of platforms) {
+    const spec = THUMB_SPECS[k];
+    const base = (spec.h > spec.w ? art.portrait : art.landscape) || frame;
+    if (!base) continue; // no artwork and no frame => this platform uses the first frame
+    const jpg = await sharp(base)
+      .resize(spec.w, spec.h, { fit: 'cover', position: 'attention' })
+      .composite([{ input: Buffer.from(thumbSvg({ ...spec, text })) }])
+      .jpeg({ quality: 86 })
+      .toBuffer();
+    out[k] = await publish.uploadMedia(jpg, 'image/jpeg');
+  }
+  log.info({ platforms }, 'thumbnails rendered + uploaded');
+  return out;
+}
+
+/** The platforms this funnel posts to that have a thumbnail spec (all, if unknown). */
+function thumbPlatforms(resolved) {
+  const accountMap = resolved.accountMap || {};
+  const present = [...new Set((resolved.accounts || []).map((id) => platformKey((accountMap[id] || {}).platform)).filter(Boolean))];
+  return (present.length ? present : Object.keys(THUMB_SPECS)).filter((k) => THUMB_SPECS[k]);
 }
 
 /** Record one direct post as a posted instance (stages skipped; AI-copy cost if any). */
@@ -166,13 +233,14 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
   });
   let steps = buildInitialSteps();
   for (const k of ['script', 'images', 'animate', 'voiceover', 'transcript']) steps = patchStep(steps, k, { status: 'skipped' });
+  if ((costs || []).some((c) => c && c.step === 'images')) steps = patchStep(steps, 'images', { status: 'done' });
   if (copy) {
     steps = patchStep(steps, 'transcript', { status: 'done' });
     steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy } });
   }
   for (const c of costs || []) {
     const { step, ...entry } = c;
-    steps = addCostToSteps(steps, step === 'transcript' ? 'transcript' : 'script', { ...entry, costUsd: Number(entry.costUsd) || 0, at: new Date().toISOString() });
+    steps = addCostToSteps(steps, ['transcript', 'images'].includes(step) ? step : 'script', { ...entry, costUsd: Number(entry.costUsd) || 0, at: new Date().toISOString() });
   }
   steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: { driveId } } });
   steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: ref ? [ref] : [], caption } });
@@ -215,7 +283,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
     // "Post now" => no scheduled_at, so Post-for-Me publishes immediately.
     const scheduledIso = sel.now ? null : ((sel.scheduledAt && parseIstDateTime(sel.scheduledAt)) || slots[i] || null);
     // AI-copy lane: each platform gets its own copy for this video.
-    const ai = sel.copy ? platformConfigsFor(sel.copy, { accountIds: accounts, accountMap, ctaLink: resolved.ctaLink }) : null;
+    const ai = sel.copy ? platformConfigsFor(sel.copy, { accountIds: accounts, accountMap, ctaLink: resolved.ctaLink, videoUrl: publicDlUrl(sel.driveId), thumbs: sel.thumbs }) : null;
     const caption = ai ? ai.caption : (sel.caption.trim() || captionFor(cfg, resolved));
     try {
       await drive.shareAnyone(sel.driveId);

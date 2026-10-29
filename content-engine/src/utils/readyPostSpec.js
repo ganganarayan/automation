@@ -131,7 +131,10 @@ export function normalizeSelections(selections) {
       copy: s && s.copy && typeof s.copy === 'object' ? s.copy : null,
       costs: (Array.isArray(s && s.costs) ? s.costs : [])
         .filter((c) => c && Number.isFinite(Number(c.costUsd)))
-        .slice(0, 4),
+        .slice(0, 8),
+      // Per-platform designed thumbnails: platform -> public https URL.
+      thumbs: Object.fromEntries(Object.entries(s && s.thumbs && typeof s.thumbs === 'object' ? s.thumbs : {})
+        .filter(([k, v]) => /^[a-z]{1,12}$/.test(k) && /^https:\/\/\S+$/.test(String(v)))),
     });
   }
   return out;
