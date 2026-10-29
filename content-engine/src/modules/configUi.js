@@ -1085,7 +1085,7 @@ function pfmAccountsRow(cfg, fid) {
       <button type="button" class="act" onclick="fetchPfm('${fid}')">↻ Fetch accounts from Post for Me</button>
       <span id="pfmstatus-${fid}" class="hint"></span>
     </div>
-    <div id="pfmlist-${fid}" class="acctlist">${pre || '<span class="hint">No accounts yet — paste your API key above, then click Fetch and tick the accounts.</span>'}</div>
+    <div id="pfmlist-${fid}" class="acctlist">${pre || '<span class="hint">No accounts yet — click Fetch (uses the Post for Me key from Settings → API Keys) and tick the accounts.</span>'}</div>
     <input type="hidden" id="pfmaccts-${fid}" name="set[postforme_accounts]" value="${esc(JSON.stringify(ids))}">
     <input type="hidden" id="pfmmap-${fid}" name="set[account_map]" value="${esc(JSON.stringify(map))}">
     <p class="hint">One click — no JSON. Tick the accounts this funnel posts to.</p></div>`;

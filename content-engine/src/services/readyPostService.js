@@ -45,16 +45,26 @@ import {
   defaultSlotsIso,
   parseIstDateTime,
   normalizeSelections,
+  normalizePickedAccounts,
 } from '../utils/readyPostSpec.js';
 import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'readyPost' });
 
-async function loadFunnel(funnelId) {
+async function loadFunnel(funnelId, pickedAccounts = null) {
   const funnel = await funnels.get(Number(funnelId));
   if (!funnel) throw new Error(`funnel ${funnelId} not found`);
   const resolved = await funnels.resolve(funnel);
   const cfg = await funnels.getConfig(funnel.id).catch(() => ({}));
+  // Accounts ticked on the posting page win, and are remembered on the funnel
+  // (no funnel setup step needed).
+  const picked = normalizePickedAccounts(pickedAccounts);
+  if (picked.length) {
+    resolved.accounts = picked.map((a) => a.id);
+    resolved.accountMap = Object.fromEntries(picked.map((a) => [a.id, { platform: a.platform, account_name: a.name }]));
+    await funnels.setConfig(funnel.id, 'postforme_accounts', JSON.stringify(resolved.accounts));
+    await funnels.setConfig(funnel.id, 'account_map', JSON.stringify(resolved.accountMap));
+  }
   return { funnel, resolved, cfg };
 }
 
@@ -126,9 +136,9 @@ const WHISPER_MAX_BYTES = 25 * 1024 * 1024;
  * transcription and token costs, carried back with the selection and recorded
  * on the instance.
  */
-export async function generateCopy({ tenantId = 'default', funnelId, driveId, name = '', transcript: pasted = '', accessToken = '' }) {
+export async function generateCopy({ tenantId = 'default', funnelId, driveId, name = '', transcript: pasted = '', accessToken = '', accounts: pickedAccounts = null }) {
   if (!driveId) throw new Error('driveId required');
-  const { funnel, resolved, cfg } = await loadFunnel(funnelId);
+  const { funnel, resolved, cfg } = await loadFunnel(funnelId, pickedAccounts);
   const providers = await buildProviders(funnel.tenant_id || tenantId);
   const costs = [];
 
@@ -254,8 +264,8 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
  * (explicit "DD-MM-YYYY HH:MM" IST, else the next sequential daily slot). Sends a
  * posted-summary email. Returns a per-item result list.
  */
-export async function postSelections({ tenantId = 'default', funnelId, selections, accessToken = '' }) {
-  const { funnel, resolved, cfg } = await loadFunnel(funnelId);
+export async function postSelections({ tenantId = 'default', funnelId, selections, accessToken = '', accounts: pickedAccounts = null }) {
+  const { funnel, resolved, cfg } = await loadFunnel(funnelId, pickedAccounts);
   const providers = await buildProviders(funnel.tenant_id || tenantId);
   const drive = driveFor(providers, accessToken);
   const clean = normalizeSelections(selections);
@@ -265,7 +275,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
   const postformeKey = providers.resolved.postformeKey || '';
   if (!postformeKey) throw new Error('No Post for Me API key — set it once under Settings → API Keys');
   const accounts = Array.isArray(resolved.accounts) ? resolved.accounts : [];
-  if (!accounts.length) throw new Error('This funnel has no Post for Me accounts configured');
+  if (!accounts.length) throw new Error('No accounts ticked — tick the accounts to post to (top of this page)');
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
 
   // YouTube needs a title. When any selected account is a YouTube one and the

@@ -77,7 +77,7 @@ export function register(ctx) {
       const selections = Array.isArray(req.body?.selections) ? req.body.selections : [];
       if (!funnelId) return res.status(400).json({ ok: false, error: 'funnelId required' });
       const accessToken = String(req.body?.accessToken || '');
-      const out = await readyPost.postSelections({ tenantId: req.tenantId, funnelId, selections, accessToken });
+      const out = await readyPost.postSelections({ tenantId: req.tenantId, funnelId, selections, accessToken, accounts: req.body?.accounts });
       res.json({ ok: true, ...out });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
@@ -105,9 +105,9 @@ export function register(ctx) {
   router.post('/admin/instances/ready-ai/generate', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      const { funnelId, driveId, name, transcript, accessToken } = req.body || {};
+      const { funnelId, driveId, name, transcript, accessToken, accounts } = req.body || {};
       if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
-      const out = await readyPost.generateCopy({ tenantId: req.tenantId, funnelId, driveId: String(driveId), name: String(name || ''), transcript: String(transcript || ''), accessToken: String(accessToken || '') });
+      const out = await readyPost.generateCopy({ tenantId: req.tenantId, funnelId, driveId: String(driveId), name: String(name || ''), transcript: String(transcript || ''), accessToken: String(accessToken || ''), accounts });
       res.json({ ok: true, ...out });
     } catch (err) {
       log.error({ err: err.message }, 'ready-ai generate failed');
@@ -406,6 +406,29 @@ function readyChooserPage(funnels, lane = READY) {
   `, '', lane.nav);
 }
 
+// Ready-video: which connected Post for Me accounts to post to. Loaded with the
+// global API key; the funnel's last choice is pre-ticked, and the ticks are
+// saved back on the funnel when you generate / post.
+function acctBar(resolved = {}) {
+  const saved = (resolved.accounts || []).map((id) => ({ id, platform: ((resolved.accountMap || {})[id] || {}).platform || '', name: ((resolved.accountMap || {})[id] || {}).account_name || id }));
+  return `<div class="acctbar"><b>Post to:</b> <span id="acctlist" class="hint">Loading your Post for Me accounts…</span></div>
+    <script>
+      const SAVED_ACCTS = ${JSON.stringify(saved).replace(/</g, '\\u003c')};
+      let ACCTS = SAVED_ACCTS.slice();
+      function renderAccts(){
+        const el=document.getElementById('acctlist'); if(!el) return;
+        const on=new Set(SAVED_ACCTS.map(a=>a.id));
+        el.className='';
+        el.innerHTML = ACCTS.length ? ACCTS.map(a=>'<label class="nowrow acct"><input type="checkbox" class="acctcb" value="'+a.id+'" data-plat="'+String(a.platform).replace(/"/g,'')+'" data-name="'+String(a.name).replace(/"/g,'')+'"'+(on.has(a.id)?' checked':'')+'> <b>'+String(a.platform).replace(/</g,'&lt;')+'</b> '+String(a.name).replace(/</g,'&lt;')+'</label>').join(' ')
+          : '<span class="hint">No connected accounts found in Post for Me.</span>';
+      }
+      function pickedAccounts(){ return Array.from(document.querySelectorAll('.acctcb:checked')).map(c=>({ id:c.value, platform:c.dataset.plat, name:c.dataset.name })); }
+      fetch('/api/v1/admin/funnels/fetch-accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+        .then(r=>r.json()).then(j=>{ if(j.ok){ const ids=new Set(ACCTS.map(a=>a.id)); (j.accounts||[]).forEach(a=>{ if(!ids.has(a.id)) ACCTS.push(a); }); renderAccts(); } else { renderAccts(); const el=document.getElementById('acctlist'); if(el) el.insertAdjacentHTML('beforeend',' <span class="hint">⚠ '+String(j.error||'').replace(/</g,'&lt;')+'</span>'); } })
+        .catch(()=>renderAccts());
+    </script>`;
+}
+
 // Ready-video: where the videos come from, shared by both pickers.
 //  1. 📂 Pick from Drive — "Sign in with Google" + Google's own picker; the app
 //     then acts only on the picked files with the operator's short-lived token
@@ -519,6 +542,7 @@ function readyPickerPage({ funnel, videos, prefills, defCap = '', ...src }) {
       </div>
     </div>
     ${folderBar(funnel, src)}
+    ${acctBar(src.resolved)}
     <div class="grid">${cards}</div>
     <div class="bar">
       <button class="approve" onclick="postSel()">Post selected</button>
@@ -541,10 +565,11 @@ function readyPickerPage({ funnel, videos, prefills, defCap = '', ...src }) {
     function allNow(){ const on=document.getElementById('allnow').checked; document.querySelectorAll('input[id^="now-"]').forEach(n=>{ n.checked=on; toggleNow(n.id.slice(4)); }); }
     async function postSel(){
       if(!order.length){ msg('Tick at least one video.'); return; }
+      if(!pickedAccounts().length){ msg('Tick at least one account under "Post to".'); return; }
       const selections = order.map(id=>({ driveId:id, name:document.getElementById('nm-'+id).value, caption:document.getElementById('cap-'+id).value, scheduledAt:document.getElementById('sch-'+id).value, now:document.getElementById('now-'+id).checked }));
       msg('Posting '+selections.length+'…');
       try{
-        const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections, accessToken: await driveToken() })});
+        const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections, accounts: pickedAccounts(), accessToken: await driveToken() })});
         const j=await r.json();
         if(j.ok){ msg('Posted '+j.posted+(j.failed?(', '+j.failed+' failed'):'')+'. Opening the log…'); setTimeout(()=>location.href='/api/v1/admin/instances',1300); }
         else msg('Failed: '+(j.error||''));
@@ -594,6 +619,7 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
       </div>
     </div>
     ${folderBar(funnel, src)}
+    ${acctBar(src.resolved)}
     <div class="grid">${cards}</div>
     <div class="bar">
       <button class="approve" onclick="postSel(false)">📅 Schedule selected</button>
@@ -621,7 +647,7 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
       const pasted=$('tx',id).value.trim();
       busy[id]=true; $('gs',id).textContent=(pasted?'Writing copy from your text':'Transcribing + writing copy')+' + designing thumbnails… (about 1–2 min)';
       try{
-        const r=await fetch('/api/v1/admin/instances/ready-ai/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, driveId:id, name:$('nm',id).value, transcript:pasted, accessToken: await driveToken() })});
+        const r=await fetch('/api/v1/admin/instances/ready-ai/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, driveId:id, name:$('nm',id).value, transcript:pasted, accounts: pickedAccounts(), accessToken: await driveToken() })});
         const j=await r.json();
         if(!j.ok) throw new Error(j.error||'failed');
         $('ti',id).value=j.copy.title; $('de',id).value=j.copy.description; $('ig',id).value=j.copy.igCaption; $('sh',id).value=j.copy.short; cnt(id);
@@ -639,6 +665,7 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
     function toggleNow(id){ const n=$('now',id), s=$('sch',id); if(n&&s){ s.disabled=n.checked; s.style.opacity=n.checked?0.45:1; } }
     async function postSel(allNow){
       if(!order.length){ msg('Tick at least one video.'); return; }
+      if(!pickedAccounts().length){ msg('Tick at least one account under "Post to".'); return; }
       if(order.some(id=>busy[id])){ msg('Wait for the copy to finish generating.'); return; }
       const nogen=order.filter(id=>!done[id]);
       if(nogen.length){ msg('Press ✨ Generate transcript + Thumbnail first for '+nogen.map(id=>$('ord',id).textContent).join(', ')+'.'); return; }
@@ -650,7 +677,7 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
       if(nowCount && !confirm(nowCount+' video(s) will go live on every channel right now. Continue?')) return;
       msg((nowCount===selections.length?'Posting now ':'Scheduling ')+selections.length+'…');
       try{
-        const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections, accessToken: await driveToken() })});
+        const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections, accounts: pickedAccounts(), accessToken: await driveToken() })});
         const j=await r.json();
         if(j.ok){
           const bad=(j.results||[]).filter(x=>!x.ok);
@@ -867,6 +894,8 @@ ${NAV_CSS}
  .card.wide>.tile{max-height:320px;max-width:220px}
  .det.ailay.on{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1.2rem;align-items:start}
  @media (max-width:900px){.det.ailay.on{grid-template-columns:1fr}}
+ .acctbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.5rem 0 .8rem;padding:.5rem .7rem;border:1px solid #24243a;border-radius:8px}
+ .acct{margin-right:.8rem}
  .thumbs{display:flex;flex-wrap:wrap;gap:.8rem;margin:.6rem 0;align-items:flex-end}
  .thumbs a{display:flex;flex-direction:column;align-items:center;gap:.25rem;font-size:.8rem;color:inherit;text-decoration:none}
  .thumbs a.wide img{width:300px;max-width:100%}

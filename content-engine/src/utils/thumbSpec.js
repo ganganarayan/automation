@@ -21,7 +21,6 @@ export const THUMB_SPECS = {
   linkedin: { w: 1280, h: 720, layout: 'top', accent: '#0A66C2' },
   x: { w: 1280, h: 720, layout: 'center', accent: '#FFFFFF' },
   instagram: { w: 1080, h: 1920, layout: 'center', accent: '#E1306C' },
-  tiktok: { w: 1080, h: 1920, layout: 'upper', accent: '#25F4EE' },
   threads: { w: 1080, h: 1350, layout: 'bottom', accent: '#FFFFFF' },
 };
 

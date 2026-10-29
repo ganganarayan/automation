@@ -9,6 +9,7 @@ import {
   parseDriveFolderId,
   parsePickedFiles,
   parseEmbeddedFolder,
+  normalizePickedAccounts,
 } from '../src/utils/readyPostSpec.js';
 
 const ist = (iso) => DateTime.fromISO(iso, { zone: 'Asia/Kolkata' });
@@ -143,5 +144,13 @@ describe('parseEmbeddedFolder', () => {
   it('returns [] for a sign-in / empty page', () => {
     expect(parseEmbeddedFolder('<title>Sign in</title>')).toEqual([]);
     expect(parseEmbeddedFolder(null)).toEqual([]);
+  });
+});
+
+describe('normalizePickedAccounts', () => {
+  it('keeps valid ticked accounts, de-duped', () => {
+    expect(normalizePickedAccounts([{ id: 'spc_abc', platform: 'instagram', name: 'gita' }, { id: 'spc_abc' }, { id: 'x' }, null]))
+      .toEqual([{ id: 'spc_abc', platform: 'instagram', name: 'gita' }]);
+    expect(normalizePickedAccounts('junk')).toEqual([]);
   });
 });

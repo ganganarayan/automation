@@ -71,6 +71,23 @@ export function parseEmbeddedFolder(html) {
   return out;
 }
 
+/**
+ * Post for Me accounts ticked on the posting page: [{ id, platform, name }],
+ * validated, de-duped, max 30.
+ */
+export function normalizePickedAccounts(raw) {
+  const seen = new Set();
+  const out = [];
+  for (const a of Array.isArray(raw) ? raw : []) {
+    const id = String((a && a.id) || '').trim();
+    if (!/^[\w-]{3,80}$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, platform: String((a && a.platform) || '').slice(0, 40), name: String((a && a.name) || id).slice(0, 120) });
+    if (out.length >= 30) break;
+  }
+  return out;
+}
+
 /** The postable files in a Drive folder: videos not already tagged POSTED. */
 export function filterReadyVideos(files) {
   return (Array.isArray(files) ? files : []).filter(
@@ -141,4 +158,4 @@ export function normalizeSelections(selections) {
 }
 
 export { ZONE };
-export default { parseEmbeddedFolder, parseDriveFolderId, parsePickedFiles, filterReadyVideos, defaultSlotsIso, parseIstDateTime, defaultCaption, normalizeSelections, ZONE };
+export default { normalizePickedAccounts, parseEmbeddedFolder, parseDriveFolderId, parsePickedFiles, filterReadyVideos, defaultSlotsIso, parseIstDateTime, defaultCaption, normalizeSelections, ZONE };

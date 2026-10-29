@@ -4,7 +4,7 @@ import { platformConfigsFor } from '../src/utils/aiCopySpec.js';
 
 describe('thumbSpec', () => {
   it('has a size + layout for every platform', () => {
-    for (const k of ['youtube', 'facebook', 'linkedin', 'x', 'instagram', 'tiktok', 'threads']) {
+    for (const k of ['youtube', 'facebook', 'linkedin', 'x', 'instagram', 'threads']) {
       expect(THUMB_SPECS[k].w).toBeGreaterThan(0);
       expect(THUMB_SPECS[k].h).toBeGreaterThan(0);
     }
