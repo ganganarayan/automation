@@ -69,7 +69,8 @@ export function createLlmProvider(cfg, log) {
       const res = await client.chat.completions.create({
         model: usedModel,
         response_format: { type: 'json_object' },
-        max_tokens: maxTokens,
+        // max_completion_tokens: newer models reject max_tokens; reasoning tokens count here too.
+        max_completion_tokens: maxTokens,
         messages: [
           ...(system ? [{ role: 'system', content: system }] : []),
           { role: 'user', content: user },

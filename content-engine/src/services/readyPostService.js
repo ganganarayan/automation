@@ -147,7 +147,7 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   const { data, model, usage } = await providers.llm.generateJsonDetailed({
     system: copySystemPrompt({ brief: cfg && cfg.direct_copy_brief, audience: resolved.audiencePrefix, keyword: resolved.captureKeyword }),
     user: copyUserPrompt({ transcript, fileName: name }),
-    maxTokens: 2000,
+    maxTokens: 8000,
   });
   costs.push({ step: 'script', ...costText({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, model }) });
   const copy = normalizeCopy(data);
