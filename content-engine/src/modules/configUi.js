@@ -915,7 +915,7 @@ function appSection(app, tenantId, configMap, key) {
       <input type="hidden" name="tenant" value="${esc(tenantId)}">
       <input type="hidden" name="key" value="${esc(key)}">
       ${groups}
-      <fieldset><legend>Modules (per tenant)</legend><div class="mods">${mods}</div></fieldset>
+      ${mods ? `<fieldset><legend>Background jobs (apply to all funnels)</legend><div class="mods">${mods}</div></fieldset>` : ''}
       <button class="save" type="submit">Save ${esc(m.label)}</button>
     </form>
   </section>`;

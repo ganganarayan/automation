@@ -66,11 +66,10 @@ describe('buildSaveOps', () => {
   it('sets module true/false and deletes on default', () => {
     const ops = buildSaveOps('content-engine', {
       settings: {},
-      modules: { imageFactory: 'false', delivery: 'true', videoPipeline: 'default' },
+      modules: { vidapulseRefill: 'false', delivery: 'default' },
     });
-    expect(ops.sets).toContainEqual({ key: 'module.content-engine.imageFactory', value: 'false' });
-    expect(ops.sets).toContainEqual({ key: 'module.content-engine.delivery', value: 'true' });
-    expect(ops.dels).toContain('module.content-engine.videoPipeline');
+    expect(ops.sets).toContainEqual({ key: 'module.content-engine.vidapulseRefill', value: 'false' });
+    expect(ops.dels).toContain('module.content-engine.delivery');
   });
 
   it('ignores unknown apps with an error', () => {

@@ -86,8 +86,10 @@ export const CONFIG_MANIFEST = {
   },
 
   'content-engine': {
-    label: 'content-engine',
-    blurb: 'Content generation, approval, publishing, reports, dashboard.',
+    // Only settings shared by every funnel live here. Per-funnel content
+    // sources, accounts and schedules are set in each funnel's setup.
+    label: 'Workspace',
+    blurb: 'Settings shared by every funnel: Google access, email, reports, comment capture, LinkedIn relay.',
     groups: [
       {
         title: 'Google (Sheets & Drive access)',
@@ -102,12 +104,9 @@ export const CONFIG_MANIFEST = {
         ],
       },
       {
-        title: 'Reports & Instagram automation',
+        title: 'Reports',
         fields: [
-          { key: 'report_email', label: 'Report email' },
-          { key: 'ig_automation_url', label: 'IG automation URL' },
-          { key: 'ig_contact_email', label: 'IG contact email' },
-          { key: 'ig_comment_webhook_url', label: 'IG comment webhook URL' },
+          { key: 'report_email', label: 'Report email', help: 'Where the daily delivery reports are sent.' },
         ],
       },
       {
@@ -138,25 +137,15 @@ export const CONFIG_MANIFEST = {
           { key: 'smtp_test', label: 'Test', type: 'smtp_test' },
         ],
       },
-      {
-        title: 'Video & image factory (advanced)',
-        fields: [
-          { key: 'video_sheet_id', label: 'Video sheet ID' },
-          { key: 'voiceover_folder_id', label: 'Voiceover folder ID' },
-          { key: 'reels_folder_id', label: 'Reels folder ID' },
-          { key: 'factory_sheet_id', label: 'Image factory sheet ID' },
-          { key: 'factory_gpt_folder_id', label: 'Factory GPT folder ID' },
-          { key: 'factory_gemini_folder_id', label: 'Factory Gemini folder ID' },
-        ],
-      },
     ],
+    // Only toggles that tenantSettings.moduleEnabled() checks at runtime belong
+    // here. Funnel posters/video/capture always run; the legacy video pipeline,
+    // image factory, dashboard and admin routes are env-gated at boot only.
+    // (Legacy ig_* / video_* / factory_* keys are no longer edited here; any
+    // stored values are still read by tenantSettings.forTenant.)
     modules: [
-      { key: 'vidapulseRefill', label: 'Content refill' },
-      { key: 'delivery', label: 'Delivery log & reports' },
-      { key: 'videoPipeline', label: 'Video pipeline' },
-      { key: 'imageFactory', label: 'AI image factory' },
-      { key: 'dashboard', label: 'Dashboard' },
-      { key: 'admin', label: 'Admin API' },
+      { key: 'vidapulseRefill', label: 'VidaPulse content refill (09:00)' },
+      { key: 'delivery', label: 'Delivery log & daily reports' },
     ],
   },
 
