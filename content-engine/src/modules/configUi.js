@@ -34,6 +34,9 @@ import * as configService from '../services/configService.js';
 import * as users from '../repositories/usersRepository.js';
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as tenantSettings from '../core/tenantSettings.js';
+import * as tenantConfigRepo from '../repositories/tenantConfigRepository.js';
+import { listOpenAiModels, listGeminiModels } from '../providers/modelsProvider.js';
+import { buildCatalog } from '../utils/modelCatalog.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { buildProviders } from '../services/providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
@@ -173,6 +176,35 @@ export function register(ctx) {
   // Pull the connected social accounts from Post for Me so the funnel's account
   // IDs can be picked with checkboxes instead of hand-typed JSON. Uses the key
   // typed in the box if present, else the funnel's saved key. Returns JSON.
+  // Ask the provider which models the saved key can actually call, cache the
+  // short list, and let the settings dropdowns offer it (no hand-typed models).
+  router.post('/admin/settings/models/refresh', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const provider = String(req.body?.provider || '').toLowerCase();
+      const tenantId = req.tenantId;
+      const t = await tenantSettings.forTenant(tenantId);
+      let cat = {};
+      try { cat = JSON.parse((await tenantConfigRepo.get(tenantId, 'models_catalog')) || '{}') || {}; } catch { cat = {}; }
+
+      if (provider === 'openai') {
+        const fresh = buildCatalog({ openaiIds: await listOpenAiModels(t.openai.apiKey, log) });
+        cat.openai_image = fresh.openai_image; cat.openai_text = fresh.openai_text;
+      } else if (provider === 'gemini') {
+        const fresh = buildCatalog({ geminiModels: await listGeminiModels(t.gemini.apiKey, log) });
+        cat.gemini_image = fresh.gemini_image; cat.gemini_text = fresh.gemini_text;
+      } else {
+        return res.status(400).json({ ok: false, error: 'unknown provider' });
+      }
+      cat.refreshedAt = new Date().toISOString();
+      await tenantConfigRepo.set(tenantId, 'models_catalog', JSON.stringify(cat));
+      tenantSettings.invalidate(tenantId);
+      res.json({ ok: true, image: (cat[provider + '_image'] || []).length, text: (cat[provider + '_text'] || []).length });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   router.post('/admin/funnels/fetch-accounts', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -468,6 +500,16 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey
     }catch(e){ cell.textContent='Failed to load billing.'; }
   }
   function esc2(s){ return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  async function refreshModels(provider){
+    const st=document.getElementById('mdl-'+provider);
+    if(st){ st.textContent='Loading…'; st.style.color=''; }
+    try{
+      const r=await fetch('/api/v1/admin/settings/models/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:provider})});
+      const j=await r.json();
+      if(j.ok){ if(st){ st.textContent='✓ '+(j.image+j.text)+' models'; st.style.color='#5bd08a'; } setTimeout(function(){location.reload();},600); }
+      else if(st){ st.textContent='✗ '+(j.error||'failed'); st.style.color='#ff9a9a'; }
+    }catch(e){ if(st){ st.textContent='✗ '+e.message; st.style.color='#ff9a9a'; } }
+  }
   function genSecret(id){
     const b=new Uint8Array(24); crypto.getRandomValues(b);
     const hex=Array.from(b).map(x=>x.toString(16).padStart(2,'0')).join('');
@@ -898,6 +940,27 @@ function fieldRow(field, configMap) {
       .join('');
     return `<div class="field"><label>${esc(field.label)}</label>
       <select name="set[${esc(field.key)}]" class="pick">${opts}</select></div>`;
+  }
+  if (field.type === 'model_select') {
+    const val = has ? current : (field.default || field.placeholder || '');
+    let cat = {};
+    try { cat = JSON.parse(configMap.models_catalog || '{}') || {}; } catch { cat = {}; }
+    const list = Array.isArray(cat[field.catalog]) ? cat[field.catalog] : [];
+    const provider = String(field.catalog || '').startsWith('gemini') ? 'gemini' : 'openai';
+    const pname = provider === 'gemini' ? 'Gemini' : 'OpenAI';
+    const opts2 = [...new Set([val, ...list].filter(Boolean))]
+      .map((v) => `<option value="${esc(v)}"${String(val) === String(v) ? ' selected' : ''}>${esc(v)}</option>`)
+      .join('');
+    const hint = list.length
+      ? `${list.length} model${list.length === 1 ? '' : 's'} available on your ${pname} key — pick one.`
+      : `Save your ${pname} key above, then click Refresh to load the list.`;
+    return `<div class="field"><label>${esc(field.label)}</label>
+      <div class="row" style="gap:.4rem">
+        <select name="set[${esc(field.key)}]" class="pick" style="flex:1">${opts2 || '<option value="">— click Refresh —</option>'}</select>
+        <button type="button" class="act" onclick="refreshModels('${provider}')">↻ Refresh</button>
+        <span id="mdl-${esc(provider)}" class="hint"></span>
+      </div>
+      <p class="hint">${hint}</p></div>`;
   }
   if (field.type === 'weekdays') {
     const gid = uniqueId('days');

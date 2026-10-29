@@ -29,10 +29,10 @@ export const CONFIG_MANIFEST = {
         title: 'AI — text & image models',
         fields: [
           { key: 'openai_api_key', label: 'OpenAI API key', type: 'secret' },
-          { key: 'image_model', label: 'OpenAI image model', placeholder: 'gpt-image-2' },
-          { key: 'text_model', label: 'OpenAI text model', placeholder: 'gpt-5-mini' },
+          { key: 'image_model', label: 'OpenAI image model', type: 'model_select', catalog: 'openai_image', placeholder: 'gpt-image-2' },
+          { key: 'text_model', label: 'OpenAI text model', type: 'model_select', catalog: 'openai_text', placeholder: 'gpt-5-mini' },
           { key: 'gemini_api_key', label: 'Gemini API key', type: 'secret' },
-          { key: 'gemini_image_model', label: 'Gemini image model', placeholder: 'models/gemini-3.1-flash-image' },
+          { key: 'gemini_image_model', label: 'Gemini image model', type: 'model_select', catalog: 'gemini_image', placeholder: 'models/gemini-3.1-flash-image' },
         ],
       },
       {
