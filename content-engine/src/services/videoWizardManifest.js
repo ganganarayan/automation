@@ -68,6 +68,7 @@ export const WIZARD_STEPS = [
       { key: 'direct_drive_folder', label: 'Direct upload — Drive folder of ready videos (blank = the funnel media folder)', group: 'direct', placeholder: 'Drive folder ID' },
       { key: 'direct_caption', label: 'Direct upload — caption (used for the Instagram & LinkedIn caption, and the YouTube description; the funnel CTA link is appended)', type: 'textarea', group: 'direct', placeholder: 'default caption for these posts' },
       { key: 'direct_yt_title', label: 'Direct upload — YouTube title', group: 'direct', placeholder: 'title shown on YouTube' },
+      { key: 'direct_copy_brief', label: 'AI copy — brand / voice brief (used by "Ready video + AI copy" to write each video\'s title, description, captions)', type: 'textarea', group: 'direct', placeholder: 'e.g. calm, practical tone; speak to founders; always use #gitawisdom' },
     ],
   },
   {

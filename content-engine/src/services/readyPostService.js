@@ -10,7 +10,14 @@
  *               email is sent afterwards. Each post is recorded as a posted
  *               instance so it shows in the same log, with its stages marked
  *               skipped and zero AI cost.
- * Responsibility: Orchestration + side effects; pure logic in utils/readyPostSpec.
+ *
+ *               AI-copy lane: the same picker, but per video the app first
+ *               downloads the file, transcribes its audio and writes the YouTube
+ *               title + description (also the LinkedIn / Facebook post), the
+ *               Instagram caption and a short Threads / X post. The operator
+ *               edits them, then posts — each platform gets its own copy.
+ * Responsibility: Orchestration + side effects; pure logic in utils/readyPostSpec
+ *               and utils/aiCopySpec.
  * Dependencies: funnelsRepository, instanceService, instanceRepository,
  *               providerFactory, publishProvider, storageProvider, instanceSpec,
  *               utils/{readyPostSpec,reviewSpec,time}, logger.
@@ -20,9 +27,13 @@ import * as instanceService from '../services/instanceService.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
 import { buildProviders } from './providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
+import { createTranscriptProvider } from '../providers/transcriptProvider.js';
+import { createFfmpegProvider } from '../providers/ffmpegProvider.js';
 import { dlUrl } from '../providers/storageProvider.js';
 import * as captureRules from './captureRules.js';
-import { buildInitialSteps, patchStep } from '../utils/instanceSpec.js';
+import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
+import { costText, costTranscript } from '../utils/pricing.js';
+import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor } from '../utils/aiCopySpec.js';
 import { formatIst } from '../utils/time.js';
 import { driveEmbedUrl } from '../utils/reviewSpec.js';
 import {
@@ -68,19 +79,69 @@ export async function listReadyVideos({ tenantId = 'default', funnelId }) {
   return { funnel, resolved, cfg, videos, defaultCaption: captionFor(cfg, resolved) };
 }
 
-/** Record one direct post as a posted instance (stages skipped, cost 0). */
-async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, ref }) {
+// Whisper rejects uploads over 25 MB.
+const WHISPER_MAX_BYTES = 25 * 1024 * 1024;
+
+/**
+ * AI-copy lane: download one ready video, transcribe it and write its copy.
+ * A pasted `transcript` (or any text) skips the download + transcription.
+ * Returns { copy, transcript, costs, transcribed } — costs are the real
+ * transcription and token costs, carried back with the selection and recorded
+ * on the instance.
+ */
+export async function generateCopy({ tenantId = 'default', funnelId, driveId, name = '', transcript: pasted = '' }) {
+  if (!driveId) throw new Error('driveId required');
+  const { funnel, resolved, cfg } = await loadFunnel(funnelId);
+  const providers = await buildProviders(funnel.tenant_id || tenantId);
+  const costs = [];
+
+  // A pasted transcript / text skips the download + transcription entirely.
+  let transcript = String(pasted || '').trim();
+  const audio = transcript ? Buffer.alloc(0) : await createFfmpegProvider({}, log).extractAudio({
+    videoBuffer: await providers.storage.download(driveId),
+    ext: ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase(),
+  });
+  if (audio.length) {
+    if (audio.length > WHISPER_MAX_BYTES) throw new Error('video audio is too long to transcribe (over ~70 minutes)');
+    const tp = createTranscriptProvider({ apiKey: providers.resolved.transcriptKey || providers.resolved.openai.apiKey }, log);
+    const t = await tp.transcribe({ buffer: audio, filename: 'audio.mp3' });
+    transcript = t.text;
+    costs.push({ step: 'transcript', ...costTranscript({ provider: tp.provider, minutes: t.minutes }) });
+  }
+
+  const { data, model, usage } = await providers.llm.generateJsonDetailed({
+    system: copySystemPrompt({ brief: cfg && cfg.direct_copy_brief, audience: resolved.audiencePrefix, keyword: resolved.captureKeyword }),
+    user: copyUserPrompt({ transcript, fileName: name }),
+    maxTokens: 2000,
+  });
+  costs.push({ step: 'script', ...costText({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, model }) });
+  const copy = normalizeCopy(data);
+  if (!copy.title && !copy.description) throw new Error('the model returned empty copy — try again');
+  log.info({ funnel: funnel.name, driveId, words: transcript.split(/\s+/).filter(Boolean).length }, 'ready video copy generated');
+  return { copy, transcript, costs, transcribed: audio.length > 0 };
+}
+
+/** Record one direct post as a posted instance (stages skipped; AI-copy cost if any). */
+async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, ref, copy = null, costs = [] }) {
   const inst = await instanceService.createForFunnel({
     tenantId: funnel.tenant_id,
     funnel,
-    title: `Ready video — ${scheduledIso ? formatIst(scheduledIso, { withTime: false }) : 'now'}`,
+    title: `${copy && copy.title ? copy.title : 'Ready video'} — ${scheduledIso ? formatIst(scheduledIso, { withTime: false }) : 'now'}`,
     scheduledFor: scheduledIso ? new Date(scheduledIso) : null,
   });
   let steps = buildInitialSteps();
   for (const k of ['script', 'images', 'animate', 'voiceover', 'transcript']) steps = patchStep(steps, k, { status: 'skipped' });
+  if (copy) {
+    steps = patchStep(steps, 'transcript', { status: 'done' });
+    steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy } });
+  }
+  for (const c of costs || []) {
+    const { step, ...entry } = c;
+    steps = addCostToSteps(steps, step === 'transcript' ? 'transcript' : 'script', { ...entry, costUsd: Number(entry.costUsd) || 0, at: new Date().toISOString() });
+  }
   steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: { driveId } } });
   steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: ref ? [ref] : [], caption } });
-  await instanceRepo.saveSteps(inst.id, steps, 0);
+  await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   await instanceRepo.lockAsPosted(inst.id, { postRefs: ref ? [ref] : [], postedAt: scheduledIso ? new Date(scheduledIso) : new Date() });
   return inst.id;
 }
@@ -117,7 +178,9 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
     const sel = clean[i];
     // "Post now" => no scheduled_at, so Post-for-Me publishes immediately.
     const scheduledIso = sel.now ? null : ((sel.scheduledAt && parseIstDateTime(sel.scheduledAt)) || slots[i] || null);
-    const caption = sel.caption.trim() || captionFor(cfg, resolved);
+    // AI-copy lane: each platform gets its own copy for this video.
+    const ai = sel.copy ? platformConfigsFor(sel.copy, { accountIds: accounts, accountMap, ctaLink: resolved.ctaLink }) : null;
+    const caption = ai ? ai.caption : (sel.caption.trim() || captionFor(cfg, resolved));
     try {
       await providers.storage.shareAnyone(sel.driveId);
       const result = await publish.createPost({
@@ -125,7 +188,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
         caption,
         mediaUrl: dlUrl(sel.driveId),
         scheduledAt: scheduledIso || undefined,
-        platformConfigurations,
+        platformConfigurations: ai ? ai.platformConfigurations : platformConfigurations,
       });
       const ref = result && result.id ? result.id : null;
       // Arm comment-to-DM for this post (funnel-level keyword/dm defaults).
@@ -140,7 +203,10 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
           notFollowingText: resolved.captureNotFollowingText, log,
         }).catch((err) => log.warn({ err: err.message }, 'capture rule create failed (posted anyway)'));
       }
-      const instanceId = await recordPostedInstance({ funnel, driveId: sel.driveId, caption, scheduledIso, ref });
+      const instanceId = await recordPostedInstance({
+        funnel, driveId: sel.driveId, caption, scheduledIso, ref,
+        copy: sel.copy ? normalizeCopy(sel.copy) : null, costs: sel.costs,
+      });
       try {
         await providers.storage.renameFile(sel.driveId, `POSTED - ${sel.name || sel.driveId}`);
       } catch (err) {
@@ -187,4 +253,4 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export default { listReadyVideos, postSelections };
+export default { listReadyVideos, generateCopy, postSelections };

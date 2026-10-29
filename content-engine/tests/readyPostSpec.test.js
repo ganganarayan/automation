@@ -81,7 +81,12 @@ describe('normalizeSelections', () => {
       { driveId: '', caption: 'skip' },
     ]);
     expect(out.map((s) => s.driveId)).toEqual(['c', 'a']);
-    expect(out[0]).toEqual({ driveId: 'c', name: 'c.mp4', caption: 'C', scheduledAt: '', now: false });
+    expect(out[0]).toEqual({ driveId: 'c', name: 'c.mp4', caption: 'C', scheduledAt: '', now: false, copy: null, costs: [] });
+  });
+  it('carries AI copy and keeps only numeric cost entries', () => {
+    const out = normalizeSelections([{ driveId: 'a', copy: { title: 'T' }, costs: [{ costUsd: 0.01 }, { costUsd: 'x' }, null] }]);
+    expect(out[0].copy).toEqual({ title: 'T' });
+    expect(out[0].costs).toEqual([{ costUsd: 0.01 }]);
   });
   it('carries the post-now flag', () => {
     const out = normalizeSelections([{ driveId: 'a', now: true }, { driveId: 'b' }]);

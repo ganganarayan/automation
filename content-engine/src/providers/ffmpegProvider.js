@@ -20,6 +20,7 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ffmpegConcatArgs } from '../utils/stageSpec.js';
+import { extractAudioArgs } from '../utils/aiCopySpec.js';
 import { probeMp4DurationSeconds } from '../utils/videoSpec.js';
 import { ExternalAPIError } from '../core/errors.js';
 
@@ -62,6 +63,27 @@ export function createFfmpegProvider(cfg = {}, log) {
         return { buffer, durationSeconds };
       } catch (err) {
         throw new ExternalAPIError(`ffmpeg stitch failed: ${err.stderr ? String(err.stderr).slice(0, 300) : err.message}`);
+      } finally {
+        await rm(dir, { recursive: true, force: true }).catch(() => {});
+      }
+    },
+
+    /** Pull a small mono mp3 out of a video, for transcription. Returns the mp3 Buffer. */
+    async extractAudio({ videoBuffer, ext = 'mp4' }) {
+      if (!videoBuffer || !videoBuffer.length) throw new ExternalAPIError('extractAudio needs video bytes');
+      const dir = await mkdtemp(join(tmpdir(), 'aud-'));
+      try {
+        const inPath = join(dir, `in.${ext}`);
+        const outPath = join(dir, 'audio.mp3');
+        await writeFile(inPath, videoBuffer);
+        await run(bin, extractAudioArgs({ inPath, outPath }), { maxBuffer: 64 * 1024 * 1024 });
+        const buffer = await readFile(outPath);
+        log?.info?.({ bytes: buffer.length }, 'ffmpeg audio extracted');
+        return buffer;
+      } catch (err) {
+        // No audio stream => ffmpeg writes nothing; treat as a silent video.
+        if (err.stderr && /does not contain any stream|Output file is empty|matches no streams/i.test(String(err.stderr))) return Buffer.alloc(0);
+        throw new ExternalAPIError(`ffmpeg audio extract failed: ${err.stderr ? String(err.stderr).slice(0, 300) : err.message}`);
       } finally {
         await rm(dir, { recursive: true, force: true }).catch(() => {});
       }

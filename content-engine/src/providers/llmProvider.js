@@ -6,6 +6,7 @@
  * Responsibility:
  *               - generateText({ system, user }): string
  *               - generateJson({ system, user, maxTokens }): parsed object
+ *               - generateJsonDetailed(...): { data, model, usage }
  *               - generateImage({ prompt, size }): PNG Buffer (OpenAI)
  *               - generateImageGemini({ prompt }): PNG Buffer (Gemini)
  * Dependencies: openai, @google/generative-ai, errors, logger.
@@ -57,9 +58,16 @@ export function createLlmProvider(cfg, log) {
     },
 
     async generateJson({ system, user, model, maxTokens = 4000 }) {
+      const { data } = await this.generateJsonDetailed({ system, user, model, maxTokens });
+      return data;
+    },
+
+    /** Like generateJson but also returns the model and real token usage (for cost). */
+    async generateJsonDetailed({ system, user, model, maxTokens = 4000 }) {
       const client = requireOpenai();
+      const usedModel = model || cfg.openai.textModel;
       const res = await client.chat.completions.create({
-        model: model || cfg.openai.textModel,
+        model: usedModel,
         response_format: { type: 'json_object' },
         max_tokens: maxTokens,
         messages: [
@@ -68,11 +76,20 @@ export function createLlmProvider(cfg, log) {
         ],
       });
       const raw = res.choices?.[0]?.message?.content || '{}';
+      let data;
       try {
-        return JSON.parse(raw);
+        data = JSON.parse(raw);
       } catch (err) {
         throw new ExternalAPIError('LLM returned invalid JSON', { cause: err });
       }
+      return {
+        data,
+        model: usedModel,
+        usage: {
+          inputTokens: res.usage?.prompt_tokens || 0,
+          outputTokens: res.usage?.completion_tokens || 0,
+        },
+      };
     },
 
     async generateImage({ prompt, size = '1024x1024', model }) {

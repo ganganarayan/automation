@@ -13,6 +13,8 @@
  *         GET  /api/v1/admin/instances/:id/data   JSON (instance + cost)
  *         POST /api/v1/admin/instances/sample      seed a sample (dev)
  *         POST /api/v1/admin/instances/:id/delete  delete (if not locked)
+ *         GET  /api/v1/admin/instances/ready-ai    ready video + AI copy picker
+ *         POST /api/v1/admin/instances/ready-ai/generate  transcribe + write one video's copy
  */
 import * as instances from '../services/instanceService.js';
 import * as review from '../services/instanceReviewService.js';
@@ -75,6 +77,35 @@ export function register(ctx) {
       const out = await readyPost.postSelections({ tenantId: req.tenantId, funnelId, selections });
       res.json({ ok: true, ...out });
     } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Ready video + AI copy: same as above, but each ticked video is transcribed
+  // and gets its own title / description / IG caption / short post to review.
+  router.get('/admin/instances/ready-ai', async (req, res, next) => {
+    try {
+      if (!(await guardHtml(req, res))) return;
+      const funnelId = req.query.funnel ? String(req.query.funnel) : '';
+      const list = await funnelsRepo.listByTenant(req.tenantId);
+      if (!funnelId) return res.type('html').send(readyChooserPage(list, READY_AI));
+      const { funnel, resolved, videos } = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId });
+      const prefills = defaultSlotsIso(resolved.publishTime, videos.length).map((iso) => formatIst(iso));
+      res.type('html').send(readyAiPickerPage({ funnel, resolved, videos, prefills }));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/admin/instances/ready-ai/generate', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const { funnelId, driveId, name, transcript } = req.body || {};
+      if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
+      const out = await readyPost.generateCopy({ tenantId: req.tenantId, funnelId, driveId: String(driveId), name: String(name || ''), transcript: String(transcript || '') });
+      res.json({ ok: true, ...out });
+    } catch (err) {
+      log.error({ err: err.message }, 'ready-ai generate failed');
       res.status(400).json({ ok: false, error: err.message });
     }
   });
@@ -352,19 +383,22 @@ function btn(call, kind = '') {
   return `<button class="act ${kind}" onclick="${call}">▶ Preview</button>`;
 }
 
-// Ready-video: funnel chooser when none is in the query.
-function readyChooserPage(funnels) {
+const READY = { base: '/api/v1/admin/instances/ready', title: 'Post ready videos', nav: 'ready' };
+const READY_AI = { base: '/api/v1/admin/instances/ready-ai', title: 'Ready video + AI copy', nav: 'ready-ai' };
+
+// Ready-video: funnel chooser when none is in the query (both lanes).
+function readyChooserPage(funnels, lane = READY) {
   const items = (funnels || [])
-    .map((f) => `<a class="act" href="/api/v1/admin/instances/ready?funnel=${encodeURIComponent(f.id)}">${esc(f.name)}</a>`)
+    .map((f) => `<a class="act" href="${lane.base}?funnel=${encodeURIComponent(f.id)}">${esc(f.name)}</a>`)
     .join(' ');
-  return shell('Post ready videos', `
+  return shell(lane.title, `
     <div class="top">
-      <h1>Post ready videos</h1>
+      <h1>${esc(lane.title)}</h1>
       <div class="toprow"><a class="act" href="/api/v1/admin/instances">← All instances</a></div>
     </div>
     <p class="ro">Pick a funnel whose Drive folder holds the uploaded videos to post.</p>
     <div class="row">${items || '<span class="hint">No funnels yet.</span>'}</div>
-  `, '', 'ready');
+  `, '', lane.nav);
 }
 
 // Ready-video: tick-select unposted Drive videos, caption + schedule each, post
@@ -427,6 +461,101 @@ function readyPickerPage({ funnel, resolved, videos, prefills, defCap = '' }) {
       }catch(e){ msg('Failed: '+e.message); }
     }
   `, 'ready');
+}
+
+// Ready video + AI copy: tick a video and the app transcribes it and writes its
+// per-platform copy into the fields below; edit, schedule, then post in tick order.
+function readyAiPickerPage({ funnel, resolved, videos, prefills }) {
+  const cards = (videos || [])
+    .map((v, i) => `<div class="card">
+      <div class="tile" onclick="openVideo('${esc(v.id)}')"><img src="${esc(driveThumbUrl(v.id, 'w400'))}" loading="lazy"><span class="playov">▶</span></div>
+      <label class="pick"><input type="checkbox" id="cb-${esc(v.id)}" onchange="toggle('${esc(v.id)}')"> <span class="ord" id="ord-${esc(v.id)}" data-id="${esc(v.id)}"></span> ${esc(v.name)}</label>
+      <input type="hidden" id="nm-${esc(v.id)}" value="${esc(v.name)}">
+      <div class="det" id="det-${esc(v.id)}">
+        <label class="fl">Transcript / text (optional — paste to skip transcription; blank = the app transcribes the video)<textarea id="tx-${esc(v.id)}" rows="4"></textarea></label>
+        <div class="nowrow"><button class="act" id="gb-${esc(v.id)}" onclick="gen('${esc(v.id)}')">✨ Generate copy</button> <span class="hint" id="gs-${esc(v.id)}"></span></div>
+        <label class="fl">YouTube title<input id="ti-${esc(v.id)}" maxlength="100"></label>
+        <label class="fl">Description — YouTube · LinkedIn · Facebook (link appended)<textarea id="de-${esc(v.id)}" rows="7"></textarea></label>
+        <label class="fl">Instagram caption<textarea id="ig-${esc(v.id)}" rows="6"></textarea></label>
+        <label class="fl">Short — Threads · X (link appended) <span class="hint" id="sc-${esc(v.id)}"></span><textarea id="sh-${esc(v.id)}" rows="2" oninput="cnt('${esc(v.id)}')"></textarea></label>
+        <label class="nowrow"><input type="checkbox" id="now-${esc(v.id)}" onchange="toggleNow('${esc(v.id)}')"> Post now (ignore schedule)</label>
+        <label class="fl">Schedule (IST DD-MM-YYYY HH:MM)<input id="sch-${esc(v.id)}" value="${esc(prefills[i] || '')}"></label>
+      </div>
+    </div>`)
+    .join('');
+
+  return shell(`Ready video + AI copy — ${shortId(String(funnel.id))}`, `
+    <div class="top">
+      <div>
+        <h1>Ready video + AI copy — ${esc(funnel.name)}</h1>
+        <div class="sub">Tick a video, optionally paste its transcript, then ✨ Generate copy: the app transcribes it (unless you pasted text) and writes its YouTube title, description (also LinkedIn &amp; Facebook), Instagram caption and a short Threads / X post. Edit, then post — in the order you ticked.</div>
+      </div>
+      <div class="toprow">
+        <a class="act" href="/api/v1/admin/instances/ready-ai">↺ Change funnel</a>
+        <a class="act" href="/api/v1/admin/instances">← All instances</a>
+      </div>
+    </div>
+    ${!resolved.driveFolder ? '<p class="ro">⚠ This funnel has no Drive folder set.</p>' : ''}
+    <div class="grid">${cards || '<p class="hint">No unposted videos found in the Drive folder.</p>'}</div>
+    <div class="bar">
+      <button class="approve" onclick="postSel()">Post selected</button>
+      <label class="nowrow"><input type="checkbox" id="allnow" onchange="allNow()"> Post all now (immediate)</label>
+      <span id="rmsg" class="hint"></span>
+    </div>
+    ${previewModal()}
+  `, `
+    const FUNNEL_ID = ${JSON.stringify(String(funnel.id))};
+    const order = [], costs = {}, busy = {}, done = {};
+    const $ = (p,id)=>document.getElementById(p+'-'+id);
+    function msg(t){ const m=document.getElementById('rmsg'); if(m) m.textContent=t; }
+    function renumber(){ order.forEach((id,i)=>{ const b=$('ord',id); if(b) b.textContent='#'+(i+1); }); document.querySelectorAll('.ord').forEach(b=>{ if(order.indexOf(b.dataset.id)<0) b.textContent=''; }); }
+    function cnt(id){ $('sc',id).textContent='('+$('sh',id).value.length+'/220)'; }
+    function toggle(id){
+      const cb=$('cb',id), det=$('det',id);
+      if(cb.checked){ if(order.indexOf(id)<0) order.push(id); det.classList.add('on'); }
+      else { const k=order.indexOf(id); if(k>=0) order.splice(k,1); det.classList.remove('on'); }
+      renumber();
+    }
+    async function gen(id){
+      if(busy[id]) return;
+      const pasted=$('tx',id).value.trim();
+      busy[id]=true; $('gs',id).textContent=pasted?'Writing copy from your text…':'Transcribing + writing copy… (about 20–60 s)';
+      try{
+        const r=await fetch('/api/v1/admin/instances/ready-ai/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, driveId:id, name:$('nm',id).value, transcript:pasted })});
+        const j=await r.json();
+        if(!j.ok) throw new Error(j.error||'failed');
+        $('ti',id).value=j.copy.title; $('de',id).value=j.copy.description; $('ig',id).value=j.copy.igCaption; $('sh',id).value=j.copy.short; cnt(id);
+        if(j.transcript) $('tx',id).value=j.transcript; $('gb',id).textContent='✨ Regenerate copy';
+        costs[id]=(costs[id]||[]).concat(j.costs||[]); done[id]=true;
+        const usd=(costs[id]||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
+        $('gs',id).textContent=(j.transcribed?'✓ Transcribed + copy written':(j.transcript?'✓ Copy written from your text':'✓ No speech found — copy written from the file name'))+' · $'+usd.toFixed(4);
+      }catch(e){ $('gs',id).textContent='⚠ '+e.message; }
+      busy[id]=false;
+    }
+    function toggleNow(id){ const n=$('now',id), s=$('sch',id); if(n&&s){ s.disabled=n.checked; s.style.opacity=n.checked?0.45:1; } }
+    function allNow(){ const on=document.getElementById('allnow').checked; document.querySelectorAll('input[id^="now-"]').forEach(n=>{ n.checked=on; toggleNow(n.id.slice(4)); }); }
+    async function postSel(){
+      if(!order.length){ msg('Tick at least one video.'); return; }
+      if(order.some(id=>busy[id])){ msg('Wait for the copy to finish generating.'); return; }
+      const nogen=order.filter(id=>!done[id]);
+      if(nogen.length){ msg('Generate copy first for '+nogen.map(id=>$('ord',id).textContent).join(', ')+'.'); return; }
+      const missing=order.filter(id=>!$('ti',id).value.trim()||!$('de',id).value.trim()||!$('ig',id).value.trim()||!$('sh',id).value.trim());
+      if(missing.length){ msg('Fill every copy field for '+missing.map(id=>$('ord',id).textContent).join(', ')+'.'); return; }
+      const selections = order.map(id=>({ driveId:id, name:$('nm',id).value, caption:'', scheduledAt:$('sch',id).value, now:$('now',id).checked,
+        copy:{ title:$('ti',id).value, description:$('de',id).value, igCaption:$('ig',id).value, short:$('sh',id).value }, costs:costs[id]||[] }));
+      msg('Posting '+selections.length+'…');
+      try{
+        const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections })});
+        const j=await r.json();
+        if(j.ok){
+          const bad=(j.results||[]).filter(x=>!x.ok);
+          msg('Posted '+j.posted+(bad.length?(', '+bad.length+' failed: '+bad.map(x=>x.name+' — '+x.error).join('; ')):'. Opening the log…'));
+          if(!bad.length) setTimeout(()=>location.href='/api/v1/admin/instances',1300);
+        }
+        else msg('Failed: '+(j.error||''));
+      }catch(e){ msg('Failed: '+e.message); }
+    }
+  `, 'ready-ai');
 }
 
 // ---- manual stepper UI -----------------------------------------------------
