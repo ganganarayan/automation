@@ -17,6 +17,8 @@ import { google } from 'googleapis';
 const thumbUrl = (id) => `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
 const dlUrl = (id) => `https://drive.google.com/uc?export=download&id=${id}`;
 
+const NOT_CONNECTED = 'Google Drive is not connected — paste the service-account JSON under Settings → Workspace → Google (Sheets & Drive access)';
+
 export function createGoogleDriveProvider(cfg, log) {
   if (!cfg.serviceAccount) {
     const noop = async () => {
@@ -32,12 +34,14 @@ export function createGoogleDriveProvider(cfg, log) {
         return { id: null, thumbnailUrl: null, downloadUrl: null };
       },
       shareAnyone: noop,
+      // Reads can't be skipped quietly — an empty list / empty file looks like
+      // "no videos" and hides the real problem, so say what to set.
       async listFiles() {
-        return [];
+        throw new Error(NOT_CONNECTED);
       },
       renameFile: noop,
       async download() {
-        return Buffer.alloc(0);
+        throw new Error(NOT_CONNECTED);
       },
     };
   }
