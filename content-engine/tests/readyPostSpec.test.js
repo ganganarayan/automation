@@ -6,6 +6,7 @@ import {
   parseIstDateTime,
   defaultCaption,
   normalizeSelections,
+  parseDriveFolderId,
 } from '../src/utils/readyPostSpec.js';
 
 const ist = (iso) => DateTime.fromISO(iso, { zone: 'Asia/Kolkata' });
@@ -69,6 +70,20 @@ describe('defaultCaption', () => {
   it('tolerates blanks', () => {
     expect(defaultCaption({ ctaLink: 'https://x.co/a' })).toBe('https://x.co/a');
     expect(defaultCaption({})).toBe('');
+  });
+});
+
+describe('parseDriveFolderId', () => {
+  const ID = '1AbCdEfGhIjKlMnOpQrStUv_-9';
+  it('reads a folder link, an ?id= link and a bare ID', () => {
+    expect(parseDriveFolderId(`https://drive.google.com/drive/folders/${ID}?usp=sharing`)).toBe(ID);
+    expect(parseDriveFolderId(`https://drive.google.com/drive/u/0/folders/${ID}`)).toBe(ID);
+    expect(parseDriveFolderId(`https://drive.google.com/open?id=${ID}`)).toBe(ID);
+    expect(parseDriveFolderId(`  ${ID} `)).toBe(ID);
+  });
+  it('returns empty for junk', () => {
+    expect(parseDriveFolderId('')).toBe('');
+    expect(parseDriveFolderId('not a link')).toBe('');
   });
 });
 

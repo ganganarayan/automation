@@ -69,6 +69,7 @@ export function createGoogleDriveProvider(cfg, log) {
       if (!fileId) return;
       await drive.permissions.create({
         fileId,
+        supportsAllDrives: true,
         requestBody: { role: 'reader', type: 'anyone' },
       });
     },
@@ -79,16 +80,19 @@ export function createGoogleDriveProvider(cfg, log) {
         fields: 'files(id, name, createdTime, mimeType)',
         orderBy: 'createdTime',
         pageSize: 200,
+        // Folders on a shared drive only list with these set.
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
       return res.data.files || [];
     },
 
     async renameFile(fileId, name) {
-      await drive.files.update({ fileId, requestBody: { name } });
+      await drive.files.update({ fileId, supportsAllDrives: true, requestBody: { name } });
     },
 
     async download(fileId) {
-      const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'arraybuffer' });
+      const res = await drive.files.get({ fileId, alt: 'media', supportsAllDrives: true }, { responseType: 'arraybuffer' });
       return Buffer.from(res.data);
     },
   };

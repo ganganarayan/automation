@@ -66,17 +66,30 @@ function captionFor(cfg, resolved) {
   return defaultCaption({ directCaption: cfg && cfg.direct_caption, audiencePrefix: resolved.audiencePrefix, ctaLink: resolved.ctaLink });
 }
 
-/** The unposted videos in a funnel's ready-videos Drive folder, newest first. */
-export async function listReadyVideos({ tenantId = 'default', funnelId }) {
+/**
+ * The unposted videos in a Drive folder, newest first — the folder the operator
+ * pasted on the page (`folder`), else the funnel's ready-videos folder. Also
+ * returns the service-account email the folder must be shared with, and the
+ * Drive error (if listing failed) so the page can say what's wrong.
+ */
+export async function listReadyVideos({ tenantId = 'default', funnelId, folder: override = '' }) {
   const { funnel, resolved, cfg } = await loadFunnel(funnelId);
   const providers = await buildProviders(funnel.tenant_id || tenantId);
-  const folder = readyFolder(cfg, resolved);
-  if (!folder) return { funnel, resolved, cfg, videos: [], defaultCaption: captionFor(cfg, resolved) };
-  const files = await providers.storage.listFiles(folder);
+  const folder = override || readyFolder(cfg, resolved);
+  const saEmail = (providers.resolved.google && providers.resolved.google.serviceAccount && providers.resolved.google.serviceAccount.client_email) || '';
+  const base = { funnel, resolved, cfg, folder, saEmail, defaultCaption: captionFor(cfg, resolved) };
+  if (!folder) return { ...base, videos: [] };
+  let files;
+  try {
+    files = await providers.storage.listFiles(folder);
+  } catch (err) {
+    log.warn({ err: err.message, folder }, 'ready folder list failed');
+    return { ...base, videos: [], listError: err.message };
+  }
   const videos = filterReadyVideos(files)
     .map((f) => ({ id: f.id, name: f.name, createdTime: f.createdTime }))
     .sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
-  return { funnel, resolved, cfg, videos, defaultCaption: captionFor(cfg, resolved) };
+  return { ...base, videos, totalFiles: files.length };
 }
 
 // Whisper rejects uploads over 25 MB.

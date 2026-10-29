@@ -14,6 +14,18 @@ import { DateTime } from 'luxon';
 
 const ZONE = 'Asia/Kolkata';
 
+/**
+ * The Drive folder ID from whatever the operator pasted: a folder link
+ * (…/folders/<id>?usp=…), an ?id=<id> link, or a bare ID. '' when none.
+ */
+export function parseDriveFolderId(input) {
+  const s = String(input || '').trim();
+  if (!s) return '';
+  const m = s.match(/\/folders\/([\w-]{10,})/) || s.match(/[?&]id=([\w-]{10,})/);
+  if (m) return m[1];
+  return /^[\w-]{10,}$/.test(s) ? s : '';
+}
+
 /** The postable files in a Drive folder: videos not already tagged POSTED. */
 export function filterReadyVideos(files) {
   return (Array.isArray(files) ? files : []).filter(
@@ -81,4 +93,4 @@ export function normalizeSelections(selections) {
 }
 
 export { ZONE };
-export default { filterReadyVideos, defaultSlotsIso, parseIstDateTime, defaultCaption, normalizeSelections, ZONE };
+export default { parseDriveFolderId, filterReadyVideos, defaultSlotsIso, parseIstDateTime, defaultCaption, normalizeSelections, ZONE };

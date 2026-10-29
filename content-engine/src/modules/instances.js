@@ -26,7 +26,7 @@ import { INSTANCE_STEPS, sumInstanceCost, costBreakdown, shortId, formatDuration
 import { MANUAL_STAGES, STAGE_LABEL, inputKind, canExecute } from '../utils/manualStepSpec.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst } from '../utils/time.js';
-import { defaultSlotsIso } from '../utils/readyPostSpec.js';
+import { defaultSlotsIso, parseDriveFolderId } from '../utils/readyPostSpec.js';
 import { driveThumbUrl } from '../utils/reviewSpec.js';
 import { keyOk } from '../services/accessService.js';
 
@@ -60,9 +60,10 @@ export function register(ctx) {
       const funnelId = req.query.funnel ? String(req.query.funnel) : '';
       const list = await funnelsRepo.listByTenant(req.tenantId);
       if (!funnelId) return res.type('html').send(readyChooserPage(list));
-      const { funnel, resolved, videos, defaultCaption: defCap } = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId });
-      const prefills = defaultSlotsIso(resolved.publishTime, videos.length).map((iso) => formatIst(iso));
-      res.type('html').send(readyPickerPage({ funnel, resolved, videos, prefills, defCap }));
+      const folder = parseDriveFolderId(req.query.folder);
+      const out = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId, folder });
+      const prefills = defaultSlotsIso(out.resolved.publishTime, out.videos.length).map((iso) => formatIst(iso));
+      res.type('html').send(readyPickerPage({ ...out, prefills, defCap: out.defaultCaption }));
     } catch (err) {
       next(err);
     }
@@ -89,9 +90,10 @@ export function register(ctx) {
       const funnelId = req.query.funnel ? String(req.query.funnel) : '';
       const list = await funnelsRepo.listByTenant(req.tenantId);
       if (!funnelId) return res.type('html').send(readyChooserPage(list, READY_AI));
-      const { funnel, resolved, videos } = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId });
-      const prefills = defaultSlotsIso(resolved.publishTime, videos.length).map((iso) => formatIst(iso));
-      res.type('html').send(readyAiPickerPage({ funnel, resolved, videos, prefills }));
+      const folder = parseDriveFolderId(req.query.folder);
+      const out = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId, folder });
+      const prefills = defaultSlotsIso(out.resolved.publishTime, out.videos.length).map((iso) => formatIst(iso));
+      res.type('html').send(readyAiPickerPage({ ...out, prefills }));
     } catch (err) {
       next(err);
     }
@@ -401,9 +403,42 @@ function readyChooserPage(funnels, lane = READY) {
   `, '', lane.nav);
 }
 
+// Ready-video: the "which Drive folder" box shared by both pickers — paste a
+// folder link, ↻ Load / refresh lists its unposted videos. The last folder used
+// per funnel is remembered in this browser and reopened automatically.
+function folderBar(funnel, { folder = '', saEmail = '', listError = '', totalFiles = 0, videos = [] } = {}) {
+  const fid = esc(String(funnel.id));
+  const link = folder ? `https://drive.google.com/drive/folders/${folder}` : '';
+  const share = saEmail ? `Share the folder with <b>${esc(saEmail)}</b> as <b>Editor</b> (Editor lets the app tag posted files "POSTED").` : '';
+  let status = '';
+  if (!folder) status = '<p class="ro">Paste the Google Drive folder link that holds your videos, then press ↻ Load.</p>';
+  else if (listError) status = `<p class="ro">⚠ Couldn't open that folder: ${esc(listError)}. ${share}</p>`;
+  else if (!videos.length) status = `<p class="ro">No unposted videos in this folder (${esc(String(totalFiles))} file(s) seen). Videos already tagged "POSTED" are hidden. If the folder isn't empty: ${share || 'share it with the app\'s service account.'}</p>`;
+  else status = `<p class="hint">${esc(String(videos.length))} unposted video(s) in this folder. Tick the one(s) to post.</p>`;
+  return `<div class="row" style="gap:.5rem;align-items:center;margin:.6rem 0">
+      <input id="folderin" style="flex:1;min-width:260px" placeholder="Paste Drive folder link (https://drive.google.com/drive/folders/…)" value="${esc(link)}" onkeydown="if(event.key==='Enter')loadFolder()">
+      <button class="act primary" onclick="loadFolder()">↻ Load / refresh</button>
+      ${link ? `<a class="act" href="${esc(link)}" target="_blank" rel="noopener">Open in Drive ↗</a>` : ''}
+    </div>
+    ${status}
+    <script>
+      function loadFolder(){
+        const v=document.getElementById('folderin').value.trim();
+        const u=new URL(location.href); u.searchParams.set('funnel','${fid}');
+        if(v) u.searchParams.set('folder', v); else u.searchParams.delete('folder');
+        try{ if(v) localStorage.setItem('readyFolder-${fid}', v); else localStorage.removeItem('readyFolder-${fid}'); }catch(e){}
+        location.href=u.toString();
+      }
+      (function(){ try{
+        const u=new URL(location.href), saved=localStorage.getItem('readyFolder-${fid}');
+        if(!u.searchParams.get('folder') && saved){ u.searchParams.set('folder', saved); location.replace(u.toString()); }
+      }catch(e){} })();
+    </script>`;
+}
+
 // Ready-video: tick-select unposted Drive videos, caption + schedule each, post
 // in selection order via Post-for-Me (no generation, no review email).
-function readyPickerPage({ funnel, resolved, videos, prefills, defCap = '' }) {
+function readyPickerPage({ funnel, videos, prefills, defCap = '', ...src }) {
   const cards = (videos || [])
     .map((v, i) => `<div class="card">
       <div class="tile" onclick="openVideo('${esc(v.id)}')"><img src="${esc(driveThumbUrl(v.id, 'w400'))}" loading="lazy"><span class="playov">▶</span></div>
@@ -428,8 +463,8 @@ function readyPickerPage({ funnel, resolved, videos, prefills, defCap = '' }) {
         <a class="act" href="/api/v1/admin/instances">← All instances</a>
       </div>
     </div>
-    ${!resolved.driveFolder ? '<p class="ro">⚠ This funnel has no Drive folder set.</p>' : ''}
-    <div class="grid">${cards || '<p class="hint">No unposted videos found in the Drive folder.</p>'}</div>
+    ${folderBar(funnel, src)}
+    <div class="grid">${cards}</div>
     <div class="bar">
       <button class="approve" onclick="postSel()">Post selected</button>
       <label class="nowrow"><input type="checkbox" id="allnow" onchange="allNow()"> Post all now (immediate)</label>
@@ -465,7 +500,7 @@ function readyPickerPage({ funnel, resolved, videos, prefills, defCap = '' }) {
 
 // Ready video + AI copy: tick a video and the app transcribes it and writes its
 // per-platform copy into the fields below; edit, schedule, then post in tick order.
-function readyAiPickerPage({ funnel, resolved, videos, prefills }) {
+function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
   const cards = (videos || [])
     .map((v, i) => `<div class="card">
       <div class="tile" onclick="openVideo('${esc(v.id)}')"><img src="${esc(driveThumbUrl(v.id, 'w400'))}" loading="lazy"><span class="playov">▶</span></div>
@@ -498,8 +533,8 @@ function readyAiPickerPage({ funnel, resolved, videos, prefills }) {
         <a class="act" href="/api/v1/admin/instances">← All instances</a>
       </div>
     </div>
-    ${!resolved.driveFolder ? '<p class="ro">⚠ This funnel has no Drive folder set.</p>' : ''}
-    <div class="grid">${cards || '<p class="hint">No unposted videos found in the Drive folder.</p>'}</div>
+    ${folderBar(funnel, src)}
+    <div class="grid">${cards}</div>
     <div class="bar">
       <button class="approve" onclick="postSel(false)">📅 Schedule selected</button>
       <button class="approve" onclick="postSel(true)">⚡ Post selected now</button>
