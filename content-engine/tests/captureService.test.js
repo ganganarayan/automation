@@ -147,12 +147,28 @@ describe('processCommentEvent', () => {
     expect(leads.rows.get('c1').dm_status).toBe('blocked_abuse');
   });
 
-  it('no matching rule -> nothing captured', async () => {
+  it('no matching rule -> comment is logged but is not a lead and gets nothing sent', async () => {
     const rules = fakeRules([RULE]);
     const senders = fakeSenders();
     const r = await processCommentEvent({ event: { ...baseEvent, text: 'hello there' } }, { rules, leads, senders, log: {} });
     expect(r.outcome).toBe('no_rule');
-    expect(leads.rows.size).toBe(0);
+    const row = leads.rows.get('c1');
+    expect(row).toBeTruthy();                 // visible, so it can be answered by hand
+    expect(row.dm_status).toBe('no_rule');    // not a lead
+    expect(row.keyword ?? null).toBeNull();
+    expect(row.commentText).toBe('hello there');
+    expect(senders.calls.dm).toBe(0);
+    expect(senders.calls.reply ?? 0).toBe(0);
+  });
+
+  it('a duplicate webhook for an unmatched comment logs it once', async () => {
+    const rules = fakeRules([RULE]);
+    const senders = fakeSenders();
+    const ev = { event: { ...baseEvent, text: 'hello there' } };
+    await processCommentEvent(ev, { rules, leads, senders, log: {} });
+    const second = await processCommentEvent(ev, { rules, leads, senders, log: {} });
+    expect(second.outcome).toBe('duplicate');
+    expect(leads.rows.size).toBe(1);
   });
 
   it('learns the native post id from the first matching comment (unlinked rule)', async () => {

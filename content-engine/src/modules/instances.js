@@ -22,6 +22,7 @@ import * as jobRunner from '../core/jobRunner.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import { INSTANCE_STEPS, sumInstanceCost, costBreakdown, shortId, formatDuration } from '../utils/instanceSpec.js';
 import { MANUAL_STAGES, STAGE_LABEL, inputKind, canExecute } from '../utils/manualStepSpec.js';
+import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst } from '../utils/time.js';
 import { defaultSlotsIso } from '../utils/readyPostSpec.js';
 import { driveThumbUrl } from '../utils/reviewSpec.js';
@@ -258,11 +259,7 @@ function listPage(rows, status) {
       <h1>Instances</h1>
       <div class="toprow">
         <div class="tabs">${tabs}</div>
-        <a class="act primary" href="/api/v1/admin/instances/ready">📤 Post ready videos</a>
-        <a class="act" href="/api/v1/admin/instances/manual">🎛 Manual run</a>
-        <a class="act" href="/api/v1/admin/capture">🎯 Comment capture</a>
         <button class="act" onclick="sample()">+ Sample</button>
-        <a class="act" href="/api/v1/admin/settings#funnels">← Settings</a>
       </div>
     </div>
     <table>
@@ -273,7 +270,7 @@ function listPage(rows, status) {
   `, `
     async function sample(){ const r=await fetch('/api/v1/admin/instances/sample',{method:'POST'}); const j=await r.json(); if(j.ok) location.reload(); else alert(j.error||'failed'); }
     async function del(id){ if(!confirm('Delete this instance?')) return; const r=await fetch('/api/v1/admin/instances/'+id+'/delete',{method:'POST'}); const j=await r.json(); if(j.ok) location.reload(); else alert(j.error||'failed'); }
-  `);
+  `, 'instances');
 }
 
 function detailPage(row, steps) {
@@ -348,7 +345,7 @@ function detailPage(row, steps) {
         if(m) m.textContent = j.ok ? ('Sent'+(j.emailedTo?(' to '+j.emailedTo):' — no approval email set, link only')) : ('Failed: '+(j.error||''));
       }catch(e){ if(m) m.textContent='Failed: '+e.message; }
     }
-  `);
+  `, 'instances');
 }
 
 function btn(call, kind = '') {
@@ -367,7 +364,7 @@ function readyChooserPage(funnels) {
     </div>
     <p class="ro">Pick a funnel whose Drive folder holds the uploaded videos to post.</p>
     <div class="row">${items || '<span class="hint">No funnels yet.</span>'}</div>
-  `, '');
+  `, '', 'ready');
 }
 
 // Ready-video: tick-select unposted Drive videos, caption + schedule each, post
@@ -429,7 +426,7 @@ function readyPickerPage({ funnel, resolved, videos, prefills, defCap = '' }) {
         else msg('Failed: '+(j.error||''));
       }catch(e){ msg('Failed: '+e.message); }
     }
-  `);
+  `, 'ready');
 }
 
 // ---- manual stepper UI -----------------------------------------------------
@@ -451,7 +448,7 @@ function manualChooserPage(funnels) {
       const j=await r.json();
       if(j.ok) location.href='/api/v1/admin/instances/'+j.id; else alert(j.error||'failed');
     }
-  `);
+  `, 'manual');
 }
 
 function manualCard(key, steps) {
@@ -541,7 +538,7 @@ function manualPage(row, steps) {
       }catch(e){ if(m) m.textContent='Failed: '+e.message; }
     }
     function genScript(){ const t=document.getElementById('in-script'); if(t) t.value=''; exec('script'); }
-  `);
+  `, 'manual');
 }
 
 function statusWord(s) {
@@ -579,13 +576,15 @@ function previewModal() {
   </script>`;
 }
 
-function shell(title, inner, script) {
+function shell(title, inner, script, current) {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} — automation</title>
 <style>
  :root{color-scheme:dark}*{box-sizing:border-box}
  body{font-family:system-ui;margin:0;background:#0b0b12;color:#e8e8ef}
  .wrap{max-width:1040px;margin:1.4rem auto;padding:0 1rem}
+${NAV_SHELL_CSS}
+${NAV_CSS}
  .top{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-bottom:1rem}
  h1{font-size:1.3rem;margin:0}.sub{color:#8a8aa2;font-size:.82rem;margin-top:.2rem}
  .toprow{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
@@ -637,7 +636,10 @@ function shell(title, inner, script) {
  .bar{position:sticky;bottom:0;background:#0b0b12;border-top:1px solid #24243a;padding:.9rem 0;margin-top:1rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
  .approve{background:#0a7d32;color:#fff;border:0;border-radius:8px;padding:.7rem 1.3rem;font-size:1rem;cursor:pointer}
 </style>
-<div class="wrap">${inner}</div>
+<div class="layout">
+  <aside>${navHtml({ current })}</aside>
+  <main><div class="wrap">${inner}</div></main>
+</div>
 <script>${script || ''}</script>`;
 }
 

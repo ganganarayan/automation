@@ -51,7 +51,28 @@ export async function processCommentEvent({ tenantId = 'default', event, now = n
     rule = firstMatchingRule(e.text, unlinked);
     if (rule) await rules.bindNativePost({ ruleId: rule.id, platformPostId: e.postId, accountId: e.accountId });
   }
-  if (!rule) return { outcome: 'no_rule' };
+  // No rule for this post: still record the comment so it is visible and can be
+  // answered by hand. No DM, no public reply, no keyword — it is not a lead.
+  if (!rule) {
+    const unmatchedAbuse = detectAbuse(e.text, abuseWords);
+    const seen = await leads.insertIfNew({
+      tenantId,
+      platform: e.platform,
+      commentId: e.commentId,
+      accountId: e.accountId,
+      postId: e.postId,
+      commenterId: e.commenterId,
+      commenterUsername: e.commenterUsername,
+      commentText: e.text,
+      commentCreatedAt: e.createdAt || null,
+      abuse: unmatchedAbuse.abusive,
+      dmStatus: 'no_rule',
+      publicReplyStatus: 'skipped',
+    });
+    if (!seen) return { outcome: 'duplicate' };
+    log.info?.({ commentId: e.commentId, postId: e.postId }, 'capture: comment logged, no rule for this post');
+    return { outcome: 'no_rule', leadId: seen.id };
+  }
 
   // (1/idempotency) Claim the comment. A duplicate webhook returns null here.
   const lead = await leads.insertIfNew({

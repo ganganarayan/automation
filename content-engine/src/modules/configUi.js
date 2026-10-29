@@ -27,6 +27,7 @@
  *   POST /api/v1/admin/access/key            set/clear the access key
  */
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
+import { navHtml, NAV_CSS } from '../utils/adminNav.js';
 import { FLOW_MANIFEST, hasFlow } from '../services/flowManifest.js';
 import { WIZARD_STEPS, completeness } from '../services/videoWizardManifest.js';
 import * as imageGateService from '../services/imageGateService.js';
@@ -363,9 +364,7 @@ export function register(ctx) {
 // ---- rendering -------------------------------------------------------------
 
 function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey, key, saved }) {
-  const menu = [['users', 'Users'], ['funnels', 'Funnels'], ...APPS.map((a) => [a, CONFIG_MANIFEST[a].label])]
-    .map(([id, label], i) => `<button class="nav${i === 0 ? ' active' : ''}" data-target="${id}" onclick="show('${id}')">${esc(label)}</button>`)
-    .join('');
+  const menu = navHtml({ key, tabs: true });
 
   const appSections = APPS
     .map((a) => (hasFlow(a) ? flowSection(a, tenantId, configMap, key) : appSection(a, tenantId, configMap, key)))
@@ -381,6 +380,7 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey
  aside .brand{font-weight:700;padding:.4rem .6rem 1rem;font-size:1.05rem}
  .nav{display:block;width:100%;text-align:left;background:none;border:0;color:#c7c7d9;padding:.6rem .7rem;border-radius:8px;font-size:.92rem;cursor:pointer;margin-bottom:.15rem}
  .nav:hover{background:#1c1c2a}.nav.active{background:#2a2a44;color:#fff}
+${NAV_CSS}
  aside .dash{display:block;margin-top:1rem;color:#7aa2ff;text-decoration:none;font-size:.85rem;padding:.4rem .7rem;border-top:1px solid #24243a}
  main{flex:1;padding:1.3rem;max-width:960px}
  header.top{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem}
@@ -446,10 +446,7 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey
 </style>
 <div class="layout">
   <aside>
-    <div class="brand">⚙️ automation</div>
     ${menu}
-    <a class="dash" href="instances">Instances →</a>
-    <a class="dash" href="../dashboard${key ? `?key=${encodeURIComponent(key)}` : ''}">← Dashboard</a>
   </aside>
   <main>
     ${saved ? `<div class="flash">Saved <b>${esc(saved)}</b>.</div>` : ''}

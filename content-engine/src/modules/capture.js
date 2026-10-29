@@ -21,6 +21,7 @@ import * as captureConfig from '../services/captureConfig.js';
 import { captureSenders } from '../services/captureSenders.js';
 import { verifyMetaSignature, parseCommentEvents, parseMessageEvents } from '../utils/captureSpec.js';
 import { keyOk } from '../services/accessService.js';
+import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst } from '../utils/time.js';
 
 const JOB_TYPE = 'capture_comment';
@@ -213,63 +214,94 @@ function dmStatusDot(status) {
   return map[status] || esc(status || '—');
 }
 
+/**
+ * The Comments screen: the rules that are armed, the leads they captured, and
+ * every other comment that arrived. An unmatched comment is NOT a lead — nothing
+ * is sent for it — but it is still shown so it can be answered by hand.
+ */
 function capturePage(ruleRows, leadRows) {
+  const leadsOnly = leadRows.filter((l) => l.dm_status !== 'no_rule');
+  const others = leadRows.filter((l) => l.dm_status === 'no_rule');
+
   const rulesHtml = ruleRows.length
     ? ruleRows.map(ruleRow).join('')
-    : `<tr><td colspan="7" class="empty">No rules yet — they are created automatically when a post with a keyword is published.</td></tr>`;
-
-  const leadsHtml = leadRows.length
-    ? leadRows.map(leadRow).join('')
+    : `<tr><td colspan="7" class="empty">No keyword rules yet — one is armed each time the app publishes a post.</td></tr>`;
+  const leadsHtml = leadsOnly.length
+    ? leadsOnly.map(leadRow).join('')
     : `<tr><td colspan="8" class="empty">No leads captured yet.</td></tr>`;
+  const othersHtml = others.length
+    ? others.map(otherRow).join('')
+    : `<tr><td colspan="6" class="empty">No other comments yet.</td></tr>`;
 
-  return `<!doctype html><html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Comment capture</title>
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Comments — automation</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f6f7f9; color: #1a1a1a; }
-  @media (prefers-color-scheme: dark) { body { background:#15171a; color:#e8e8e8; } .card{background:#1e2126!important;} th{background:#23272e!important;} tr:hover td{background:#23272e!important;} }
-  header { padding: 16px 20px; border-bottom: 1px solid #0001; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
-  header h1 { font-size: 1.1rem; margin: 0; }
-  header a { color:#0a7d32; text-decoration:none; font-size:.9rem; }
-  main { padding: 16px 20px; max-width: 1200px; }
-  h2 { font-size: .95rem; margin: 22px 0 8px; color:#555; }
-  .card { background:#fff; border-radius:10px; box-shadow:0 1px 3px #0002; overflow:hidden; }
-  table { width:100%; border-collapse: collapse; font-size:.86rem; }
-  th, td { text-align:left; padding:9px 12px; border-bottom:1px solid #0001; vertical-align:top; }
-  th { background:#f0f2f5; font-weight:600; position:sticky; top:0; }
-  tr:hover td { background:#f8f9fb; }
-  td.empty { text-align:center; color:#888; padding:22px; }
-  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:.78rem; background:#eef; }
-  .on { background:#0a7d32; color:#fff; } .off { background:#bbb; color:#fff; }
-  .kw { font-weight:600; }
-  .txt { max-width:320px; white-space:pre-wrap; word-break:break-word; color:#444; }
-  button { font:inherit; cursor:pointer; border:0; border-radius:6px; padding:5px 11px; }
-  .btn-toggle { background:#eef; color:#334; }
-  .btn-del { background:#fdecec; color:#b02020; }
-  form.inline { display:inline; margin:0; }
-  .muted { color:#999; font-size:.8rem; }
-</style></head><body>
-<header>
-  <h1>🎯 Comment capture</h1>
-  <a href="/api/v1/admin/instances">← Instances</a>
-  <a href="/api/v1/dashboard">Dashboard</a>
-  <span class="muted">Instagram &amp; Facebook — auto-DM on keyword, with log</span>
-</header>
-<main>
-  <h2>Keyword rules</h2>
-  <div class="card"><table>
-    <thead><tr><th>Platform</th><th>Lane</th><th>Keyword</th><th>Match</th><th>DM</th><th>Status</th><th></th></tr></thead>
-    <tbody>${rulesHtml}</tbody>
-  </table></div>
+ :root{color-scheme:dark}*{box-sizing:border-box}
+ body{font-family:system-ui;margin:0;background:#0b0b12;color:#e8e8ef}
+ ${NAV_SHELL_CSS}
+ ${NAV_CSS}
+ .wrap{max-width:1180px;margin:1.4rem auto;padding:0 1rem}
+ h1{font-size:1.3rem;margin:0}
+ h2{font-size:.9rem;margin:1.6rem 0 .5rem;color:#9a9ab0;text-transform:uppercase;letter-spacing:.05em}
+ .sub{color:#8a8aa2;font-size:.82rem;margin:.25rem 0 0}
+ .card{background:#12121b;border:1px solid #24243a;border-radius:12px;overflow:hidden}
+ table{width:100%;border-collapse:collapse;font-size:.86rem}
+ th,td{text-align:left;padding:.6rem .7rem;border-bottom:1px solid #1e1e2c;vertical-align:top}
+ th{color:#9a9ab0;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;background:#15151f}
+ tr:hover td{background:#15151f}
+ td.empty{text-align:center;color:#6f6f88;padding:1.4rem}
+ .kw{font-weight:600;color:#e8e8ef}
+ .txt{max-width:340px;white-space:pre-wrap;word-break:break-word;color:#c7c7d9}
+ .muted{color:#6f6f88;font-size:.78rem}
+ .pill{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.72rem;border:1px solid #24243a;background:#1c1c2a;color:#9a9ab0}
+ .pill.on{background:#123b1f;border-color:#1f6b38;color:#8ff0b0}
+ .pill.off{background:#1c1c2a;color:#9a9ab0}
+ .pill.bad{background:#3b1212;border-color:#6b1f1f;color:#ff9a9a}
+ button{font:inherit;cursor:pointer;border:0;border-radius:8px;padding:.35rem .75rem;font-size:.8rem}
+ .btn-toggle{background:#2a2a44;color:#fff}
+ .btn-del{background:#5a1d1d;color:#ffd7d7}
+ form.inline{display:inline;margin:0}
+</style>
+<div class="layout">
+  <aside>${navHtml({ current: 'capture' })}</aside>
+  <main><div class="wrap">
+    <h1>🎯 Comments</h1>
+    <p class="sub">Instagram &amp; Facebook. A comment matching an armed keyword becomes a lead and gets a DM; everything else is just listed here for you to answer yourself.</p>
 
-  <h2>Captured leads</h2>
-  <div class="card"><table>
-    <thead><tr><th>Platform</th><th>Keyword</th><th>Lane</th><th>Username</th><th>Comment time</th><th>DM status</th><th>Follow-up</th><th></th></tr></thead>
-    <tbody>${leadsHtml}</tbody>
-  </table></div>
-</main>
-</body></html>`;
+    <h2>Keyword rules</h2>
+    <div class="card"><table>
+      <thead><tr><th>Platform</th><th>Lane</th><th>Keyword</th><th>Match</th><th>DM</th><th>Status</th><th></th></tr></thead>
+      <tbody>${rulesHtml}</tbody>
+    </table></div>
+
+    <h2>Leads</h2>
+    <div class="card"><table>
+      <thead><tr><th>Platform</th><th>Keyword</th><th>Lane</th><th>Username</th><th>Comment time</th><th>DM status</th><th>Follow-up</th><th></th></tr></thead>
+      <tbody>${leadsHtml}</tbody>
+    </table></div>
+
+    <h2>Other comments — no rule matched</h2>
+    <div class="card"><table>
+      <thead><tr><th>Platform</th><th>Username</th><th>Comment</th><th>Post</th><th>Comment time</th><th></th></tr></thead>
+      <tbody>${othersHtml}</tbody>
+    </table></div>
+  </div></main>
+</div>`;
+}
+
+/** An unmatched comment: seen and shown, never acted on. */
+function otherRow(l) {
+  return `<tr>
+    <td>${esc(PLATFORM_LABEL[l.platform] || l.platform)}</td>
+    <td class="kw">${esc(l.commenter_username || l.commenter_id || '—')}</td>
+    <td class="txt">${esc(truncate(l.comment_text, 200))}${l.abuse ? `<br><span class="pill bad">abusive</span>` : ''}</td>
+    <td class="muted">${esc(l.post_id || '—')}</td>
+    <td>${esc(formatIst(l.comment_created_at))}</td>
+    <td><form class="inline" method="post" action="/api/v1/admin/capture/leads/${l.id}/delete"
+          onsubmit="return confirm('Delete this comment on the platform and remove this row?')">
+      <button class="btn-del" type="submit">Delete</button>
+    </form></td>
+  </tr>`;
 }
 
 function ruleRow(r) {
