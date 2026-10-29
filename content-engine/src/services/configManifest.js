@@ -66,7 +66,13 @@ export const CONFIG_MANIFEST = {
           { key: 'meta_app_id', label: 'Meta app ID' },
           { key: 'meta_app_secret', label: 'Meta app secret', type: 'secret', help: 'Verifies the X-Hub-Signature-256 on every incoming webhook.' },
           { key: 'meta_verify_token', label: 'Webhook verify token', type: 'generated_secret', help: 'Click Generate, then paste the SAME value into the Meta webhook setup screen.' },
-          { key: 'meta_page_tokens', label: 'Page / IG access tokens (JSON: id → token)', type: 'json' },
+          {
+            key: 'meta_page_tokens',
+            label: 'Page / IG access tokens (JSON: id → token)',
+            type: 'secret_json',
+            placeholder: '{ "<instagram business account id>": "<page token>", "<page id>": "<page token>" }',
+            help: 'Write-only — once saved the tokens are hidden and only the ids are shown; paste fresh JSON to replace them, blank keeps the current value. Map BOTH the Instagram business account id and the Page id to the same Page access token.',
+          },
         ],
       },
       {
@@ -88,6 +94,7 @@ export const CONFIG_MANIFEST = {
         fields: [
           {
             key: 'google_service_account_json',
+            placeholder: 'paste the service-account JSON here',
             label: 'Service account JSON',
             type: 'secret_json',
             help: 'Paste the downloaded Google service-account JSON once. Then share each funnel\'s content sheet and Drive upload folder (Editor) with the service-account email shown above. Blank keeps the current value. (Env GOOGLE_SERVICE_ACCOUNT_JSON is only a fallback.)',

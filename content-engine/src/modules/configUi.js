@@ -1000,15 +1000,28 @@ function fieldRow(field, configMap) {
       <input type="password" name="set[${esc(field.key)}]" autocomplete="off"
         placeholder="${has ? '•••• (set — blank keeps current)' : (field.placeholder ? esc(field.placeholder) : 'unset')}"></div>`;
   }
+/**
+ * What a stored secret_json may reveal about itself: the Google service-account
+ * identity when it holds one, otherwise the map’s own keys. Ids are not secret —
+ * the tokens they point at are, and those are never rendered.
+ */
+function secretJsonSummary(raw) {
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return 'Configured.'; }
+  if (parsed && parsed.client_email) {
+    return `Configured. Share your sheets &amp; Drive folders (Editor) with: <b>${esc(parsed.client_email)}</b>`;
+  }
+  const ids = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.keys(parsed) : [];
+  if (!ids.length) return 'Configured.';
+  return `Configured for ${ids.length} id${ids.length === 1 ? '' : 's'}: <b>${esc(ids.join(', '))}</b>`;
+}
   if (field.type === 'secret_json') {
-    // Write-only: never echo the JSON (it holds a private key). Surface only the
-    // service-account email so the user knows which identity to share sheets with.
-    let email = '';
-    if (has) { try { email = (JSON.parse(current) || {}).client_email || ''; } catch { email = ''; } }
+    // Write-only: never echo the JSON (it holds private keys or access tokens).
+    // Only the non-secret shape is surfaced, so the user can still tell what is set.
     return `<div class="field"><label>${esc(field.label)}</label>
-      ${email ? `<p class="hint">🟢 Configured. Share your sheets &amp; Drive folders (Editor) with: <b>${esc(email)}</b></p>` : ''}
+      ${has ? `<p class="hint">🟢 ${secretJsonSummary(current)}</p>` : ''}
       <textarea name="set[${esc(field.key)}]" autocomplete="off"
-        placeholder="${has ? '•••• (set — paste new JSON to replace; blank keeps current)' : 'paste the service-account JSON here'}"></textarea>
+        placeholder="${has ? '•••• (set — paste new JSON to replace; blank keeps current)' : (field.placeholder ? esc(field.placeholder) : 'paste the JSON here')}"></textarea>
       ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
   }
   if (field.type === 'json' || field.type === 'textarea') {
