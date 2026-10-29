@@ -29,7 +29,8 @@ import { buildProviders } from './providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { createTranscriptProvider } from '../providers/transcriptProvider.js';
 import { createFfmpegProvider } from '../providers/ffmpegProvider.js';
-import { dlUrl, createGoogleDriveProvider } from '../providers/storageProvider.js';
+import { createGoogleDriveProvider } from '../providers/storageProvider.js';
+import { createPublicDriveProvider, publicDlUrl } from '../providers/publicDriveProvider.js';
 import * as captureRules from './captureRules.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript } from '../utils/pricing.js';
@@ -69,10 +70,13 @@ function captionFor(cfg, resolved) {
 /**
  * The Drive client for a ready-video action: the operator's own sign-in token
  * when the files were picked with "Sign in with Google", else the workspace
- * service account.
+ * service account when one is set, else the no-key public reader (the folder
+ * is shared "Anyone with the link").
  */
 function driveFor(providers, accessToken) {
-  return accessToken ? createGoogleDriveProvider({ accessToken }, log) : providers.storage;
+  if (accessToken) return createGoogleDriveProvider({ accessToken }, log);
+  const g = providers.resolved.google || {};
+  return g.serviceAccount ? providers.storage : createPublicDriveProvider(log);
 }
 
 /**
@@ -95,14 +99,18 @@ export async function listReadyVideos({ tenantId = 'default', funnelId, folder: 
   if (!folder) return { ...base, videos: [] };
   let files;
   try {
-    files = await providers.storage.listFiles(folder);
+    files = await driveFor(providers, '').listFiles(folder);
   } catch (err) {
     log.warn({ err: err.message, folder }, 'ready folder list failed');
     return { ...base, videos: [], listError: err.message };
   }
+  // Posted files are hidden by the app's own record too — a public folder
+  // can't be renamed "POSTED".
+  const posted = new Set(await instanceRepo.postedDriveIds(funnel.id, funnel.tenant_id).catch(() => []));
   const videos = filterReadyVideos(files)
+    .filter((f) => !posted.has(f.id))
     .map((f) => ({ id: f.id, name: f.name, createdTime: f.createdTime }))
-    .sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
+    .sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
   return { ...base, videos, totalFiles: files.length };
 }
 
@@ -214,7 +222,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
       const result = await publish.createPost({
         accountIds: accounts,
         caption,
-        mediaUrl: dlUrl(sel.driveId),
+        mediaUrl: publicDlUrl(sel.driveId),
         scheduledAt: scheduledIso || undefined,
         platformConfigurations: ai ? ai.platformConfigurations : platformConfigurations,
       });

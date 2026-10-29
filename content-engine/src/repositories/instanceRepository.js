@@ -147,7 +147,23 @@ export async function existsForFunnelOnDate(funnelId, dateKey, tenantId = 'defau
   return rows.length > 0;
 }
 
+/**
+ * Drive file ids this funnel has already posted (the stitch step's video) — how
+ * the ready-video lanes hide posted files when they can't rename them in Drive.
+ */
+export async function postedDriveIds(funnelId, tenantId = 'default') {
+  if (!funnelId) return [];
+  const { rows } = await query(
+    `SELECT DISTINCT s->'artifacts'->'video'->>'driveId' AS drive_id
+       FROM instances, jsonb_array_elements(steps) s
+      WHERE tenant_id = $1 AND funnel_id = $2 AND status = 'posted'
+        AND s->>'key' = 'stitch'`,
+    [tenantId, funnelId],
+  );
+  return rows.map((r) => r.drive_id).filter(Boolean);
+}
+
 export default {
   create, get, list, logRows, saveSteps, setStatus, setMeta, bumpRound, lockAsPosted, setPostStatus, remove,
-  existsForFunnelOnDate,
+  existsForFunnelOnDate, postedDriveIds,
 };

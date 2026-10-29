@@ -410,31 +410,30 @@ function readyChooserPage(funnels, lane = READY) {
 //  1. 📂 Pick from Drive — "Sign in with Google" + Google's own picker; the app
 //     then acts only on the picked files with the operator's short-lived token
 //     (drive.file scope). Nothing to share, no service account, any account.
-//  2. Or paste a folder link (needs the workspace service account) — the last
-//     folder per funnel is remembered in this browser.
+//  2. Or paste a folder link — read with no key at all when the folder is shared
+//     "Anyone with the link" (or via the service account when one is set). The
+//     last folder per funnel is remembered in this browser.
 function folderBar(funnel, { folder = '', saEmail = '', listError = '', totalFiles = 0, videos = [], picked = false, picker = {} } = {}) {
   const fid = esc(String(funnel.id));
   const pk = { clientId: picker.clientId || '', apiKey: picker.apiKey || '', appId: picker.appId || '' };
   const pickerReady = !!(pk.clientId && pk.apiKey && pk.appId);
   const link = folder ? `https://drive.google.com/drive/folders/${folder}` : '';
-  const share = saEmail ? `Share the folder with <b>${esc(saEmail)}</b> as <b>Editor</b> (Editor lets the app tag posted files "POSTED").` : '';
+  const share = saEmail ? `Share the folder with <b>${esc(saEmail)}</b> as <b>Editor</b> (Editor lets the app tag posted files "POSTED").` : 'In Drive, set the folder sharing to <b>Anyone with the link</b>.';
   let status = '';
   if (picked) status = `<p class="hint">🟢 ${esc(String(videos.length))} video(s) picked from Google Drive. Tick the one(s) to post. <a href="#" onclick="clearPicked();return false">✕ Clear</a></p>`;
-  else if (!folder) status = `<p class="ro">${pickerReady ? 'Press 📂 Pick from Drive and choose your video(s)' : 'Paste the Google Drive folder link that holds your videos, then press ↻ Load'}.</p>`;
+  else if (!folder) status = '<p class="ro">Paste the Google Drive folder link (or ID) that holds your videos, then press ↻ Load / refresh. The folder must be shared “Anyone with the link”.</p>';
   else if (listError) status = `<p class="ro">⚠ Couldn't open that folder: ${esc(listError)}. ${share}</p>`;
-  else if (!videos.length) status = `<p class="ro">No unposted videos in this folder (${esc(String(totalFiles))} file(s) seen). Videos already tagged "POSTED" are hidden. ${pickerReady ? 'Easier: use 📂 Pick from Drive. ' : ''}${share}</p>`;
+  else if (!videos.length) status = `<p class="ro">No unposted videos in this folder (${esc(String(totalFiles))} file(s) seen). Videos already posted are hidden. ${totalFiles ? '' : share}</p>`;
   else status = `<p class="hint">${esc(String(videos.length))} unposted video(s) in this folder. Tick the one(s) to post.</p>`;
   return `<div class="row" style="gap:.5rem;align-items:center;margin:.6rem 0">
-      <button class="act primary" onclick="pickDrive(false)">📂 Pick from Drive</button>
-      <a class="act" href="#" onclick="pickDrive(true);return false" title="Sign in with a different Google account">⇄ Switch Google account</a>
-    </div>
-    ${pickerReady ? '' : '<p class="hint">📂 Pick from Drive needs the Google sign-in client ID, Picker API key and project number under Settings → Workspace → Google.</p>'}
-    <details ${folder && !picked ? 'open' : ''} style="margin:.3rem 0"><summary class="hint" style="cursor:pointer">…or load a whole folder by link (needs the service account)</summary>
-    <div class="row" style="gap:.5rem;align-items:center;margin:.4rem 0">
-      <input id="folderin" style="flex:1;min-width:260px" placeholder="Paste Drive folder link (https://drive.google.com/drive/folders/…)" value="${esc(link)}" onkeydown="if(event.key==='Enter')loadFolder()">
-      <button class="act" onclick="loadFolder()">↻ Load / refresh</button>
+      <input id="folderin" style="flex:1;min-width:260px" placeholder="Paste Drive folder link or ID (folder shared “Anyone with the link”)" value="${esc(link)}" onkeydown="if(event.key==='Enter')loadFolder()">
+      <button class="act primary" onclick="loadFolder()">↻ Load / refresh</button>
       ${link ? `<a class="act" href="${esc(link)}" target="_blank" rel="noopener">Open in Drive ↗</a>` : ''}
-    </div></details>
+    </div>
+    ${pickerReady ? `<div class="row" style="gap:.5rem;align-items:center;margin:.3rem 0">
+      <button class="act" onclick="pickDrive(false)">📂 …or pick from Drive</button>
+      <a class="act" href="#" onclick="pickDrive(true);return false" title="Sign in with a different Google account">⇄ Switch Google account</a>
+    </div>` : ''}
     ${status}
     ${pickerReady ? '<script src="https://accounts.google.com/gsi/client" async defer></script><script src="https://apis.google.com/js/api.js" async defer></script>' : ''}
     <script>

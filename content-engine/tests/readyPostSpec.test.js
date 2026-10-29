@@ -8,6 +8,7 @@ import {
   normalizeSelections,
   parseDriveFolderId,
   parsePickedFiles,
+  parseEmbeddedFolder,
 } from '../src/utils/readyPostSpec.js';
 
 const ist = (iso) => DateTime.fromISO(iso, { zone: 'Asia/Kolkata' });
@@ -121,5 +122,26 @@ describe('normalizeSelections', () => {
     const out = normalizeSelections([{ driveId: 'a', now: true }, { driveId: 'b' }]);
     expect(out[0].now).toBe(true);
     expect(out[1].now).toBe(false);
+  });
+});
+
+describe('parseEmbeddedFolder', () => {
+  const entry = (id, name, href, icon) => `<div class="flip-entry" id="entry-${id}" tabindex="0" role="link"><div class="flip-entry-info"><a href="${href}" target="_blank"><div class="flip-entry-list-icon"><img src="https://drive-thirdparty.googleusercontent.com/16/type/${icon}" alt=""/></div><div class="flip-entry-title">${name}</div></a></div></div>`;
+  const html = '<div class="flip-entries">'
+    + entry('1zNT6Lv7QDX6SN9RjP6XIcsW8WTzwwg50', 'Gita &amp; Life.mov', 'https://drive.google.com/file/d/1zNT6Lv7QDX6SN9RjP6XIcsW8WTzwwg50/view?usp=drive_web', 'video/quicktime')
+    + entry('1SubFolderIdAbCdEfGhIj', 'Archive', 'https://drive.google.com/drive/folders/1SubFolderIdAbCdEfGhIj', 'application/vnd.google-apps.folder')
+    + entry('1LFG2xVPDJwT32SZQeFTAsIP-CGJDIub4', 'notes.pdf', 'https://drive.google.com/file/d/1LFG2xVPDJwT32SZQeFTAsIP-CGJDIub4/view', 'application/pdf')
+    + '</div>';
+  it('lists files with names + mime types, skipping sub-folders', () => {
+    const out = parseEmbeddedFolder(html);
+    expect(out.map((f) => [f.id, f.name, f.mimeType])).toEqual([
+      ['1zNT6Lv7QDX6SN9RjP6XIcsW8WTzwwg50', 'Gita & Life.mov', 'video/quicktime'],
+      ['1LFG2xVPDJwT32SZQeFTAsIP-CGJDIub4', 'notes.pdf', 'application/pdf'],
+    ]);
+    expect(filterReadyVideos(out).map((f) => f.id)).toEqual(['1zNT6Lv7QDX6SN9RjP6XIcsW8WTzwwg50']);
+  });
+  it('returns [] for a sign-in / empty page', () => {
+    expect(parseEmbeddedFolder('<title>Sign in</title>')).toEqual([]);
+    expect(parseEmbeddedFolder(null)).toEqual([]);
   });
 });

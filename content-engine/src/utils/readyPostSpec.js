@@ -47,6 +47,30 @@ export function parsePickedFiles(raw) {
   return out;
 }
 
+const VIDEO_EXT = { mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/x-m4v', webm: 'video/webm', mkv: 'video/x-matroska', avi: 'video/x-msvideo' };
+const unent = (s) => String(s).replace(/&(amp|lt|gt|quot|#39|#(\d+));/g, (m, n, d) => (d ? String.fromCharCode(Number(d)) : { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" }[n]));
+
+/**
+ * Parse Google's public embedded folder view (drive.google.com/embeddedfolderview)
+ * into [{ id, name, mimeType, createdTime }]. Sub-folders are skipped; the
+ * mime type comes from the list icon, else the file extension.
+ */
+export function parseEmbeddedFolder(html) {
+  const out = [];
+  const parts = String(html || '').split('class="flip-entry"').slice(1);
+  for (const part of parts) {
+    const href = (part.match(/href="([^"]*)"/) || [])[1] || '';
+    if (/\/folders\//.test(href)) continue;
+    const id = (part.match(/id="entry-([\w-]{10,})"/) || href.match(/\/file\/d\/([\w-]{10,})/) || [])[1];
+    if (!id) continue;
+    const name = unent(((part.match(/class="flip-entry-title">([^<]*)</) || [])[1] || id).trim());
+    const ext = ((name.match(/\.(\w{2,4})$/) || [])[1] || '').toLowerCase();
+    const icon = (part.match(/\/type\/([\w.+-]+\/[\w.+-]+)/) || [])[1] || '';
+    out.push({ id, name, mimeType: icon || VIDEO_EXT[ext] || '', createdTime: null });
+  }
+  return out;
+}
+
 /** The postable files in a Drive folder: videos not already tagged POSTED. */
 export function filterReadyVideos(files) {
   return (Array.isArray(files) ? files : []).filter(
@@ -114,4 +138,4 @@ export function normalizeSelections(selections) {
 }
 
 export { ZONE };
-export default { parseDriveFolderId, parsePickedFiles, filterReadyVideos, defaultSlotsIso, parseIstDateTime, defaultCaption, normalizeSelections, ZONE };
+export default { parseEmbeddedFolder, parseDriveFolderId, parsePickedFiles, filterReadyVideos, defaultSlotsIso, parseIstDateTime, defaultCaption, normalizeSelections, ZONE };
