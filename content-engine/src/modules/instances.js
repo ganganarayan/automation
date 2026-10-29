@@ -561,10 +561,13 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
       <div class="tile" onclick="openVideo('${esc(v.id)}')"><img src="${esc(driveThumbUrl(v.id, 'w400'))}" loading="lazy"><span class="playov">▶</span></div>
       <label class="pick"><input type="checkbox" id="cb-${esc(v.id)}" onchange="toggle('${esc(v.id)}')"> <span class="ord" id="ord-${esc(v.id)}" data-id="${esc(v.id)}"></span> ${esc(v.name)}</label>
       <input type="hidden" id="nm-${esc(v.id)}" value="${esc(v.name)}">
-      <div class="det" id="det-${esc(v.id)}">
-        <label class="fl">Transcript / text (optional — paste to skip transcription; blank = the app transcribes the video)<textarea id="tx-${esc(v.id)}" rows="4"></textarea></label>
+      <div class="det ailay" id="det-${esc(v.id)}">
+        <div class="aicol">
+        <label class="fl">Transcript / text (optional — paste to skip transcription; blank = the app transcribes the video)<textarea id="tx-${esc(v.id)}" rows="6"></textarea></label>
         <div class="nowrow"><button class="act" id="gb-${esc(v.id)}" onclick="gen('${esc(v.id)}')">✨ Generate transcript + Thumbnail</button> <span class="hint" id="gs-${esc(v.id)}"></span></div>
         <div class="thumbs" id="th-${esc(v.id)}"></div>
+        </div>
+        <div class="aicol">
         <label class="fl">YouTube title<input id="ti-${esc(v.id)}" maxlength="100"></label>
         <label class="fl">Description — YouTube · LinkedIn · Facebook (link appended)<textarea id="de-${esc(v.id)}" rows="7"></textarea></label>
         <label class="fl">Instagram caption<textarea id="ig-${esc(v.id)}" rows="6"></textarea></label>
@@ -574,6 +577,7 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
           <label class="nowrow"><input type="radio" name="when-${esc(v.id)}" id="now-${esc(v.id)}" onchange="toggleNow('${esc(v.id)}')"> ⚡ Post now</label>
         </div>
         <label class="fl">Schedule (IST DD-MM-YYYY HH:MM)<input id="sch-${esc(v.id)}" value="${esc(prefills[i] || '')}"></label>
+        </div>
       </div>
     </div>`)
     .join('');
@@ -609,6 +613,7 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
       const cb=$('cb',id), det=$('det',id);
       if(cb.checked){ if(order.indexOf(id)<0) order.push(id); det.classList.add('on'); }
       else { const k=order.indexOf(id); if(k>=0) order.splice(k,1); det.classList.remove('on'); }
+      det.parentElement.classList.toggle('wide', cb.checked);
       renumber();
     }
     async function gen(id){
@@ -622,7 +627,8 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
         $('ti',id).value=j.copy.title; $('de',id).value=j.copy.description; $('ig',id).value=j.copy.igCaption; $('sh',id).value=j.copy.short; cnt(id);
         if(j.transcript) $('tx',id).value=j.transcript; $('gb',id).textContent='✨ Regenerate transcript + Thumbnail';
         thumbs[id]=j.thumbs||{};
-        $('th',id).innerHTML=Object.keys(thumbs[id]).map(k=>'<a href="'+thumbs[id][k]+'" target="_blank" rel="noopener" title="'+k+'"><img src="'+thumbs[id][k]+'"><span>'+k+'</span></a>').join('')
+        const tall=['instagram','tiktok','threads'];
+        $('th',id).innerHTML=Object.keys(thumbs[id]).map(k=>'<a class="'+(tall.indexOf(k)>=0?'tall':'wide')+'" href="'+thumbs[id][k]+'" target="_blank" rel="noopener" title="Open full size"><img src="'+thumbs[id][k]+'"><span>'+k+'</span></a>').join('')
           +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':' — the first frame will be used')+'</div>':'');
         costs[id]=(costs[id]||[]).concat(j.costs||[]); done[id]=true;
         const usd=(costs[id]||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
@@ -857,9 +863,15 @@ ${NAV_CSS}
  .ord{color:#7aa2ff;font-weight:700;min-width:1.6em;display:inline-block}
  .det{display:none;margin-top:.5rem}
  .det.on{display:block}
- .thumbs{display:flex;flex-wrap:wrap;gap:.4rem;margin:.4rem 0}
- .thumbs a{display:flex;flex-direction:column;align-items:center;font-size:.7rem;color:inherit;text-decoration:none}
- .thumbs img{height:72px;border-radius:4px;border:1px solid #444}
+ .card.wide{grid-column:1/-1}
+ .card.wide>.tile{max-height:320px;max-width:220px}
+ .det.ailay.on{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1.2rem;align-items:start}
+ @media (max-width:900px){.det.ailay.on{grid-template-columns:1fr}}
+ .thumbs{display:flex;flex-wrap:wrap;gap:.8rem;margin:.6rem 0;align-items:flex-end}
+ .thumbs a{display:flex;flex-direction:column;align-items:center;gap:.25rem;font-size:.8rem;color:inherit;text-decoration:none}
+ .thumbs a.wide img{width:300px;max-width:100%}
+ .thumbs a.tall img{width:190px}
+ .thumbs img{border-radius:6px;border:1px solid #444;display:block}
  .fl{display:flex;flex-direction:column;gap:.2rem;font-size:.74rem;color:#9a9ab0;margin-top:.45rem}
  .nowrow{display:flex;align-items:center;gap:.4rem;font-size:.78rem;color:#c7c7d9;margin-top:.45rem;cursor:pointer}
  .nowrow input{width:auto;margin:0}
