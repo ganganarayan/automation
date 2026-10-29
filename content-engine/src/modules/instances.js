@@ -478,7 +478,10 @@ function readyAiPickerPage({ funnel, resolved, videos, prefills }) {
         <label class="fl">Description — YouTube · LinkedIn · Facebook (link appended)<textarea id="de-${esc(v.id)}" rows="7"></textarea></label>
         <label class="fl">Instagram caption<textarea id="ig-${esc(v.id)}" rows="6"></textarea></label>
         <label class="fl">Short — Threads · X (link appended) <span class="hint" id="sc-${esc(v.id)}"></span><textarea id="sh-${esc(v.id)}" rows="2" oninput="cnt('${esc(v.id)}')"></textarea></label>
-        <label class="nowrow"><input type="checkbox" id="now-${esc(v.id)}" onchange="toggleNow('${esc(v.id)}')"> Post now (ignore schedule)</label>
+        <div class="nowrow"><b>When:</b>
+          <label class="nowrow"><input type="radio" name="when-${esc(v.id)}" checked onchange="toggleNow('${esc(v.id)}')"> 📅 Schedule</label>
+          <label class="nowrow"><input type="radio" name="when-${esc(v.id)}" id="now-${esc(v.id)}" onchange="toggleNow('${esc(v.id)}')"> ⚡ Post now</label>
+        </div>
         <label class="fl">Schedule (IST DD-MM-YYYY HH:MM)<input id="sch-${esc(v.id)}" value="${esc(prefills[i] || '')}"></label>
       </div>
     </div>`)
@@ -498,10 +501,11 @@ function readyAiPickerPage({ funnel, resolved, videos, prefills }) {
     ${!resolved.driveFolder ? '<p class="ro">⚠ This funnel has no Drive folder set.</p>' : ''}
     <div class="grid">${cards || '<p class="hint">No unposted videos found in the Drive folder.</p>'}</div>
     <div class="bar">
-      <button class="approve" onclick="postSel()">Post selected</button>
-      <label class="nowrow"><input type="checkbox" id="allnow" onchange="allNow()"> Post all now (immediate)</label>
+      <button class="approve" onclick="postSel(false)">📅 Schedule selected</button>
+      <button class="approve" onclick="postSel(true)">⚡ Post selected now</button>
       <span id="rmsg" class="hint"></span>
     </div>
+    <p class="hint">📅 Schedule selected uses each video's own choice (a video set to ⚡ Post now still goes immediately). ⚡ Post selected now publishes every ticked video immediately, ignoring the schedules.</p>
     ${previewModal()}
   `, `
     const FUNNEL_ID = ${JSON.stringify(String(funnel.id))};
@@ -533,17 +537,18 @@ function readyAiPickerPage({ funnel, resolved, videos, prefills }) {
       busy[id]=false;
     }
     function toggleNow(id){ const n=$('now',id), s=$('sch',id); if(n&&s){ s.disabled=n.checked; s.style.opacity=n.checked?0.45:1; } }
-    function allNow(){ const on=document.getElementById('allnow').checked; document.querySelectorAll('input[id^="now-"]').forEach(n=>{ n.checked=on; toggleNow(n.id.slice(4)); }); }
-    async function postSel(){
+    async function postSel(allNow){
       if(!order.length){ msg('Tick at least one video.'); return; }
       if(order.some(id=>busy[id])){ msg('Wait for the copy to finish generating.'); return; }
       const nogen=order.filter(id=>!done[id]);
       if(nogen.length){ msg('Generate copy first for '+nogen.map(id=>$('ord',id).textContent).join(', ')+'.'); return; }
       const missing=order.filter(id=>!$('ti',id).value.trim()||!$('de',id).value.trim()||!$('ig',id).value.trim()||!$('sh',id).value.trim());
       if(missing.length){ msg('Fill every copy field for '+missing.map(id=>$('ord',id).textContent).join(', ')+'.'); return; }
-      const selections = order.map(id=>({ driveId:id, name:$('nm',id).value, caption:'', scheduledAt:$('sch',id).value, now:$('now',id).checked,
+      const selections = order.map(id=>({ driveId:id, name:$('nm',id).value, caption:'', scheduledAt:$('sch',id).value, now:allNow||$('now',id).checked,
         copy:{ title:$('ti',id).value, description:$('de',id).value, igCaption:$('ig',id).value, short:$('sh',id).value }, costs:costs[id]||[] }));
-      msg('Posting '+selections.length+'…');
+      const nowCount=selections.filter(s=>s.now).length;
+      if(nowCount && !confirm(nowCount+' video(s) will go live on every channel right now. Continue?')) return;
+      msg((nowCount===selections.length?'Posting now ':'Scheduling ')+selections.length+'…');
       try{
         const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections })});
         const j=await r.json();
