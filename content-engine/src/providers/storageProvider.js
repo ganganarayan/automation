@@ -9,6 +9,11 @@
  *               - listFiles(folderId): [{ id, name, createdTime }]
  *               - renameFile(fileId, name)
  *               - download(fileId): Buffer
+ *
+ *               Two identities: the workspace service account (cfg.serviceAccount),
+ *               or — for files the operator picked with "Sign in with Google" —
+ *               the operator's own short-lived access token (cfg.accessToken,
+ *               drive.file scope: only the picked files are reachable).
  * Dependencies: googleapis, logger.
  */
 import { Readable } from 'node:stream';
@@ -17,10 +22,10 @@ import { google } from 'googleapis';
 const thumbUrl = (id) => `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
 const dlUrl = (id) => `https://drive.google.com/uc?export=download&id=${id}`;
 
-const NOT_CONNECTED = 'Google Drive is not connected — paste the service-account JSON under Settings → Workspace → Google (Sheets & Drive access)';
+const NOT_CONNECTED = 'Google Drive is not connected — use 📂 Pick from Drive (Sign in with Google), or paste the service-account JSON under Settings → Workspace → Google (Sheets & Drive access)';
 
 export function createGoogleDriveProvider(cfg, log) {
-  if (!cfg.serviceAccount) {
+  if (!cfg.serviceAccount && !cfg.accessToken) {
     const noop = async () => {
       log.warn('Google service account not configured; Drive op skipped');
     };
@@ -46,10 +51,16 @@ export function createGoogleDriveProvider(cfg, log) {
     };
   }
 
-  const auth = new google.auth.GoogleAuth({
-    credentials: cfg.serviceAccount,
-    scopes: ['https://www.googleapis.com/auth/drive'],
-  });
+  let auth;
+  if (cfg.accessToken) {
+    auth = new google.auth.OAuth2();
+    auth.setCredentials({ access_token: cfg.accessToken });
+  } else {
+    auth = new google.auth.GoogleAuth({
+      credentials: cfg.serviceAccount,
+      scopes: ['https://www.googleapis.com/auth/drive'],
+    });
+  }
   const drive = google.drive({ version: 'v3', auth });
 
   return {

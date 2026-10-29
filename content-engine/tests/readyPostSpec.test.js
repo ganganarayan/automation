@@ -7,6 +7,7 @@ import {
   defaultCaption,
   normalizeSelections,
   parseDriveFolderId,
+  parsePickedFiles,
 } from '../src/utils/readyPostSpec.js';
 
 const ist = (iso) => DateTime.fromISO(iso, { zone: 'Asia/Kolkata' });
@@ -84,6 +85,19 @@ describe('parseDriveFolderId', () => {
   it('returns empty for junk', () => {
     expect(parseDriveFolderId('')).toBe('');
     expect(parseDriveFolderId('not a link')).toBe('');
+  });
+});
+
+describe('parsePickedFiles', () => {
+  const ID = '1AbCdEfGhIjKlMnOpQrStUv_-9';
+  it('keeps valid picked files, de-duped', () => {
+    const raw = JSON.stringify([{ id: ID, name: 'a.mp4' }, { id: ID, name: 'dup' }, { id: 'bad id!', name: 'x' }, { id: '2ZyXwVuTsRqPoNmLkJ', name: '' }]);
+    expect(parsePickedFiles(raw)).toEqual([{ id: ID, name: 'a.mp4' }, { id: '2ZyXwVuTsRqPoNmLkJ', name: '2ZyXwVuTsRqPoNmLkJ' }]);
+  });
+  it('returns [] for junk', () => {
+    expect(parsePickedFiles('')).toEqual([]);
+    expect(parsePickedFiles('{oops')).toEqual([]);
+    expect(parsePickedFiles('{"id":"x"}')).toEqual([]);
   });
 });
 

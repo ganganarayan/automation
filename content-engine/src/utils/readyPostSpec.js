@@ -26,6 +26,27 @@ export function parseDriveFolderId(input) {
   return /^[\w-]{10,}$/.test(s) ? s : '';
 }
 
+/**
+ * The files the operator picked with the Google Drive picker, carried in the
+ * page URL as JSON [{ id, name }]. Drops anything that isn't a Drive id and
+ * de-dupes; at most 50. [] when absent or malformed.
+ */
+export function parsePickedFiles(raw) {
+  let list;
+  try { list = JSON.parse(String(raw || '')); } catch { return []; }
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const f of list) {
+    const id = String((f && f.id) || '').trim();
+    if (!/^[\w-]{10,}$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, name: String((f && f.name) || id).slice(0, 300) });
+    if (out.length >= 50) break;
+  }
+  return out;
+}
+
 /** The postable files in a Drive folder: videos not already tagged POSTED. */
 export function filterReadyVideos(files) {
   return (Array.isArray(files) ? files : []).filter(
@@ -93,4 +114,4 @@ export function normalizeSelections(selections) {
 }
 
 export { ZONE };
-export default { parseDriveFolderId, filterReadyVideos, defaultSlotsIso, parseIstDateTime, defaultCaption, normalizeSelections, ZONE };
+export default { parseDriveFolderId, parsePickedFiles, filterReadyVideos, defaultSlotsIso, parseIstDateTime, defaultCaption, normalizeSelections, ZONE };

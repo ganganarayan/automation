@@ -26,7 +26,7 @@ import { INSTANCE_STEPS, sumInstanceCost, costBreakdown, shortId, formatDuration
 import { MANUAL_STAGES, STAGE_LABEL, inputKind, canExecute } from '../utils/manualStepSpec.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst } from '../utils/time.js';
-import { defaultSlotsIso, parseDriveFolderId } from '../utils/readyPostSpec.js';
+import { defaultSlotsIso, parseDriveFolderId, parsePickedFiles } from '../utils/readyPostSpec.js';
 import { driveThumbUrl } from '../utils/reviewSpec.js';
 import { keyOk } from '../services/accessService.js';
 
@@ -61,7 +61,8 @@ export function register(ctx) {
       const list = await funnelsRepo.listByTenant(req.tenantId);
       if (!funnelId) return res.type('html').send(readyChooserPage(list));
       const folder = parseDriveFolderId(req.query.folder);
-      const out = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId, folder });
+      const picked = parsePickedFiles(req.query.picked);
+      const out = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId, folder, picked });
       const prefills = defaultSlotsIso(out.resolved.publishTime, out.videos.length).map((iso) => formatIst(iso));
       res.type('html').send(readyPickerPage({ ...out, prefills, defCap: out.defaultCaption }));
     } catch (err) {
@@ -75,7 +76,8 @@ export function register(ctx) {
       const funnelId = req.body?.funnelId;
       const selections = Array.isArray(req.body?.selections) ? req.body.selections : [];
       if (!funnelId) return res.status(400).json({ ok: false, error: 'funnelId required' });
-      const out = await readyPost.postSelections({ tenantId: req.tenantId, funnelId, selections });
+      const accessToken = String(req.body?.accessToken || '');
+      const out = await readyPost.postSelections({ tenantId: req.tenantId, funnelId, selections, accessToken });
       res.json({ ok: true, ...out });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
@@ -91,7 +93,8 @@ export function register(ctx) {
       const list = await funnelsRepo.listByTenant(req.tenantId);
       if (!funnelId) return res.type('html').send(readyChooserPage(list, READY_AI));
       const folder = parseDriveFolderId(req.query.folder);
-      const out = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId, folder });
+      const picked = parsePickedFiles(req.query.picked);
+      const out = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId, folder, picked });
       const prefills = defaultSlotsIso(out.resolved.publishTime, out.videos.length).map((iso) => formatIst(iso));
       res.type('html').send(readyAiPickerPage({ ...out, prefills }));
     } catch (err) {
@@ -102,9 +105,9 @@ export function register(ctx) {
   router.post('/admin/instances/ready-ai/generate', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      const { funnelId, driveId, name, transcript } = req.body || {};
+      const { funnelId, driveId, name, transcript, accessToken } = req.body || {};
       if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
-      const out = await readyPost.generateCopy({ tenantId: req.tenantId, funnelId, driveId: String(driveId), name: String(name || ''), transcript: String(transcript || '') });
+      const out = await readyPost.generateCopy({ tenantId: req.tenantId, funnelId, driveId: String(driveId), name: String(name || ''), transcript: String(transcript || ''), accessToken: String(accessToken || '') });
       res.json({ ok: true, ...out });
     } catch (err) {
       log.error({ err: err.message }, 'ready-ai generate failed');
@@ -403,35 +406,88 @@ function readyChooserPage(funnels, lane = READY) {
   `, '', lane.nav);
 }
 
-// Ready-video: the "which Drive folder" box shared by both pickers — paste a
-// folder link, ↻ Load / refresh lists its unposted videos. The last folder used
-// per funnel is remembered in this browser and reopened automatically.
-function folderBar(funnel, { folder = '', saEmail = '', listError = '', totalFiles = 0, videos = [] } = {}) {
+// Ready-video: where the videos come from, shared by both pickers.
+//  1. 📂 Pick from Drive — "Sign in with Google" + Google's own picker; the app
+//     then acts only on the picked files with the operator's short-lived token
+//     (drive.file scope). Nothing to share, no service account, any account.
+//  2. Or paste a folder link (needs the workspace service account) — the last
+//     folder per funnel is remembered in this browser.
+function folderBar(funnel, { folder = '', saEmail = '', listError = '', totalFiles = 0, videos = [], picked = false, picker = {} } = {}) {
   const fid = esc(String(funnel.id));
+  const pk = { clientId: picker.clientId || '', apiKey: picker.apiKey || '', appId: picker.appId || '' };
+  const pickerReady = !!(pk.clientId && pk.apiKey && pk.appId);
   const link = folder ? `https://drive.google.com/drive/folders/${folder}` : '';
   const share = saEmail ? `Share the folder with <b>${esc(saEmail)}</b> as <b>Editor</b> (Editor lets the app tag posted files "POSTED").` : '';
   let status = '';
-  if (!folder) status = '<p class="ro">Paste the Google Drive folder link that holds your videos, then press ↻ Load.</p>';
+  if (picked) status = `<p class="hint">🟢 ${esc(String(videos.length))} video(s) picked from Google Drive. Tick the one(s) to post. <a href="#" onclick="clearPicked();return false">✕ Clear</a></p>`;
+  else if (!folder) status = `<p class="ro">${pickerReady ? 'Press 📂 Pick from Drive and choose your video(s)' : 'Paste the Google Drive folder link that holds your videos, then press ↻ Load'}.</p>`;
   else if (listError) status = `<p class="ro">⚠ Couldn't open that folder: ${esc(listError)}. ${share}</p>`;
-  else if (!videos.length) status = `<p class="ro">No unposted videos in this folder (${esc(String(totalFiles))} file(s) seen). Videos already tagged "POSTED" are hidden. If the folder isn't empty: ${share || 'share it with the app\'s service account.'}</p>`;
+  else if (!videos.length) status = `<p class="ro">No unposted videos in this folder (${esc(String(totalFiles))} file(s) seen). Videos already tagged "POSTED" are hidden. ${pickerReady ? 'Easier: use 📂 Pick from Drive. ' : ''}${share}</p>`;
   else status = `<p class="hint">${esc(String(videos.length))} unposted video(s) in this folder. Tick the one(s) to post.</p>`;
   return `<div class="row" style="gap:.5rem;align-items:center;margin:.6rem 0">
-      <input id="folderin" style="flex:1;min-width:260px" placeholder="Paste Drive folder link (https://drive.google.com/drive/folders/…)" value="${esc(link)}" onkeydown="if(event.key==='Enter')loadFolder()">
-      <button class="act primary" onclick="loadFolder()">↻ Load / refresh</button>
-      ${link ? `<a class="act" href="${esc(link)}" target="_blank" rel="noopener">Open in Drive ↗</a>` : ''}
+      <button class="act primary" onclick="pickDrive(false)">📂 Pick from Drive</button>
+      <a class="act" href="#" onclick="pickDrive(true);return false" title="Sign in with a different Google account">⇄ Switch Google account</a>
     </div>
+    ${pickerReady ? '' : '<p class="hint">📂 Pick from Drive needs the Google sign-in client ID, Picker API key and project number under Settings → Workspace → Google.</p>'}
+    <details ${folder && !picked ? 'open' : ''} style="margin:.3rem 0"><summary class="hint" style="cursor:pointer">…or load a whole folder by link (needs the service account)</summary>
+    <div class="row" style="gap:.5rem;align-items:center;margin:.4rem 0">
+      <input id="folderin" style="flex:1;min-width:260px" placeholder="Paste Drive folder link (https://drive.google.com/drive/folders/…)" value="${esc(link)}" onkeydown="if(event.key==='Enter')loadFolder()">
+      <button class="act" onclick="loadFolder()">↻ Load / refresh</button>
+      ${link ? `<a class="act" href="${esc(link)}" target="_blank" rel="noopener">Open in Drive ↗</a>` : ''}
+    </div></details>
     ${status}
+    ${pickerReady ? '<script src="https://accounts.google.com/gsi/client" async defer></script><script src="https://apis.google.com/js/api.js" async defer></script>' : ''}
     <script>
+      const PK = ${JSON.stringify(pk).replace(/</g, '\\u003c')};
+      const PICKED = ${picked ? 'true' : 'false'};
+      const TOK = 'gdriveTok';
+      function savedToken(){ try{ const t=JSON.parse(sessionStorage.getItem(TOK)||'null'); return t && t.exp>Date.now() ? t.t : ''; }catch(e){ return ''; } }
+      function saveToken(t, secs){ try{ sessionStorage.setItem(TOK, JSON.stringify({ t, exp: Date.now()+(Math.max(60,Number(secs)||3600)-60)*1000 })); }catch(e){} }
+      // Sign in with Google (drive.file) and hand the token to cb.
+      function withToken(switchAccount, cb){
+        const t = switchAccount ? '' : savedToken();
+        if(t) return cb(t);
+        if(!PK.clientId){ alert('Set the Google sign-in client ID, Picker API key and project number under Settings → Workspace → Google first.'); return; }
+        if(!(window.google && google.accounts && google.accounts.oauth2)){ alert('Google sign-in is still loading — try again in a second.'); return; }
+        const tc = google.accounts.oauth2.initTokenClient({ client_id: PK.clientId, scope: 'https://www.googleapis.com/auth/drive.file',
+          callback: (r)=>{ if(r.error){ alert('Google sign-in failed: '+r.error); return; } saveToken(r.access_token, r.expires_in); cb(r.access_token); } });
+        tc.requestAccessToken(switchAccount ? { prompt: 'select_account' } : {});
+      }
+      // The token for generate / post — only when the videos were picked with sign-in.
+      function driveToken(){ if(!PICKED) return Promise.resolve(''); const t=savedToken(); return t ? Promise.resolve(t) : new Promise((res)=>withToken(false,res)); }
+      function goPicked(files){
+        const u=new URL(location.href); u.searchParams.set('funnel','${fid}'); u.searchParams.delete('folder');
+        u.searchParams.set('picked', JSON.stringify(files)); location.href=u.toString();
+      }
+      function clearPicked(){ const u=new URL(location.href); u.searchParams.delete('picked'); location.href=u.toString(); }
+      function pickDrive(switchAccount){
+        if(!(PK.clientId && PK.apiKey && PK.appId)){ alert('Set the Google sign-in client ID, Picker API key and project number under Settings → Workspace → Google first.'); return; }
+        withToken(switchAccount, (tok)=>{
+          if(!window.gapi){ alert('Google Picker is still loading — try again in a second.'); return; }
+          gapi.load('picker', ()=>{
+            const view = new google.picker.DocsView(google.picker.ViewId.DOCS_VIDEOS).setIncludeFolders(true).setMode(google.picker.DocsViewMode.LIST);
+            const p = new google.picker.PickerBuilder()
+              .addView(view)
+              .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+              .enableFeature(google.picker.Feature.SUPPORT_DRIVES)
+              .setOAuthToken(tok).setDeveloperKey(PK.apiKey).setAppId(PK.appId)
+              .setTitle('Pick the video(s) to post')
+              .setCallback((d)=>{ if(d.action===google.picker.Action.PICKED){ goPicked((d.docs||[]).map(x=>({ id:x.id, name:x.name }))); } })
+              .build();
+            p.setVisible(true);
+          });
+        });
+      }
       function loadFolder(){
         const v=document.getElementById('folderin').value.trim();
-        const u=new URL(location.href); u.searchParams.set('funnel','${fid}');
+        const u=new URL(location.href); u.searchParams.set('funnel','${fid}'); u.searchParams.delete('picked');
         if(v) u.searchParams.set('folder', v); else u.searchParams.delete('folder');
         try{ if(v) localStorage.setItem('readyFolder-${fid}', v); else localStorage.removeItem('readyFolder-${fid}'); }catch(e){}
         location.href=u.toString();
       }
       (function(){ try{
         const u=new URL(location.href), saved=localStorage.getItem('readyFolder-${fid}');
-        if(!u.searchParams.get('folder') && saved){ u.searchParams.set('folder', saved); location.replace(u.toString()); }
+        if(!u.searchParams.get('folder') && !u.searchParams.get('picked') && saved){ u.searchParams.set('folder', saved); location.replace(u.toString()); }
       }catch(e){} })();
     </script>`;
 }
@@ -489,7 +545,7 @@ function readyPickerPage({ funnel, videos, prefills, defCap = '', ...src }) {
       const selections = order.map(id=>({ driveId:id, name:document.getElementById('nm-'+id).value, caption:document.getElementById('cap-'+id).value, scheduledAt:document.getElementById('sch-'+id).value, now:document.getElementById('now-'+id).checked }));
       msg('Posting '+selections.length+'…');
       try{
-        const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections })});
+        const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections, accessToken: await driveToken() })});
         const j=await r.json();
         if(j.ok){ msg('Posted '+j.posted+(j.failed?(', '+j.failed+' failed'):'')+'. Opening the log…'); setTimeout(()=>location.href='/api/v1/admin/instances',1300); }
         else msg('Failed: '+(j.error||''));
@@ -560,7 +616,7 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
       const pasted=$('tx',id).value.trim();
       busy[id]=true; $('gs',id).textContent=pasted?'Writing copy from your text…':'Transcribing + writing copy… (about 20–60 s)';
       try{
-        const r=await fetch('/api/v1/admin/instances/ready-ai/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, driveId:id, name:$('nm',id).value, transcript:pasted })});
+        const r=await fetch('/api/v1/admin/instances/ready-ai/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, driveId:id, name:$('nm',id).value, transcript:pasted, accessToken: await driveToken() })});
         const j=await r.json();
         if(!j.ok) throw new Error(j.error||'failed');
         $('ti',id).value=j.copy.title; $('de',id).value=j.copy.description; $('ig',id).value=j.copy.igCaption; $('sh',id).value=j.copy.short; cnt(id);
@@ -585,7 +641,7 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
       if(nowCount && !confirm(nowCount+' video(s) will go live on every channel right now. Continue?')) return;
       msg((nowCount===selections.length?'Posting now ':'Scheduling ')+selections.length+'…');
       try{
-        const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections })});
+        const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections, accessToken: await driveToken() })});
         const j=await r.json();
         if(j.ok){
           const bad=(j.results||[]).filter(x=>!x.ok);

@@ -101,6 +101,27 @@ export const CONFIG_MANIFEST = {
             type: 'secret_json',
             help: 'Paste the downloaded Google service-account JSON once. Then share each funnel\'s content sheet and Drive upload folder (Editor) with the service-account email shown above. Blank keeps the current value. (Env GOOGLE_SERVICE_ACCOUNT_JSON is only a fallback.)',
           },
+          // "Sign in with Google" + Drive picker for the ready-video pages: the
+          // operator signs in in the browser and picks videos; the app then acts
+          // only on the picked files (drive.file scope). No client secret needed.
+          {
+            key: 'google_oauth_client_id',
+            label: 'Sign in with Google — OAuth client ID',
+            placeholder: '1234567890-abc….apps.googleusercontent.com',
+            help: 'Web-application OAuth client. Its Authorized JavaScript origins must include this app\'s address. Used by "📂 Pick from Drive" on the ready-video pages. The client secret is NOT needed — never paste it here.',
+          },
+          {
+            key: 'google_picker_api_key',
+            label: 'Sign in with Google — Picker API key',
+            placeholder: 'AIza…',
+            help: 'An API key restricted to the Google Picker API and to this app\'s address (it is visible in the browser, as Google intends).',
+          },
+          {
+            key: 'google_project_number',
+            label: 'Sign in with Google — Cloud project number',
+            placeholder: 'e.g. 123456789012',
+            help: 'The numeric project number from the Google Cloud dashboard (not the project ID).',
+          },
         ],
       },
       {

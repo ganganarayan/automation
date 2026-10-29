@@ -29,7 +29,7 @@ import { buildProviders } from './providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { createTranscriptProvider } from '../providers/transcriptProvider.js';
 import { createFfmpegProvider } from '../providers/ffmpegProvider.js';
-import { dlUrl } from '../providers/storageProvider.js';
+import { dlUrl, createGoogleDriveProvider } from '../providers/storageProvider.js';
 import * as captureRules from './captureRules.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript } from '../utils/pricing.js';
@@ -67,17 +67,31 @@ function captionFor(cfg, resolved) {
 }
 
 /**
- * The unposted videos in a Drive folder, newest first — the folder the operator
- * pasted on the page (`folder`), else the funnel's ready-videos folder. Also
- * returns the service-account email the folder must be shared with, and the
- * Drive error (if listing failed) so the page can say what's wrong.
+ * The Drive client for a ready-video action: the operator's own sign-in token
+ * when the files were picked with "Sign in with Google", else the workspace
+ * service account.
  */
-export async function listReadyVideos({ tenantId = 'default', funnelId, folder: override = '' }) {
+function driveFor(providers, accessToken) {
+  return accessToken ? createGoogleDriveProvider({ accessToken }, log) : providers.storage;
+}
+
+/**
+ * The videos to show: the files picked with the Google Drive picker (`picked`),
+ * else the unposted videos in a Drive folder, newest first — the folder the
+ * operator pasted on the page (`folder`), else the funnel's ready-videos folder.
+ * Also returns the picker settings, the service-account email a folder must be
+ * shared with, and the Drive error (if listing failed) so the page can say
+ * what's wrong.
+ */
+export async function listReadyVideos({ tenantId = 'default', funnelId, folder: override = '', picked = [] }) {
   const { funnel, resolved, cfg } = await loadFunnel(funnelId);
   const providers = await buildProviders(funnel.tenant_id || tenantId);
   const folder = override || readyFolder(cfg, resolved);
-  const saEmail = (providers.resolved.google && providers.resolved.google.serviceAccount && providers.resolved.google.serviceAccount.client_email) || '';
-  const base = { funnel, resolved, cfg, folder, saEmail, defaultCaption: captionFor(cfg, resolved) };
+  const g = providers.resolved.google || {};
+  const saEmail = (g.serviceAccount && g.serviceAccount.client_email) || '';
+  const picker = { clientId: g.oauthClientId || '', apiKey: g.pickerApiKey || '', appId: g.projectNumber || '' };
+  const base = { funnel, resolved, cfg, folder, saEmail, picker, defaultCaption: captionFor(cfg, resolved) };
+  if (picked && picked.length) return { ...base, folder: '', picked: true, videos: picked };
   if (!folder) return { ...base, videos: [] };
   let files;
   try {
@@ -102,7 +116,7 @@ const WHISPER_MAX_BYTES = 25 * 1024 * 1024;
  * transcription and token costs, carried back with the selection and recorded
  * on the instance.
  */
-export async function generateCopy({ tenantId = 'default', funnelId, driveId, name = '', transcript: pasted = '' }) {
+export async function generateCopy({ tenantId = 'default', funnelId, driveId, name = '', transcript: pasted = '', accessToken = '' }) {
   if (!driveId) throw new Error('driveId required');
   const { funnel, resolved, cfg } = await loadFunnel(funnelId);
   const providers = await buildProviders(funnel.tenant_id || tenantId);
@@ -111,7 +125,7 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   // A pasted transcript / text skips the download + transcription entirely.
   let transcript = String(pasted || '').trim();
   const audio = transcript ? Buffer.alloc(0) : await createFfmpegProvider({}, log).extractAudio({
-    videoBuffer: await providers.storage.download(driveId),
+    videoBuffer: await driveFor(providers, accessToken).download(driveId),
     ext: ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase(),
   });
   if (audio.length) {
@@ -164,9 +178,10 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
  * (explicit "DD-MM-YYYY HH:MM" IST, else the next sequential daily slot). Sends a
  * posted-summary email. Returns a per-item result list.
  */
-export async function postSelections({ tenantId = 'default', funnelId, selections }) {
+export async function postSelections({ tenantId = 'default', funnelId, selections, accessToken = '' }) {
   const { funnel, resolved, cfg } = await loadFunnel(funnelId);
   const providers = await buildProviders(funnel.tenant_id || tenantId);
+  const drive = driveFor(providers, accessToken);
   const clean = normalizeSelections(selections);
   if (!clean.length) throw new Error('no videos selected');
 
@@ -195,7 +210,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
     const ai = sel.copy ? platformConfigsFor(sel.copy, { accountIds: accounts, accountMap, ctaLink: resolved.ctaLink }) : null;
     const caption = ai ? ai.caption : (sel.caption.trim() || captionFor(cfg, resolved));
     try {
-      await providers.storage.shareAnyone(sel.driveId);
+      await drive.shareAnyone(sel.driveId);
       const result = await publish.createPost({
         accountIds: accounts,
         caption,
@@ -221,7 +236,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
         copy: sel.copy ? normalizeCopy(sel.copy) : null, costs: sel.costs,
       });
       try {
-        await providers.storage.renameFile(sel.driveId, `POSTED - ${sel.name || sel.driveId}`);
+        await drive.renameFile(sel.driveId, `POSTED - ${sel.name || sel.driveId}`);
       } catch (err) {
         log.warn({ err: err.message, driveId: sel.driveId }, 'POSTED tag failed (posted anyway)');
       }

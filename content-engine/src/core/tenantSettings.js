@@ -72,6 +72,10 @@ export async function forTenant(tenantId = 'default') {
     // (write-only in the UI) wins; env GOOGLE_SERVICE_ACCOUNT_JSON is a fallback.
     google: {
       serviceAccount: parseJson(pick('google_service_account_json', null), null) || settings.google.serviceAccount,
+      // "Sign in with Google" + Drive picker (browser-side; no secret).
+      oauthClientId: String(pick('google_oauth_client_id', '') || '').trim(),
+      pickerApiKey: String(pick('google_picker_api_key', '') || '').trim(),
+      projectNumber: String(pick('google_project_number', '') || '').trim(),
     },
     sheets: {
       gita: pick('gita_sheet_id', settings.sheets.gita),
