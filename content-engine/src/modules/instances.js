@@ -29,6 +29,7 @@ import * as readyPost from '../services/readyPostService.js';
 import * as stageRunner from '../services/stageRunnerService.js';
 import * as jobRunner from '../core/jobRunner.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
+import * as instanceRepo from '../repositories/instanceRepository.js';
 import { INSTANCE_STEPS, sumInstanceCost, costBreakdown, shortId, formatDuration } from '../utils/instanceSpec.js';
 import { READY_STAGES, SOURCE_TYPES, laneOf, readyStage, stageLabel, istToInputValue, channelText } from '../utils/laneSpec.js';
 import cron from 'node-cron';
@@ -250,7 +251,8 @@ export function register(ctx) {
       // A ready video in progress opens on its stage panels.
       if (lane === 'ready' && !row.locked && row.funnel_id) {
         try {
-          return res.type('html').send(readyAiPickerPage(await readyPost.instanceView(row)));
+          const funnelList = await funnelsRepo.listByTenant(row.tenant_id).catch(() => []);
+          return res.type('html').send(readyAiPickerPage({ ...(await readyPost.instanceView(row)), funnelList }));
         } catch (err) {
           log.warn({ err: err.message, instance: row.id }, 'ready instance view failed (showing detail)');
         }
@@ -317,6 +319,20 @@ export function register(ctx) {
       try { await readyPost.refreshAllTenants(); } catch (err) { log.warn({ err: err.message }, 'scheduled post check failed'); } finally { checking = false; }
     });
   }
+
+  // Move an unposted instance to the funnel it really belongs to.
+  router.post('/admin/instances/:id/move', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const row = await instances.get(req.params.id);
+      const funnel = await funnelsRepo.get(Number(req.body?.funnelId));
+      if (!row || !funnel || funnel.tenant_id !== row.tenant_id) return res.status(404).json({ ok: false, error: 'instance or funnel not found' });
+      const ok = await instanceRepo.moveFunnel(row.id, { funnelId: funnel.id, funnelName: funnel.name });
+      res.json(ok ? { ok: true } : { ok: false, error: 'only an unscheduled, unposted instance can move — ✏ Edit a scheduled one first' });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
 
   // ↻ Re-post to the ❌ channels only (after reconnecting them in Post for Me).
   router.post('/admin/instances/:id/retry', async (req, res) => {
@@ -669,7 +685,7 @@ function sourcesBar(funnel, sources = [], folder = '') {
   return `<div class="row srcbar"><b>Sources:</b> ${items}</div>`;
 }
 
-function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single = null, source = {}, ...src }) {
+function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single = null, source = {}, funnelList = [], ...src }) {
   const cta = String((src.resolved || {}).ctaLink || '').trim();
   const cards = (videos || [])
     .map((v, i) => {
@@ -757,6 +773,8 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         <div class="sub">${esc(funnel.name)} · instance ${esc(shortId(single.id))} · ${esc(SOURCE_TYPES[source.type] || 'Ready video')} · ready-video lane</div>
       </div>
       <div class="toprow">${statusPill(single.status)}
+        ${['draft', 'transcript_review', 'failed'].includes(single.status) && funnelList.length > 1 ? `<label class="nowrow">Funnel <select id="mvf">${funnelList.map((f) => `<option value="${esc(String(f.id))}"${String(f.id) === String(funnel.id) ? ' selected' : ''}>${esc(f.name)}</option>`).join('')}</select></label>
+        <button class="act" onclick="moveFunnel()">⇄ Move</button>` : ''}
         <a class="act" href="${PREPARE.base}?funnel=${encodeURIComponent(funnel.id)}">← Prepare list</a>
         <a class="act" href="/api/v1/admin/instances">All instances</a>
       </div>
@@ -810,6 +828,13 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     const toIst = v => v ? v.slice(8,10)+'-'+v.slice(5,7)+'-'+v.slice(0,4)+' '+v.slice(11,16) : '';
     const istNow = () => new Date(Date.now()+330*60000).toISOString().slice(0,16);
     document.querySelectorAll('input[type="datetime-local"]').forEach(e=>{ e.min=istNow(); });
+    async function moveFunnel(){
+      const sel=document.getElementById('mvf'); if(!sel || sel.value===FUNNEL_ID) return;
+      if(!confirm('Move this video to '+sel.options[sel.selectedIndex].text+'? Its transcript, copy and thumbnails move with it; check the CTA link and accounts after.')) return;
+      const r=await fetch(${JSON.stringify(single ? `/api/v1/admin/instances/${single.id}/move` : '')},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId: sel.value })});
+      const j=await r.json();
+      if(j.ok) location.reload(); else alert(j.error||'failed');
+    }
     async function retryFailed(){
       const m=document.getElementById('edmsg'); if(m) m.textContent='Re-posting…';
       try{

@@ -156,6 +156,16 @@ export async function markPartial(id, { note = null, postedAt = new Date() } = {
   return rowCount > 0;
 }
 
+/** Move an unposted instance to another funnel (its saved source belonged to the old one). */
+export async function moveFunnel(id, { funnelId, funnelName }) {
+  const { rowCount } = await query(
+    `UPDATE instances SET funnel_id = $2, funnel_name = $3, source_id = NULL, updated_at = now()
+      WHERE id = $1 AND locked = false AND status IN ('draft', 'transcript_review', 'failed')`,
+    [id, funnelId, funnelName],
+  );
+  return rowCount > 0;
+}
+
 /** Back to an editable draft (its scheduled post was deleted). */
 export async function unschedule(id) {
   const { rowCount } = await query(
@@ -261,6 +271,6 @@ export async function draftsByDriveIds(funnelId, tenantId = 'default', driveIds 
 }
 
 export default {
-  create, get, list, logRows, saveSteps, setStatus, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, unschedule, scheduledDue, setPostStatus, remove,
+  create, get, list, logRows, saveSteps, setStatus, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, moveFunnel, unschedule, scheduledDue, setPostStatus, remove,
   existsForFunnelOnDate, videoOnDate, postedDriveIds, draftsByDriveIds,
 };
