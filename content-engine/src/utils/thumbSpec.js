@@ -1,28 +1,44 @@
 /**
- * Per-platform thumbnail specs + the overlay design (pure — no I/O).
+ * Thumbnail sizes + the overlay design (pure — no I/O).
  *
- * Purpose:      Each platform gets its own thumbnail size and layout: AI artwork
- *               generated from an image prompt written from the video's
- *               transcript (a video frame if that fails), cropped to that size,
- *               with the AI "thumbText" hook drawn over it. A platform without a generated thumbnail
- *               falls back to the video's first frame (thumbnail_timestamp_ms 0).
+ * Purpose:      One AI artwork per video (generated from an image prompt written
+ *               from the transcript; a video frame if that fails), rendered in
+ *               three sizes with the AI "thumbText" hook as the headline. Each
+ *               platform uses the size that fits it. A platform without a
+ *               thumbnail falls back to the video's first frame
+ *               (thumbnail_timestamp_ms 0).
  * Responsibility:
- *               - THUMB_SPECS: platform -> { w, h, layout, accent }
+ *               - THUMB_SIZES: size -> { w, h, label, layout }
+ *               - PLATFORM_SIZE: platform -> size; THUMB_SPECS: platform -> its size spec
  *               - wrapText(text, maxChars, maxLines): lines
  *               - thumbSvg({ w, h, text, layout, accent }): SVG overlay string
- *               - thumbImagePrompt(prompt, orientation): the image-model prompt
+ *               - thumbImagePrompt(prompt): the image-model prompt
  *               - thumbMedia(videoUrl, thumbUrl): Post for Me media item
  * Dependencies: none.
  */
 
-export const THUMB_SPECS = {
-  youtube: { w: 1280, h: 720, layout: 'left', accent: '#FF3B30' },
-  facebook: { w: 1280, h: 720, layout: 'bottom', accent: '#1877F2' },
-  linkedin: { w: 1280, h: 720, layout: 'top', accent: '#0A66C2' },
-  x: { w: 1280, h: 720, layout: 'center', accent: '#FFFFFF' },
-  instagram: { w: 1080, h: 1920, layout: 'center', accent: '#E1306C' },
-  threads: { w: 1080, h: 1350, layout: 'bottom', accent: '#FFFFFF' },
+export const THUMB_ACCENT = '#FFC400';
+
+/** The three sizes every video gets, all from the same artwork. */
+export const THUMB_SIZES = {
+  landscape: { w: 1280, h: 720, label: '16:9', layout: 'bottom' },
+  portrait: { w: 1080, h: 1920, label: '9:16', layout: 'upper' },
+  feed: { w: 1080, h: 1350, label: '4:5', layout: 'bottom' },
 };
+
+/** Which size each platform posts with. */
+export const PLATFORM_SIZE = {
+  youtube: 'landscape',
+  facebook: 'landscape',
+  linkedin: 'landscape',
+  x: 'landscape',
+  instagram: 'portrait',
+  threads: 'feed',
+};
+
+export const THUMB_SPECS = Object.fromEntries(
+  Object.entries(PLATFORM_SIZE).map(([k, size]) => [k, { ...THUMB_SIZES[size], size, accent: THUMB_ACCENT }]),
+);
 
 /** Greedy word wrap into at most `maxLines` lines of ~`maxChars` (last line clipped). */
 export function wrapText(text, maxChars = 18, maxLines = 3) {
@@ -83,9 +99,9 @@ export function thumbSvg({ w, h, text, layout = 'center', accent = '#FFFFFF' }) 
 }
 
 /** Image-model prompt for the thumbnail artwork (text is drawn by the app, never by the model). */
-export function thumbImagePrompt(prompt, orientation = 'landscape') {
+export function thumbImagePrompt(prompt) {
   const subject = String(prompt || '').trim().slice(0, 1500) || 'A striking, emotive scene that matches the video topic';
-  return `${subject}\n\nThumbnail artwork, ${orientation} composition. Bold cinematic lighting, high contrast, vivid colours, one clear focal subject, clean empty space for a headline. Absolutely no text, letters, words, captions, logos or watermarks.`;
+  return `${subject}\n\nThumbnail artwork, square composition with the focal subject centred so it can be cropped wide or tall. Bold cinematic lighting, high contrast, vivid colours, one clear focal subject, clean empty space for a headline. Absolutely no text, letters, words, captions, logos or watermarks.`;
 }
 
 /** The Post for Me media item: a designed thumbnail, else the first frame. */
@@ -93,4 +109,4 @@ export function thumbMedia(videoUrl, thumbUrl) {
   return thumbUrl ? { url: videoUrl, thumbnail_url: thumbUrl } : { url: videoUrl, thumbnail_timestamp_ms: 0 };
 }
 
-export default { THUMB_SPECS, wrapText, thumbSvg, thumbImagePrompt, thumbMedia };
+export default { THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, thumbSvg, thumbImagePrompt, thumbMedia };

@@ -35,7 +35,7 @@ import * as captureRules from './captureRules.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
 import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey } from '../utils/aiCopySpec.js';
-import { THUMB_SPECS, thumbSvg, thumbImagePrompt } from '../utils/thumbSpec.js';
+import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, thumbSvg, thumbImagePrompt } from '../utils/thumbSpec.js';
 import sharp from 'sharp';
 import { formatIst } from '../utils/time.js';
 import { driveEmbedUrl } from '../utils/reviewSpec.js';
@@ -126,6 +126,32 @@ export async function listReadyVideos({ tenantId = 'default', funnelId, folder: 
   return { ...base, videos, totalFiles: files.length };
 }
 
+// Video lengths by Drive id — a file's length never changes, so probe once.
+const durationCache = new Map();
+
+/**
+ * Lengths (seconds) of public Drive videos, read with ffprobe from the public
+ * download URL, a few at a time. { driveId: seconds }; 0 = unknown.
+ */
+export async function videoDurations(driveIds) {
+  const ids = [...new Set((Array.isArray(driveIds) ? driveIds : []).map(String).filter((id) => /^[\w-]{10,}$/.test(id)))].slice(0, 60);
+  const ffmpeg = createFfmpegProvider({}, log);
+  const out = {};
+  let next = 0;
+  const worker = async () => {
+    while (next < ids.length) {
+      const id = ids[next++];
+      if (!durationCache.has(id)) {
+        const sec = Math.round(await ffmpeg.probeDuration({ url: publicDlUrl(id) }));
+        if (sec > 0) durationCache.set(id, sec);
+      }
+      out[id] = durationCache.get(id) || 0;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(5, ids.length) }, worker));
+  return out;
+}
+
 // Whisper rejects uploads over 25 MB.
 const WHISPER_MAX_BYTES = 25 * 1024 * 1024;
 
@@ -154,6 +180,7 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
     const tp = createTranscriptProvider({ apiKey: providers.resolved.transcriptKey || providers.resolved.openai.apiKey }, log);
     const t = await tp.transcribe({ buffer: audio, filename: 'audio.mp3' });
     transcript = t.text;
+    if (t.durationSeconds > 0) durationCache.set(driveId, Math.round(t.durationSeconds));
     costs.push({ step: 'transcript', ...costTranscript({ provider: tp.provider, minutes: t.minutes }) });
   }
 
@@ -167,63 +194,61 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   if (!copy.title && !copy.description) throw new Error('the model returned empty copy — try again');
   log.info({ funnel: funnel.name, driveId, words: transcript.split(/\s+/).filter(Boolean).length }, 'ready video copy generated');
 
-  // Thumbnails: one design per platform. A failure here never loses the copy —
-  // those platforms just fall back to the video's first frame.
+  // Thumbnails: one AI artwork, rendered in three sizes with the hook as the
+  // headline. A failure here never loses the copy — the video's first frame is
+  // used instead.
   let thumbs = {};
+  let sizes = [];
   let thumbError = '';
   try {
     const platforms = thumbPlatforms(resolved);
-    // AI artwork from the image prompt — one landscape and (if needed) one
-    // portrait image, cropped per platform. A failed image falls back to a frame.
     const imageModel = /^gpt-image/.test(String(providers.resolved.openai?.imageModel || '')) ? providers.resolved.openai.imageModel : 'gpt-image-1';
-    const art = {};
-    const needs = [['landscape', '1536x1024'], ['portrait', '1024x1536']]
-      .filter(([o]) => platforms.some((k) => (THUMB_SPECS[k].h > THUMB_SPECS[k].w) === (o === 'portrait')));
-    for (const [orientation, size] of needs) {
-      try {
-        art[orientation] = await providers.llm.generateImage({ prompt: thumbImagePrompt(copy.thumbPrompt || copy.title, orientation), size, model: imageModel });
-        costs.push({ step: 'images', ...costImages({ count: 1, size, model: imageModel }) });
-      } catch (err) {
-        log.warn({ err: err.message, orientation }, 'thumbnail artwork failed (using a video frame)');
-        thumbError = `artwork: ${err.message}`;
-      }
+    let base = null;
+    try {
+      base = await providers.llm.generateImage({ prompt: thumbImagePrompt(copy.thumbPrompt || copy.title), size: '1024x1024', model: imageModel });
+      costs.push({ step: 'images', ...costImages({ count: 1, size: '1024x1024', model: imageModel }) });
+    } catch (err) {
+      log.warn({ err: err.message }, 'thumbnail artwork failed (using a video frame)');
+      thumbError = `artwork: ${err.message}`;
     }
-    let frame = null;
-    if (needs.some(([o]) => !art[o])) {
-      frame = video
+    if (!base) {
+      base = video
         ? await ffmpeg.extractFrame({ videoBuffer: video, ext })
         : await ffmpeg.extractFrame({ url: publicDlUrl(driveId) }).catch(async () => ffmpeg.extractFrame({ videoBuffer: await getVideo(), ext }));
     }
-    thumbs = await renderThumbs({ providers, platforms, art, frame, text: copy.thumbText || copy.title });
+    ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text: copy.thumbText || copy.title }));
   } catch (err) {
     thumbError = err.message;
     log.warn({ err: err.message, driveId }, 'thumbnail generation failed (first frame will be used)');
   }
-  return { copy, transcript, costs, transcribed: audio.length > 0, thumbs, thumbError };
+  return { copy, transcript, costs, transcribed: audio.length > 0, thumbs, sizes, thumbError };
 }
 
 /**
- * Render each platform's thumbnail design (its crop of the AI artwork, else the
- * video frame) and upload it to Post for Me. Returns { platform: publicUrl }.
+ * Render the artwork in each size the funnel's platforms need (cover crop + the
+ * hook headline) and upload it to Post for Me. Returns { thumbs: platform ->
+ * url, sizes: [{ size, label, url, platforms }] }.
  */
-async function renderThumbs({ providers, platforms, art, frame, text }) {
+async function renderThumbs({ providers, platforms, base, text }) {
   const postformeKey = providers.resolved.postformeKey || '';
   if (!postformeKey) throw new Error('No Post for Me API key — set it under Settings → API Keys');
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
-  const out = {};
-  for (const k of platforms) {
-    const spec = THUMB_SPECS[k];
-    const base = (spec.h > spec.w ? art.portrait : art.landscape) || frame;
-    if (!base) continue; // no artwork and no frame => this platform uses the first frame
+  const thumbs = {};
+  const sizes = [];
+  for (const [size, spec] of Object.entries(THUMB_SIZES)) {
+    const users = platforms.filter((k) => PLATFORM_SIZE[k] === size);
+    if (!users.length) continue;
     const jpg = await sharp(base)
       .resize(spec.w, spec.h, { fit: 'cover', position: 'attention' })
-      .composite([{ input: Buffer.from(thumbSvg({ ...spec, text })) }])
+      .composite([{ input: Buffer.from(thumbSvg({ ...spec, accent: THUMB_ACCENT, text })) }])
       .jpeg({ quality: 86 })
       .toBuffer();
-    out[k] = await publish.uploadMedia(jpg, 'image/jpeg');
+    const url = await publish.uploadMedia(jpg, 'image/jpeg');
+    for (const k of users) thumbs[k] = url;
+    sizes.push({ size, label: spec.label, url, platforms: users });
   }
-  log.info({ platforms }, 'thumbnails rendered + uploaded');
-  return out;
+  log.info({ sizes: sizes.map((x) => x.label) }, 'thumbnails rendered + uploaded');
+  return { thumbs, sizes };
 }
 
 /** The platforms this funnel posts to that have a thumbnail spec (all, if unknown). */
@@ -234,7 +259,7 @@ function thumbPlatforms(resolved) {
 }
 
 /** Record one direct post as a posted instance (stages skipped; AI-copy cost if any). */
-async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, ref, copy = null, costs = [] }) {
+async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, ref, copy = null, costs = [], durationSec = 0 }) {
   const inst = await instanceService.createForFunnel({
     tenantId: funnel.tenant_id,
     funnel,
@@ -252,9 +277,10 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
     const { step, ...entry } = c;
     steps = addCostToSteps(steps, ['transcript', 'images'].includes(step) ? step : 'script', { ...entry, costUsd: Number(entry.costUsd) || 0, at: new Date().toISOString() });
   }
-  steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: { driveId } } });
+  steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: durationSec ? { driveId, durationSec } : { driveId } } });
   steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: ref ? [ref] : [], caption } });
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
+  if (durationSec) await instanceRepo.setMeta(inst.id, { durationSeconds: durationSec });
   await instanceRepo.lockAsPosted(inst.id, { postRefs: ref ? [ref] : [], postedAt: scheduledIso ? new Date(scheduledIso) : new Date() });
   return inst.id;
 }
@@ -320,6 +346,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
       const instanceId = await recordPostedInstance({
         funnel, driveId: sel.driveId, caption, scheduledIso, ref,
         copy: sel.copy ? normalizeCopy(sel.copy) : null, costs: sel.costs,
+        durationSec: (await videoDurations([sel.driveId]))[sel.driveId] || 0,
       });
       try {
         await drive.renameFile(sel.driveId, `POSTED - ${sel.name || sel.driveId}`);
@@ -367,4 +394,4 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export default { listReadyVideos, generateCopy, postSelections };
+export default { listReadyVideos, videoDurations, generateCopy, postSelections };

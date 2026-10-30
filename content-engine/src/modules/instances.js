@@ -15,6 +15,9 @@
  *         POST /api/v1/admin/instances/:id/delete  delete (if not locked)
  *         GET  /api/v1/admin/instances/ready-ai    ready video + AI copy picker
  *         POST /api/v1/admin/instances/ready-ai/generate  transcribe + write one video's copy
+ *         POST /api/v1/admin/instances/ready-ai/durations video lengths for the listed videos
+ *         POST /api/v1/admin/instances/ready/post  post the ticked videos
+ *         GET  /api/v1/admin/instances/ready       old link → ready-ai
  */
 import * as instances from '../services/instanceService.js';
 import * as review from '../services/instanceReviewService.js';
@@ -51,23 +54,12 @@ export function register(ctx) {
     }
   });
 
-  // Ready-video direct post: pick uploaded, unposted videos from the funnel's
-  // Drive folder and post them via Post-for-Me, bypassing the whole pipeline.
-  // Registered before '/admin/instances/:id' so "ready" isn't read as an id.
-  router.get('/admin/instances/ready', async (req, res, next) => {
-    try {
-      if (!(await guardHtml(req, res))) return;
-      const funnelId = req.query.funnel ? String(req.query.funnel) : '';
-      const list = await funnelsRepo.listByTenant(req.tenantId);
-      if (!funnelId) return res.type('html').send(readyChooserPage(list));
-      const folder = parseDriveFolderId(req.query.folder);
-      const picked = parsePickedFiles(req.query.picked);
-      const out = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId, folder, picked });
-      const prefills = defaultSlotsIso(out.resolved.publishTime, out.videos.length).map((iso) => formatIst(iso));
-      res.type('html').send(readyPickerPage({ ...out, prefills, defCap: out.defaultCaption }));
-    } catch (err) {
-      next(err);
-    }
+  // The plain "Post ready videos" lane was merged into the AI lane; old links
+  // still land there. Registered before '/admin/instances/:id' so "ready"
+  // isn't read as an id.
+  router.get('/admin/instances/ready', (req, res) => {
+    const q = new URLSearchParams(Object.entries(req.query || {}).map(([k, v]) => [k, String(v)])).toString();
+    res.redirect(302, `/api/v1/admin/instances/ready-ai${q ? `?${q}` : ''}`);
   });
 
   router.post('/admin/instances/ready/post', async (req, res) => {
@@ -91,7 +83,7 @@ export function register(ctx) {
       if (!(await guardHtml(req, res))) return;
       const funnelId = req.query.funnel ? String(req.query.funnel) : '';
       const list = await funnelsRepo.listByTenant(req.tenantId);
-      if (!funnelId) return res.type('html').send(readyChooserPage(list, READY_AI));
+      if (!funnelId) return res.type('html').send(readyChooserPage(list));
       const folder = parseDriveFolderId(req.query.folder);
       const picked = parsePickedFiles(req.query.picked);
       const out = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId, folder, picked });
@@ -111,6 +103,16 @@ export function register(ctx) {
       res.json({ ok: true, ...out });
     } catch (err) {
       log.error({ err: err.message }, 'ready-ai generate failed');
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Video lengths for the listed Drive videos (ffprobe on the public link).
+  router.post('/admin/instances/ready-ai/durations', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      res.json({ ok: true, durations: await readyPost.videoDurations(req.body?.ids) });
+    } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
   });
@@ -388,11 +390,10 @@ function btn(call, kind = '') {
   return `<button class="act ${kind}" onclick="${call}">▶ Preview</button>`;
 }
 
-const READY = { base: '/api/v1/admin/instances/ready', title: 'Post ready videos', nav: 'ready' };
 const READY_AI = { base: '/api/v1/admin/instances/ready-ai', title: 'Ready video + AI copy', nav: 'ready-ai' };
 
-// Ready-video: funnel chooser when none is in the query (both lanes).
-function readyChooserPage(funnels, lane = READY) {
+// Ready-video: funnel chooser when none is in the query.
+function readyChooserPage(funnels, lane = READY_AI) {
   const items = (funnels || [])
     .map((f) => `<a class="act" href="${lane.base}?funnel=${encodeURIComponent(f.id)}">${esc(f.name)}</a>`)
     .join(' ');
@@ -429,7 +430,7 @@ function acctBar(resolved = {}) {
     </script>`;
 }
 
-// Ready-video: where the videos come from, shared by both pickers.
+// Ready-video: where the videos come from.
 //  1. 📂 Pick from Drive — "Sign in with Google" + Google's own picker; the app
 //     then acts only on the picked files with the operator's short-lived token
 //     (drive.file scope). Nothing to share, no service account, any account.
@@ -514,76 +515,12 @@ function folderBar(funnel, { folder = '', saEmail = '', listError = '', totalFil
     </script>`;
 }
 
-// Ready-video: tick-select unposted Drive videos, caption + schedule each, post
-// in selection order via Post-for-Me (no generation, no review email).
-function readyPickerPage({ funnel, videos, prefills, defCap = '', ...src }) {
-  const cards = (videos || [])
-    .map((v, i) => `<div class="card">
-      <div class="tile" onclick="openVideo('${esc(v.id)}')"><img src="${esc(driveThumbUrl(v.id, 'w400'))}" loading="lazy"><span class="playov">▶</span></div>
-      <label class="pick"><input type="checkbox" id="cb-${esc(v.id)}" onchange="toggle('${esc(v.id)}')"> <span class="ord" id="ord-${esc(v.id)}" data-id="${esc(v.id)}"></span> ${esc(v.name)}</label>
-      <input type="hidden" id="nm-${esc(v.id)}" value="${esc(v.name)}">
-      <div class="det" id="det-${esc(v.id)}">
-        <label class="fl">Caption<textarea id="cap-${esc(v.id)}" rows="3">${esc(defCap)}</textarea></label>
-        <label class="nowrow"><input type="checkbox" id="now-${esc(v.id)}" onchange="toggleNow('${esc(v.id)}')"> Post now (ignore schedule)</label>
-        <label class="fl">Schedule (IST DD-MM-YYYY HH:MM)<input id="sch-${esc(v.id)}" value="${esc(prefills[i] || '')}"></label>
-      </div>
-    </div>`)
-    .join('');
-
-  return shell(`Post ready videos — ${shortId(String(funnel.id))}`, `
-    <div class="top">
-      <div>
-        <h1>Post ready videos — ${esc(funnel.name)}</h1>
-        <div class="sub">Uploaded, not-yet-posted videos in this funnel's Drive folder. Tick to select — they post in the order you tick, directly via Post for Me.</div>
-      </div>
-      <div class="toprow">
-        <a class="act" href="/api/v1/admin/instances/ready">↺ Change funnel</a>
-        <a class="act" href="/api/v1/admin/instances">← All instances</a>
-      </div>
-    </div>
-    ${folderBar(funnel, src)}
-    ${acctBar(src.resolved)}
-    <div class="grid">${cards}</div>
-    <div class="bar">
-      <button class="approve" onclick="postSel()">Post selected</button>
-      <label class="nowrow"><input type="checkbox" id="allnow" onchange="allNow()"> Post all now (immediate)</label>
-      <span id="rmsg" class="hint"></span>
-    </div>
-    ${previewModal()}
-  `, `
-    const FUNNEL_ID = ${JSON.stringify(String(funnel.id))};
-    const order = [];
-    function msg(t){ const m=document.getElementById('rmsg'); if(m) m.textContent=t; }
-    function renumber(){ order.forEach((id,i)=>{ const b=document.getElementById('ord-'+id); if(b) b.textContent='#'+(i+1); }); document.querySelectorAll('.ord').forEach(b=>{ if(order.indexOf(b.dataset.id)<0) b.textContent=''; }); }
-    function toggle(id){
-      const cb=document.getElementById('cb-'+id), det=document.getElementById('det-'+id);
-      if(cb.checked){ if(order.indexOf(id)<0) order.push(id); det.classList.add('on'); }
-      else { const k=order.indexOf(id); if(k>=0) order.splice(k,1); det.classList.remove('on'); }
-      renumber();
-    }
-    function toggleNow(id){ const n=document.getElementById('now-'+id), s=document.getElementById('sch-'+id); if(n&&s){ s.disabled=n.checked; s.style.opacity=n.checked?0.45:1; } }
-    function allNow(){ const on=document.getElementById('allnow').checked; document.querySelectorAll('input[id^="now-"]').forEach(n=>{ n.checked=on; toggleNow(n.id.slice(4)); }); }
-    async function postSel(){
-      if(!order.length){ msg('Tick at least one video.'); return; }
-      if(!pickedAccounts().length){ msg('Tick at least one account under "Post to".'); return; }
-      const selections = order.map(id=>({ driveId:id, name:document.getElementById('nm-'+id).value, caption:document.getElementById('cap-'+id).value, scheduledAt:document.getElementById('sch-'+id).value, now:document.getElementById('now-'+id).checked }));
-      msg('Posting '+selections.length+'…');
-      try{
-        const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections, accounts: pickedAccounts(), accessToken: await driveToken() })});
-        const j=await r.json();
-        if(j.ok){ msg('Posted '+j.posted+(j.failed?(', '+j.failed+' failed'):'')+'. Opening the log…'); setTimeout(()=>location.href='/api/v1/admin/instances',1300); }
-        else msg('Failed: '+(j.error||''));
-      }catch(e){ msg('Failed: '+e.message); }
-    }
-  `, 'ready');
-}
-
 // Ready video + AI copy: tick a video and the app transcribes it and writes its
 // per-platform copy into the fields below; edit, schedule, then post in tick order.
 function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
   const cards = (videos || [])
     .map((v, i) => `<div class="card">
-      <div class="tile" onclick="openVideo('${esc(v.id)}')"><img src="${esc(driveThumbUrl(v.id, 'w400'))}" loading="lazy"><span class="playov">▶</span></div>
+      <div class="tile" onclick="openVideo('${esc(v.id)}')"><img src="${esc(driveThumbUrl(v.id, 'w400'))}" loading="lazy"><span class="playov">▶</span><span class="dur" id="du-${esc(v.id)}"></span></div>
       <label class="pick"><input type="checkbox" id="cb-${esc(v.id)}" onchange="toggle('${esc(v.id)}')"> <span class="ord" id="ord-${esc(v.id)}" data-id="${esc(v.id)}"></span> ${esc(v.name)}</label>
       <input type="hidden" id="nm-${esc(v.id)}" value="${esc(v.name)}">
       <div class="det ailay" id="det-${esc(v.id)}">
@@ -631,6 +568,13 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
   `, `
     const FUNNEL_ID = ${JSON.stringify(String(funnel.id))};
     const order = [], costs = {}, busy = {}, done = {}, thumbs = {};
+    (function(){
+      const ids=Array.from(document.querySelectorAll('[id^="du-"]')).map(e=>e.id.slice(3));
+      if(!ids.length) return;
+      fetch('/api/v1/admin/instances/ready-ai/durations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ ids })})
+        .then(r=>r.json()).then(j=>{ if(!j.ok) return; Object.keys(j.durations||{}).forEach(id=>{ const n=Number(j.durations[id])||0, e=document.getElementById('du-'+id); if(e&&n) e.textContent=Math.floor(n/60)+':'+String(n%60).padStart(2,'0'); }); })
+        .catch(()=>{});
+    })();
     const $ = (p,id)=>document.getElementById(p+'-'+id);
     function msg(t){ const m=document.getElementById('rmsg'); if(m) m.textContent=t; }
     function renumber(){ order.forEach((id,i)=>{ const b=$('ord',id); if(b) b.textContent='#'+(i+1); }); document.querySelectorAll('.ord').forEach(b=>{ if(order.indexOf(b.dataset.id)<0) b.textContent=''; }); }
@@ -653,8 +597,7 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
         $('ti',id).value=j.copy.title; $('de',id).value=j.copy.description; $('ig',id).value=j.copy.igCaption; $('sh',id).value=j.copy.short; cnt(id);
         if(j.transcript) $('tx',id).value=j.transcript; $('gb',id).textContent='✨ Regenerate transcript + Thumbnail';
         thumbs[id]=j.thumbs||{};
-        const tall=['instagram','tiktok','threads'];
-        $('th',id).innerHTML=Object.keys(thumbs[id]).map(k=>'<a class="'+(tall.indexOf(k)>=0?'tall':'wide')+'" href="'+thumbs[id][k]+'" target="_blank" rel="noopener" title="Open full size"><img src="'+thumbs[id][k]+'"><span>'+k+'</span></a>').join('')
+        $('th',id).innerHTML=(j.sizes||[]).map(z=>'<a class="'+(z.size==='landscape'?'wide':'tall')+'" href="'+z.url+'" target="_blank" rel="noopener" title="Open full size"><img src="'+z.url+'"><span>'+z.label+' · '+z.platforms.join(', ')+'</span></a>').join('')
           +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':' — the first frame will be used')+'</div>':'');
         costs[id]=(costs[id]||[]).concat(j.costs||[]); done[id]=true;
         const usd=(costs[id]||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
@@ -884,6 +827,8 @@ ${NAV_CSS}
  .tile{position:relative;border:1px solid #24243a;border-radius:8px;overflow:hidden;cursor:pointer;aspect-ratio:2/3;background:#0b0b12}
  .tile img{width:100%;height:100%;object-fit:cover;display:block}
  .playov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#fff;background:rgba(0,0,0,.25)}
+ .dur{position:absolute;right:6px;bottom:6px;padding:1px 6px;border-radius:4px;background:rgba(0,0,0,.8);color:#fff;font-size:.78rem;font-weight:600}
+ .dur:empty{display:none}
  .card{border:1px solid #24243a;border-radius:10px;padding:.6rem;background:#12121b}
  .card .tile{max-height:260px;margin:0 auto .5rem}
  .pick{display:flex;align-items:center;gap:.4rem;font-size:.84rem;color:#e8e8ef;cursor:pointer}

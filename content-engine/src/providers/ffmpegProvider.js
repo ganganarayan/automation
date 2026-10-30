@@ -115,6 +115,22 @@ export function createFfmpegProvider(cfg = {}, log) {
         await rm(dir, { recursive: true, force: true }).catch(() => {});
       }
     },
+
+    /**
+     * A video's length in seconds, read by ffprobe from a public URL (range
+     * reads of the header only). 0 when it can't be read.
+     */
+    async probeDuration({ url }) {
+      const probe = cfg.probeBin || process.env.FFPROBE_PATH || bin.replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1');
+      try {
+        const { stdout } = await run(probe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', url], { timeout: 20000 });
+        const sec = Number(String(stdout).trim());
+        return Number.isFinite(sec) && sec > 0 ? sec : 0;
+      } catch (err) {
+        log?.warn?.({ err: err.message }, 'ffprobe duration failed');
+        return 0;
+      }
+    },
   };
 }
 
