@@ -62,8 +62,7 @@ instance view's stage panels.
 - One responsive layout: cards instead of tables under 700 px, big buttons, the sidebar
   becomes a bottom bar.
 - Installable as a PWA (add to home screen); the login cookie stays valid for 30 days.
-- A notification when something needs you: "transcript ready", "clean done", "post failed",
-  sent through the WhatsApp gateway the app already has, or by email. Each has a deep link
+- An email when something needs you ("transcript ready", "clean done", "post failed"), with a deep link
   to that item.
 - Everything in the Queue and the Calendar works one-handed on a phone. ✂ Clean and
   generation run on the server, so the phone can be locked while they run.
@@ -90,13 +89,29 @@ instance view's stage panels.
    approve step, glossary, SRT paste. Merges Manual run and Ready video into stage panels.
 2. **Prepare + bulk clean:** locked clean preset on the funnel; bulk clean queue (one at a
    time on Railway, to keep memory flat).
-3. **Phone:** responsive cards, Queue home, Calendar, PWA, WhatsApp notifications.
+3. **Phone:** responsive cards, Queue home, Calendar, PWA, email notifications.
 4. **Drive connect + GitHub Actions clean:** already proposed as a cloud session for 2nd Nov.
 5. **Sheet lane aligned** to the same stages.
 
-## Open questions for the user
+## Decisions (user, 30-10-2026)
 
-1. Can one funnel have more than one source, or exactly one?
-2. Do you still want the generated lane (images → animation → voice)?
-3. Phone notifications: WhatsApp, email, or both?
-4. Should approval on the phone be one tap per item, or a bulk "approve all transcripts"?
+1. **Sources:** a funnel can have **several sources**; each instance comes from exactly
+   one of them.
+2. **Generated lane:** it **stays**. It rolls out after all the keys are set and the
+   roadmap is drawn up; it is not part of phases 1–3.
+3. **Alerts:** **email only** (no WhatsApp).
+4. **Phone approval:** transcripts are approved **one by one**, never in bulk.
+
+## Priority (why the lanes exist)
+
+- Only **videos** get organic traction; image posts get little or none. Image-only lanes are
+  low priority.
+- The day-to-day need is the **ready-video lane**. Many finished videos only need
+  thumbnails, captions, a schedule and posting. NotebookLM videos also need the clean
+  step.
+- The lanes exist to keep regular posting going at low cost. The alternative is approved
+  script → HeyGen/Kling → approve → post daily; that is the generated lane, held for
+  later.
+- So phase 1 builds the ready-video lane properly first (funnel sources, transcript gate,
+  copy/thumbnails, schedule), with the stage model shaped so the sheet and generated lanes
+  slot in later.
