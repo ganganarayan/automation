@@ -182,7 +182,7 @@ export const WIZARD_STEPS = [
           { value: 'heygen', label: 'HeyGen' },
         ],
       },
-      { key: 'voice_id', label: 'Voice ID', placeholder: 'the cloned voice to use' },
+      { key: 'voice_id', label: 'Voice', type: 'voice_select', placeholder: 'the cloned voice to use' },
     ],
   },
   {

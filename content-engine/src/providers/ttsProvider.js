@@ -48,4 +48,34 @@ export function createTtsProvider(cfg = {}, log) {
   };
 }
 
-export default { createTtsProvider };
+/**
+ * The voices on an ElevenLabs account, for the wizard's Voice picker.
+ * GET /v2/voices pages with next_page_token (page_size max 100); a short page
+ * cap keeps a huge library from stalling the request.
+ * Returns [{ voice_id, name, category }], sorted by name.
+ */
+export async function listElevenLabsVoices(apiKey, { fetchImpl = fetch, maxPages = 10 } = {}) {
+  if (!apiKey) throw new ExternalAPIError('No ElevenLabs API key');
+  const voices = [];
+  let token = '';
+  for (let page = 0; page < maxPages; page++) {
+    const qs = new URLSearchParams({ page_size: '100', include_total_count: 'false' });
+    if (token) qs.set('next_page_token', token);
+    const res = await fetchImpl(`https://api.elevenlabs.io/v2/voices?${qs}`, {
+      headers: { 'xi-api-key': apiKey, Accept: 'application/json' },
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new ExternalAPIError(`ElevenLabs voices failed (${res.status}): ${detail.slice(0, 200)}`);
+    }
+    const data = await res.json();
+    for (const v of data.voices || []) {
+      if (v && v.voice_id) voices.push({ voice_id: v.voice_id, name: v.name || v.voice_id, category: v.category || '' });
+    }
+    token = data.next_page_token || '';
+    if (!data.has_more || !token) break;
+  }
+  return voices.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export default { createTtsProvider, listElevenLabsVoices };

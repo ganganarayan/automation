@@ -41,6 +41,7 @@ import { buildCatalog } from '../utils/modelCatalog.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { buildProviders } from '../services/providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
+import { listElevenLabsVoices } from '../providers/ttsProvider.js';
 import { keyOk, requiredKey, verifyKey, setAccessCookie, clearAccessCookie, ACCESS_KEY_STORE } from '../services/accessService.js';
 
 export function register(ctx) {
@@ -219,6 +220,20 @@ export function register(ctx) {
       const provider = createPostForMeProvider({ apiKey }, log);
       const data = await provider.listAccounts();
       return res.json({ ok: true, accounts: normalizeAccounts(data) });
+    } catch (err) {
+      return res.json({ ok: false, error: err.message });
+    }
+  });
+
+  // The ElevenLabs voices on the central key, for the wizard's Voice picker.
+  // The key stays server-side; only id / name / category reach the browser.
+  router.get('/admin/tts/voices', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const t = await tenantSettings.forTenant(req.tenantId);
+      const apiKey = (t.tts && t.tts.elevenlabsApiKey) || '';
+      if (!apiKey) return res.json({ ok: false, missingKey: true, error: 'No ElevenLabs API key. Set it once under Settings → API Keys, then reload this step.' });
+      return res.json({ ok: true, voices: await listElevenLabsVoices(apiKey) });
     } catch (err) {
       return res.json({ ok: false, error: err.message });
     }
@@ -958,6 +973,37 @@ function fieldRow(field, configMap) {
         <span id="mdl-${esc(provider)}" class="hint"></span>
       </div>
       <p class="hint">${hint}</p></div>`;
+  }
+  if (field.type === 'voice_select') {
+    // The saved id is the text input (what gets saved); the dropdown is filled
+    // from /admin/tts/voices after load and just writes its choice into it.
+    const val = has ? String(current) : '';
+    const k = esc(field.key);
+    return `<div class="field voice-pick"><label>${esc(field.label)}</label>
+      <select id="vsel-${k}" class="pick" style="display:none" onchange="pickVoice('${k}')"></select>
+      <input id="vid-${k}" type="text" name="set[${k}]" value="${esc(val)}"
+        placeholder="${field.placeholder ? esc(field.placeholder) : ''}">
+      <p id="vmsg-${k}" class="hint">Loading your ElevenLabs voices…</p>
+      <script>
+        function pickVoice(k){const s=document.getElementById('vsel-'+k),i=document.getElementById('vid-'+k);
+          if(s.value==='__type__'){i.style.display='';i.focus();}else{i.value=s.value;i.style.display='none';}}
+        (async function(k){
+          const s=document.getElementById('vsel-'+k),i=document.getElementById('vid-'+k),m=document.getElementById('vmsg-'+k);
+          const esc=(x)=>String(x).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+          let j;
+          try{ j=await (await fetch('/api/v1/admin/tts/voices')).json(); }catch(e){ j={ok:false,error:e.message}; }
+          if(!j.ok){ m.textContent=(j.missingKey?'🟡 ':'🟡 Could not load voices: ')+(j.error||'failed')+' Type a voice ID instead.'; return; }
+          const cur=i.value.trim(), vs=j.voices||[];
+          const known=vs.some((v)=>v.voice_id===cur);
+          let h=cur?'':'<option value="" selected>Choose a voice…</option>';
+          if(cur&&!known) h+='<option value="'+esc(cur)+'" selected>'+esc(cur)+' (saved, not on this key)</option>';
+          h+=vs.map((v)=>'<option value="'+esc(v.voice_id)+'"'+(v.voice_id===cur?' selected':'')+'>'+esc(v.name)+(v.category?' ('+esc(v.category)+')':'')+'</option>').join('');
+          h+='<option value="__type__">✎ Type an ID…</option>';
+          s.innerHTML=h; s.style.display=''; i.style.display='none';
+          m.textContent=vs.length?('🟢 '+vs.length+' voice'+(vs.length===1?'':'s')+' on your ElevenLabs key.'):'🟡 No voices on your ElevenLabs key. Type a voice ID instead.';
+          if(!vs.length){ s.style.display='none'; i.style.display=''; }
+        })('${k}');
+      </script></div>`;
   }
   if (field.type === 'weekdays') {
     const gid = uniqueId('days');
