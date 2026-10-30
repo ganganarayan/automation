@@ -62,8 +62,8 @@ export function wrapText(text, maxChars = 18, maxLines = 3) {
 const xmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
 
 /**
- * The overlay drawn on the frame: a darkening gradient behind the text, an
- * accent bar, and big bold white text with a black outline.
+ * The overlay drawn on the frame: a darkening gradient behind the text and the
+ * hook as big bold white text with a black outline (no accent bar).
  */
 export function thumbSvg({ w, h, text, layout = 'center', accent = '#FFFFFF' }) {
   const portrait = h > w;
@@ -87,14 +87,10 @@ export function thumbSvg({ w, h, text, layout = 'center', accent = '#FFFFFF' }) 
   const band = layout === 'left'
     ? `<linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".8"/><stop offset=".75" stop-color="#000" stop-opacity="0"/></linearGradient><rect width="${w}" height="${h}" fill="url(#g)"/>`
     : `<linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset=".5" stop-color="#000" stop-opacity=".75"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient><rect y="${Math.round(top - lh * 0.6)}" width="${w}" height="${Math.round(block + lh * 1.2)}" fill="url(#g)"/>`;
-  const barY = Math.round(top - size * 0.45);
-  const barW = Math.round(w * 0.14);
-  const barX = anchor === 'start' ? x : Math.round(w / 2 - barW / 2);
   const tspans = lines
     .map((l, i) => `<tspan x="${x}" y="${y0 + i * lh}">${xmlEsc(l)}</tspan>`)
     .join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs>${band.split('<rect')[0]}</defs><rect${band.split('<rect')[1]}
-<rect x="${barX}" y="${barY}" width="${barW}" height="${Math.max(6, Math.round(size * 0.12))}" rx="4" fill="${accent}"/>
 <text text-anchor="${anchor}" font-family="Noto Sans, Noto Sans Devanagari, DejaVu Sans, sans-serif" font-weight="800" font-size="${size}" fill="#FFFFFF" stroke="#000000" stroke-width="${Math.max(2, Math.round(size * 0.06))}" paint-order="stroke">${tspans}</text></svg>`;
 }
 

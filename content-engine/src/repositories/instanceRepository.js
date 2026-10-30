@@ -163,7 +163,24 @@ export async function postedDriveIds(funnelId, tenantId = 'default') {
   return rows.map((r) => r.drive_id).filter(Boolean);
 }
 
+/**
+ * Ready-video AI drafts (unposted generations) for these Drive files, newest
+ * first per file: { driveId: row }.
+ */
+export async function draftsByDriveIds(funnelId, tenantId = 'default', driveIds = []) {
+  if (!funnelId || !driveIds.length) return {};
+  const { rows } = await query(
+    `SELECT DISTINCT ON (s->'artifacts'->'video'->>'driveId') s->'artifacts'->'video'->>'driveId' AS drive_id, i.*
+       FROM instances i, jsonb_array_elements(i.steps) s
+      WHERE i.tenant_id = $1 AND i.funnel_id = $2 AND i.status = 'draft' AND i.locked = false
+        AND s->>'key' = 'stitch' AND s->'artifacts'->'video'->>'driveId' = ANY($3)
+      ORDER BY s->'artifacts'->'video'->>'driveId', i.updated_at DESC`,
+    [tenantId, funnelId, driveIds],
+  );
+  return Object.fromEntries(rows.map((r) => [r.drive_id, r]));
+}
+
 export default {
   create, get, list, logRows, saveSteps, setStatus, setMeta, bumpRound, lockAsPosted, setPostStatus, remove,
-  existsForFunnelOnDate, postedDriveIds,
+  existsForFunnelOnDate, postedDriveIds, draftsByDriveIds,
 };

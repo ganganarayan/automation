@@ -57,7 +57,7 @@ export async function run({ tenantId = 'default' }) {
     .filter((x) => x.theme || x.headline);
 
   const generated = await providers.llm.generateJson({
-    system: VIDAPULSE_SYSTEM,
+    system: String(resolved.prompts.refill || '').trim() || VIDAPULSE_SYSTEM,
     user:
       `Generate EXACTLY ${BATCH} brand-new VidaPulse posts as JSON ` +
       `{"posts":[{"audience","theme","headline","subheadline","caption","scene"}]}. ` +

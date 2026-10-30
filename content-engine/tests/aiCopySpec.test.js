@@ -30,6 +30,11 @@ describe('prompts', () => {
     expect(copySystemPrompt({ keyword: 'guide' })).toContain('comment "guide"');
     expect(copySystemPrompt({})).toContain('link in bio');
   });
+  it('uses the saved system prompt and always adds the output keys', () => {
+    const p = copySystemPrompt({ base: 'House voice only.' });
+    expect(p.startsWith('House voice only.')).toBe(true);
+    expect(p).toContain('"thumbPrompt"');
+  });
   it('falls back to the file name for a silent video', () => {
     expect(copyUserPrompt({ fileName: 'a.mp4' })).toContain('no speech');
     expect(copyUserPrompt({ transcript: 'hello', fileName: 'a.mp4' })).toContain('Transcript:\nhello');

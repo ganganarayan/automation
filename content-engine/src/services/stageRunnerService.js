@@ -124,7 +124,7 @@ export async function generateScript({ instanceId, correction = '' }) {
   const { instance, funnel, cfg, resolved, providers } = await loadContext(instanceId);
   await instanceService.updateStep(instanceId, 'script', { status: 'running', startedAt: new Date().toISOString() });
   const { text, model, usage } = await providers.llm.generateTextDetailed({
-    system: scriptSystemPrompt(cfg.script_tone),
+    system: scriptSystemPrompt(cfg.script_tone, providers.resolved.prompts.script),
     user: scriptUserPrompt({ topic: funnel?.name || instance.title || '', audience: resolved.audiencePrefix || '', correction }),
   });
   if (!text) throw new Error('empty script from model');

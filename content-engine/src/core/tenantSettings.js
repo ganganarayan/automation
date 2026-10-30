@@ -131,6 +131,13 @@ export async function forTenant(tenantId = 'default') {
       heygenApiKey: pick('heygen_api_key', ''),
     },
     transcriptKey: pick('transcript_api_key', ''),
+    // System prompts (API Keys → System prompts). Blank = the built-in default.
+    prompts: {
+      global: pick('system_prompt_global', ''),
+      copy: pick('system_prompt_copy', ''),
+      script: pick('system_prompt_script', ''),
+      refill: pick('system_prompt_refill', ''),
+    },
     video: {
       json2videoApiKey: pick('json2video_api_key', settings.video.json2videoApiKey),
     },

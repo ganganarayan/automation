@@ -25,6 +25,9 @@ export function createLlmProvider(cfg, log) {
   const openai = cfg.openai.apiKey ? new OpenAI({ apiKey: cfg.openai.apiKey }) : null;
   const gemini = cfg.gemini.apiKey ? new GoogleGenerativeAI(cfg.gemini.apiKey) : null;
 
+  // The global system prompt (API Keys → System prompts) leads every call.
+  const withGlobal = (system) => [String(cfg.globalSystem || '').trim(), String(system || '').trim()].filter(Boolean).join('\n\n');
+
   const requireOpenai = () => {
     if (!openai) throw new ExternalAPIError('OpenAI not configured (OPENAI_API_KEY missing)');
     return openai;
@@ -43,7 +46,7 @@ export function createLlmProvider(cfg, log) {
       const res = await client.chat.completions.create({
         model: usedModel,
         messages: [
-          ...(system ? [{ role: 'system', content: system }] : []),
+          ...(withGlobal(system) ? [{ role: 'system', content: withGlobal(system) }] : []),
           { role: 'user', content: user },
         ],
       });
@@ -72,7 +75,7 @@ export function createLlmProvider(cfg, log) {
         // max_completion_tokens: newer models reject max_tokens; reasoning tokens count here too.
         max_completion_tokens: maxTokens,
         messages: [
-          ...(system ? [{ role: 'system', content: system }] : []),
+          ...(withGlobal(system) ? [{ role: 'system', content: withGlobal(system) }] : []),
           { role: 'user', content: user },
         ],
       });

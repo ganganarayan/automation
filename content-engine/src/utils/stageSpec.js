@@ -12,12 +12,14 @@
  * Dependencies: none.
  */
 
-/** System prompt for script generation (tone is the funnel's script_tone). */
-export function scriptSystemPrompt(tone = '') {
-  const base =
-    'You write short vertical social-video scripts: a strong hook, a tight body, and a clear CTA. '
-    + 'Return only the spoken script text — no scene labels, no headings, no stage directions.';
-  return [base, String(tone || '').trim()].filter(Boolean).join('\n\n');
+/** The editable script-writer system prompt (API Keys → System prompts). */
+export const DEFAULT_SCRIPT_PROMPT =
+  'You write short vertical social-video scripts: a strong hook, a tight body, and a clear CTA. '
+  + 'Return only the spoken script text — no scene labels, no headings, no stage directions.';
+
+/** System prompt for script generation (tone is the funnel's script_tone; base = the saved prompt). */
+export function scriptSystemPrompt(tone = '', base = '') {
+  return [String(base || '').trim() || DEFAULT_SCRIPT_PROMPT, String(tone || '').trim()].filter(Boolean).join('\n\n');
 }
 
 /** User prompt for script generation from a topic/angle (+ optional correction). */

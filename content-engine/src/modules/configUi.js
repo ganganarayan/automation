@@ -1022,8 +1022,11 @@ function secretJsonSummary(raw) {
       ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
   }
   if (field.type === 'json' || field.type === 'textarea') {
+    // A field with a built-in default shows it pre-filled until it's changed.
+    const rows = field.default ? ' rows="12"' : '';
     return `<div class="field"><label>${esc(field.label)}</label>
-      <textarea name="set[${esc(field.key)}]" placeholder="${field.placeholder ? esc(field.placeholder) : ''}">${esc(has ? current : '')}</textarea></div>`;
+      <textarea name="set[${esc(field.key)}]"${rows} placeholder="${field.placeholder ? esc(field.placeholder) : ''}">${esc(has ? current : (field.default || ''))}</textarea>
+      ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
   }
   return `<div class="field"><label>${esc(field.label)}</label>
     <input type="text" name="set[${esc(field.key)}]" value="${esc(has ? current : '')}"

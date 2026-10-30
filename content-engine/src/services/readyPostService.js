@@ -107,7 +107,7 @@ export async function listReadyVideos({ tenantId = 'default', funnelId, folder: 
   const saEmail = (g.serviceAccount && g.serviceAccount.client_email) || '';
   const picker = { clientId: g.oauthClientId || '', apiKey: g.pickerApiKey || '', appId: g.projectNumber || '' };
   const base = { funnel, resolved, cfg, folder, saEmail, picker, defaultCaption: captionFor(cfg, resolved) };
-  if (picked && picked.length) return { ...base, folder: '', picked: true, videos: picked };
+  if (picked && picked.length) return { ...base, folder: '', picked: true, videos: picked, drafts: await loadDrafts(funnel, picked.map((f) => f.id)) };
   if (!folder) return { ...base, videos: [] };
   let files;
   try {
@@ -123,7 +123,7 @@ export async function listReadyVideos({ tenantId = 'default', funnelId, folder: 
     .filter((f) => !posted.has(f.id))
     .map((f) => ({ id: f.id, name: f.name, createdTime: f.createdTime }))
     .sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
-  return { ...base, videos, totalFiles: files.length };
+  return { ...base, videos, totalFiles: files.length, drafts: await loadDrafts(funnel, videos.map((v) => v.id)) };
 }
 
 // Video lengths by Drive id — a file's length never changes, so probe once.
@@ -185,7 +185,7 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   }
 
   const { data, model, usage } = await providers.llm.generateJsonDetailed({
-    system: copySystemPrompt({ brief: cfg && cfg.direct_copy_brief, audience: resolved.audiencePrefix, keyword: resolved.captureKeyword }),
+    system: copySystemPrompt({ brief: cfg && cfg.direct_copy_brief, audience: resolved.audiencePrefix, keyword: resolved.captureKeyword, base: providers.resolved.prompts.copy }),
     user: copyUserPrompt({ transcript, fileName: name }),
     maxTokens: 8000,
   });
@@ -221,7 +221,11 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
     thumbError = err.message;
     log.warn({ err: err.message, driveId }, 'thumbnail generation failed (first frame will be used)');
   }
-  return { copy, transcript, costs, transcribed: audio.length > 0, thumbs, sizes, thumbError };
+  const instanceId = await saveDraft({ funnel, driveId, transcript, copy, thumbs, sizes, thumbError, costs }).catch((err) => {
+    log.warn({ err: err.message, driveId }, 'draft save failed (generation still returned)');
+    return null;
+  });
+  return { copy, transcript, costs, transcribed: audio.length > 0, thumbs, sizes, thumbError, instanceId };
 }
 
 /**
@@ -258,8 +262,65 @@ function thumbPlatforms(resolved) {
   return (present.length ? present : Object.keys(THUMB_SPECS)).filter((k) => THUMB_SPECS[k]);
 }
 
+/**
+ * Keep every generation: one "draft" instance per video, its latest copy,
+ * transcript and thumbnails as JSON on the steps (all generations kept in
+ * script.artifacts.generations), and every generation's real cost added.
+ */
+async function saveDraft({ funnel, driveId, transcript, copy, thumbs, sizes, thumbError, costs }) {
+  const existing = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [driveId]))[driveId];
+  const inst = existing || await instanceService.createForFunnel({ tenantId: funnel.tenant_id, funnel, title: copy.title || 'Ready video', status: 'draft' });
+  let steps = existing ? instanceService.parseSteps(existing) : buildInitialSteps();
+  if (!existing) for (const k of ['animate', 'voiceover']) steps = patchStep(steps, k, { status: 'skipped' });
+  const at = new Date().toISOString();
+  const prev = ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).generations || [];
+  const generation = { at, copy, thumbs, sizes, thumbError };
+  steps = patchStep(steps, 'transcript', { status: transcript ? 'done' : 'skipped', artifacts: { text: transcript } });
+  steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, generations: [...prev, generation].slice(-20) } });
+  steps = patchStep(steps, 'images', { status: sizes.length ? 'done' : 'skipped', artifacts: { thumbs, sizes } });
+  const durationSec = durationCache.get(driveId) || 0;
+  steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: durationSec ? { driveId, durationSec } : { driveId } } });
+  for (const c of costs || []) {
+    const { step, ...entry } = c;
+    steps = addCostToSteps(steps, ['transcript', 'images'].includes(step) ? step : 'script', { ...entry, costUsd: Number(entry.costUsd) || 0, at });
+  }
+  await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
+  await instanceRepo.setMeta(inst.id, { title: copy.title || undefined, durationSeconds: durationSec || undefined });
+  return inst.id;
+}
+
+/** The saved AI drafts for these videos, for the page to restore: { driveId: draft }. */
+async function loadDrafts(funnel, driveIds) {
+  const rows = await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, driveIds).catch(() => ({}));
+  const out = {};
+  for (const [driveId, row] of Object.entries(rows)) {
+    const steps = instanceService.parseSteps(row);
+    const art = (k) => (steps.find((x) => x.key === k) || {}).artifacts || {};
+    const costUsd = steps.reduce((t, x) => t + (x.costs || []).reduce((u, c) => u + (Number(c.costUsd) || 0), 0), 0);
+    if (!art('script').copy) continue;
+    out[driveId] = { instanceId: row.id, copy: art('script').copy, transcript: art('transcript').text || '', thumbs: art('images').thumbs || {}, sizes: art('images').sizes || [], costUsd, atIst: formatIst(row.updated_at) };
+  }
+  return out;
+}
+
 /** Record one direct post as a posted instance (stages skipped; AI-copy cost if any). */
 async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, ref, copy = null, costs = [], durationSec = 0 }) {
+  const draft = copy ? (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [driveId]).catch(() => ({})))[driveId] : null;
+  if (draft) {
+    // The generation (and its cost) is already on the draft — finish it.
+    let steps = instanceService.parseSteps(draft);
+    steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy } });
+    steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: durationSec ? { driveId, durationSec } : { driveId } } });
+    steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: ref ? [ref] : [], caption } });
+    await instanceRepo.saveSteps(draft.id, steps, sumInstanceCost(steps));
+    await instanceRepo.setMeta(draft.id, {
+      title: `${copy.title || 'Ready video'} — ${scheduledIso ? formatIst(scheduledIso, { withTime: false }) : 'now'}`,
+      durationSeconds: durationSec || undefined,
+      scheduledFor: scheduledIso ? new Date(scheduledIso) : undefined,
+    });
+    await instanceRepo.lockAsPosted(draft.id, { postRefs: ref ? [ref] : [], postedAt: scheduledIso ? new Date(scheduledIso) : new Date() });
+    return draft.id;
+  }
   const inst = await instanceService.createForFunnel({
     tenantId: funnel.tenant_id,
     funnel,

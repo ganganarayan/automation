@@ -36,7 +36,7 @@ export async function buildProviders(tenantId = 'default') {
 
   return {
     // Tenant-scoped credentials (from the app UI; env is only a default).
-    llm: createLlmProvider({ openai: r.openai, gemini: r.gemini }, log),
+    llm: createLlmProvider({ openai: r.openai, gemini: r.gemini, globalSystem: r.prompts.global }, log),
     publish: createPostForMeProvider({ apiKey: r.postformeKey }, log),
     video: createJson2VideoProvider(r.video, log),
 

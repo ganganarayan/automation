@@ -250,6 +250,7 @@ const STATUS_LABEL = {
   failed: 'Failed',
   superseded: 'Superseded',
   manual: 'Manual',
+  draft: 'AI draft',
 };
 
 function statusPill(status) {
@@ -517,7 +518,7 @@ function folderBar(funnel, { folder = '', saEmail = '', listError = '', totalFil
 
 // Ready video + AI copy: tick a video and the app transcribes it and writes its
 // per-platform copy into the fields below; edit, schedule, then post in tick order.
-function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
+function readyAiPickerPage({ funnel, videos, prefills, drafts = {}, ...src }) {
   const cards = (videos || [])
     .map((v, i) => `<div class="card">
       <div class="tile" onclick="openVideo('${esc(v.id)}')"><img src="${esc(driveThumbUrl(v.id, 'w400'))}" loading="lazy"><span class="playov">▶</span><span class="dur" id="du-${esc(v.id)}"></span></div>
@@ -586,24 +587,31 @@ function readyAiPickerPage({ funnel, videos, prefills, ...src }) {
       det.parentElement.classList.toggle('wide', cb.checked);
       renumber();
     }
+    // Show one generation (fresh, or a saved draft restored after a reload).
+    function applyGen(id, j){
+      $('ti',id).value=j.copy.title||''; $('de',id).value=j.copy.description||''; $('ig',id).value=j.copy.igCaption||''; $('sh',id).value=j.copy.short||''; cnt(id);
+      if(j.transcript) $('tx',id).value=j.transcript; $('gb',id).textContent='✨ Regenerate transcript + Thumbnail';
+      thumbs[id]=j.thumbs||{};
+      $('th',id).innerHTML=(j.sizes||[]).map(z=>'<a class="'+(z.size==='landscape'?'wide':'tall')+'" href="'+z.url+'" target="_blank" rel="noopener" title="Open full size"><img src="'+z.url+'"><span>'+z.label+' · '+z.platforms.join(', ')+'</span></a>').join('')
+        +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':' — the first frame will be used')+'</div>':'');
+      done[id]=true;
+    }
+    const SAVED = ${JSON.stringify(drafts).replace(/</g, '\\u003c')};
+    Object.keys(SAVED).forEach(id=>{ if(!$('cb',id)) return; applyGen(id, SAVED[id]); $('gs',id).textContent='💾 Saved draft from '+SAVED[id].atIst+' · $'+Number(SAVED[id].costUsd||0).toFixed(4); });
     async function gen(id){
       if(busy[id]) return;
       const pasted=$('tx',id).value.trim();
-      busy[id]=true; $('gs',id).textContent=(pasted?'Writing copy from your text':'Transcribing + writing copy')+' + designing thumbnails… (about 1–2 min)';
+      busy[id]=true; $('gb',id).disabled=true; $('gs',id).textContent=(pasted?'Writing copy from your text':'Transcribing + writing copy')+' + designing thumbnails… (about 1–2 min)';
       try{
         const r=await fetch('/api/v1/admin/instances/ready-ai/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, driveId:id, name:$('nm',id).value, transcript:pasted, accounts: pickedAccounts(), accessToken: await driveToken() })});
         const j=await r.json();
         if(!j.ok) throw new Error(j.error||'failed');
-        $('ti',id).value=j.copy.title; $('de',id).value=j.copy.description; $('ig',id).value=j.copy.igCaption; $('sh',id).value=j.copy.short; cnt(id);
-        if(j.transcript) $('tx',id).value=j.transcript; $('gb',id).textContent='✨ Regenerate transcript + Thumbnail';
-        thumbs[id]=j.thumbs||{};
-        $('th',id).innerHTML=(j.sizes||[]).map(z=>'<a class="'+(z.size==='landscape'?'wide':'tall')+'" href="'+z.url+'" target="_blank" rel="noopener" title="Open full size"><img src="'+z.url+'"><span>'+z.label+' · '+z.platforms.join(', ')+'</span></a>').join('')
-          +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':' — the first frame will be used')+'</div>':'');
-        costs[id]=(costs[id]||[]).concat(j.costs||[]); done[id]=true;
+        applyGen(id, j);
+        costs[id]=(costs[id]||[]).concat(j.costs||[]);
         const usd=(costs[id]||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
         $('gs',id).textContent=(j.transcribed?'✓ Transcribed + copy written':(j.transcript?'✓ Copy written from your text':'✓ No speech found — copy written from the file name'))+' · $'+usd.toFixed(4);
       }catch(e){ $('gs',id).textContent='⚠ '+e.message; }
-      busy[id]=false;
+      busy[id]=false; $('gb',id).disabled=false;
     }
     function toggleNow(id){ const n=$('now',id), s=$('sch',id); if(n&&s){ s.disabled=n.checked; s.style.opacity=n.checked?0.45:1; } }
     async function postSel(allNow){
@@ -829,6 +837,7 @@ ${NAV_CSS}
  .playov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#fff;background:rgba(0,0,0,.25)}
  .dur{position:absolute;right:6px;bottom:6px;padding:1px 6px;border-radius:4px;background:rgba(0,0,0,.8);color:#fff;font-size:.78rem;font-weight:600}
  .dur:empty{display:none}
+ button.act:disabled{opacity:.5;cursor:wait}
  .card{border:1px solid #24243a;border-radius:10px;padding:.6rem;background:#12121b}
  .card .tile{max-height:260px;margin:0 auto .5rem}
  .pick{display:flex;align-items:center;gap:.4rem;font-size:.84rem;color:#e8e8ef;cursor:pointer}

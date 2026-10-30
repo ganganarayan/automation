@@ -15,6 +15,10 @@
  * Field types: 'text' (default) | 'secret' (masked) | 'json' | 'textarea'.
  */
 
+import { DEFAULT_COPY_PROMPT } from '../utils/aiCopySpec.js';
+import { DEFAULT_SCRIPT_PROMPT } from '../utils/stageSpec.js';
+import { VIDAPULSE_SYSTEM } from './prompts.js';
+
 export const APPS = ['api-keys', 'content-engine', 'tracking-bridge'];
 
 export const CONFIG_MANIFEST = {
@@ -79,6 +83,17 @@ export const CONFIG_MANIFEST = {
         title: 'Gmail (LinkedIn relay)',
         fields: [
           { key: 'linkedin_imap_pass', label: 'Gmail app password (blank = use the SMTP password)', type: 'secret' },
+        ],
+      },
+      {
+        // Set once here; every funnel and every LLM call uses them. Blank = the
+        // built-in default (shown pre-filled).
+        title: 'System prompts (used by every LLM call)',
+        fields: [
+          { key: 'system_prompt_global', label: 'Global system prompt — added before every LLM call', type: 'textarea', help: 'House rules for all AI text: voice, language, words to avoid. Leave blank for none.' },
+          { key: 'system_prompt_copy', label: 'Ready video copy writer (title, description, captions, thumbnail hook + image prompt)', type: 'textarea', default: DEFAULT_COPY_PROMPT, help: 'The app always adds the JSON output keys, the funnel comment keyword, brand brief and audience after this.' },
+          { key: 'system_prompt_script', label: 'Video script writer (automated pipeline)', type: 'textarea', default: DEFAULT_SCRIPT_PROMPT, help: "The funnel's script tone is added after this." },
+          { key: 'system_prompt_refill', label: 'VidaPulse post refill', type: 'textarea', default: VIDAPULSE_SYSTEM },
         ],
       },
     ],
