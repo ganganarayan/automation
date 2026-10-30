@@ -37,6 +37,10 @@ import { costText, costTranscript, costImages } from '../utils/pricing.js';
 import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey } from '../utils/aiCopySpec.js';
 import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, thumbSvg, thumbImagePrompt } from '../utils/thumbSpec.js';
 import sharp from 'sharp';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { normalizeCleanOpts } from '../utils/cleanSpec.js';
 import { formatIst } from '../utils/time.js';
 import { driveEmbedUrl } from '../utils/reviewSpec.js';
 import {
@@ -262,6 +266,81 @@ function thumbPlatforms(resolved) {
   return (present.length ? present : Object.keys(THUMB_SPECS)).filter((k) => THUMB_SPECS[k]);
 }
 
+/** The stitch step's video artifact, keeping what's already there (e.g. the cleaned copy). */
+function videoArt(steps, driveId, durationSec = 0) {
+  const prev = ((steps.find((x) => x.key === 'stitch') || {}).artifacts || {}).video || {};
+  return { ...prev, driveId, ...(durationSec ? { durationSec } : {}) };
+}
+
+// ✂ Clean jobs by Drive id: { state: running | done | failed, clean?, error? }.
+// In memory only — a restart loses a running job (just press Clean again);
+// a finished one is saved on the video's draft instance.
+const cleanJobs = new Map();
+
+/**
+ * Start cleaning one ready video in the background (zoom from the top so the
+ * corner watermark leaves the frame, cut the outro), then upload it to Post for
+ * Me. The page polls cleanStatus.
+ */
+export async function startClean({ funnelId, driveId, zoomPct, trimEndSec }) {
+  if (!driveId) throw new Error('driveId required');
+  const id = String(driveId);
+  const { funnel } = await loadFunnel(funnelId);
+  const providers = await buildProviders(funnel.tenant_id);
+  if (!providers.resolved.postformeKey) throw new Error('No Post for Me API key — set it under Settings → API Keys');
+  const job = cleanJobs.get(id);
+  if (job && job.state === 'running') return job;
+  const opts = normalizeCleanOpts({ zoomPct, trimEndSec });
+  const running = { state: 'running', startedAt: Date.now(), ...opts };
+  cleanJobs.set(id, running);
+  runClean({ funnel, providers, driveId: id, opts })
+    .then((clean) => cleanJobs.set(id, { state: 'done', clean }))
+    .catch((err) => {
+      log.error({ err: err.message, driveId: id }, 'video clean failed');
+      cleanJobs.set(id, { state: 'failed', error: err.message });
+    });
+  return running;
+}
+
+async function runClean({ funnel, providers, driveId, opts }) {
+  const total = (await videoDurations([driveId]))[driveId] || 0;
+  if (opts.trimEndSec && !total) throw new Error("couldn't read the video's length to trim its end");
+  const keepSec = opts.trimEndSec ? Math.max(1, total - opts.trimEndSec) : 0;
+  const dir = await mkdtemp(join(tmpdir(), 'clean-'));
+  try {
+    const outPath = join(dir, 'clean.mp4');
+    const t0 = Date.now();
+    await createFfmpegProvider({}, log).cleanVideo({ url: publicDlUrl(driveId), outPath, zoomPct: opts.zoomPct, keepSec });
+    const url = await createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log).uploadFile(outPath, 'video/mp4');
+    const clean = { url, ...opts, durationSec: Math.round(keepSec || total), at: new Date().toISOString() };
+    await saveClean(funnel, driveId, clean);
+    log.info({ driveId, ...opts, seconds: Math.round((Date.now() - t0) / 1000) }, 'video cleaned + uploaded');
+    return clean;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** Keep the cleaned video on the video's draft instance (made if there's none yet). */
+async function saveClean(funnel, driveId, clean) {
+  const existing = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [driveId]))[driveId];
+  const inst = existing || await instanceService.createForFunnel({ tenantId: funnel.tenant_id, funnel, title: 'Ready video (cleaned)', status: 'draft' });
+  let steps = existing ? instanceService.parseSteps(existing) : buildInitialSteps();
+  if (!existing) for (const k of ['animate', 'voiceover']) steps = patchStep(steps, k, { status: 'skipped' });
+  steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: { ...videoArt(steps, driveId, clean.durationSec), clean } } });
+  await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
+  await instanceRepo.setMeta(inst.id, { durationSeconds: clean.durationSec || undefined });
+}
+
+/** Where a clean job stands (running / done / failed), else the saved cleaned video. */
+export async function cleanStatus({ funnelId, driveId }) {
+  const job = cleanJobs.get(String(driveId));
+  if (job) return job;
+  const { funnel } = await loadFunnel(funnelId);
+  const d = (await loadDrafts(funnel, [String(driveId)]))[String(driveId)];
+  return d && d.clean ? { state: 'done', clean: d.clean } : { state: 'none' };
+}
+
 /**
  * Keep every generation: one "draft" instance per video, its latest copy,
  * transcript and thumbnails as JSON on the steps (all generations kept in
@@ -281,7 +360,7 @@ async function saveDraft({ funnel, driveId, transcript, copy, thumbs, sizes, thu
   steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, generations } });
   if (sizes.length || !edit) steps = patchStep(steps, 'images', { status: sizes.length ? 'done' : 'skipped', artifacts: { thumbs, sizes } });
   const durationSec = durationCache.get(driveId) || 0;
-  steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: durationSec ? { driveId, durationSec } : { driveId } } });
+  steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
   // An edit save carries a generation's cost only the first time (no draft yet).
   for (const c of edit && existing ? [] : costs || []) {
     const { step, ...entry } = c;
@@ -325,8 +404,9 @@ async function loadDrafts(funnel, driveIds) {
     const steps = instanceService.parseSteps(row);
     const art = (k) => (steps.find((x) => x.key === k) || {}).artifacts || {};
     const costUsd = steps.reduce((t, x) => t + (x.costs || []).reduce((u, c) => u + (Number(c.costUsd) || 0), 0), 0);
-    if (!art('script').copy) continue;
-    out[driveId] = { instanceId: row.id, copy: art('script').copy, transcript: art('transcript').text || '', thumbs: art('images').thumbs || {}, sizes: art('images').sizes || [], costUsd, atIst: formatIst(row.updated_at) };
+    const clean = (art('stitch').video || {}).clean || null;
+    if (!art('script').copy && !clean) continue;
+    out[driveId] = { instanceId: row.id, clean, copy: art('script').copy || null, transcript: art('transcript').text || '', thumbs: art('images').thumbs || {}, sizes: art('images').sizes || [], costUsd, atIst: formatIst(row.updated_at) };
   }
   return out;
 }
@@ -338,7 +418,7 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
     // The generation (and its cost) is already on the draft — finish it.
     let steps = instanceService.parseSteps(draft);
     steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy } });
-    steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: durationSec ? { driveId, durationSec } : { driveId } } });
+    steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
     steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: ref ? [ref] : [], caption } });
     await instanceRepo.saveSteps(draft.id, steps, sumInstanceCost(steps));
     await instanceRepo.setMeta(draft.id, {
@@ -366,7 +446,7 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
     const { step, ...entry } = c;
     steps = addCostToSteps(steps, ['transcript', 'images'].includes(step) ? step : 'script', { ...entry, costUsd: Number(entry.costUsd) || 0, at: new Date().toISOString() });
   }
-  steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: durationSec ? { driveId, durationSec } : { driveId } } });
+  steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
   steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: ref ? [ref] : [], caption } });
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   if (durationSec) await instanceRepo.setMeta(inst.id, { durationSeconds: durationSec });
@@ -402,20 +482,24 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
   const platformConfigurations = hasYoutube && ytTitle ? { youtube: { title: ytTitle } } : undefined;
 
   const slots = defaultSlotsIso(resolved.publishTime, clean.length);
+  // A video cleaned with ✂ Clean posts its cleaned copy instead of the Drive original.
+  const saved = await loadDrafts(funnel, clean.map((x) => x.driveId));
   const results = [];
   for (let i = 0; i < clean.length; i += 1) {
     const sel = clean[i];
     // "Post now" => no scheduled_at, so Post-for-Me publishes immediately.
     const scheduledIso = sel.now ? null : ((sel.scheduledAt && parseIstDateTime(sel.scheduledAt)) || slots[i] || null);
     // AI-copy lane: each platform gets its own copy for this video.
-    const ai = sel.copy ? platformConfigsFor(sel.copy, { accountIds: accounts, accountMap, ctaLink: resolved.ctaLink, videoUrl: publicDlUrl(sel.driveId), thumbs: sel.thumbs }) : null;
+    const cleaned = (saved[sel.driveId] || {}).clean || null;
+    const videoUrl = cleaned ? cleaned.url : publicDlUrl(sel.driveId);
+    const ai = sel.copy ? platformConfigsFor(sel.copy, { accountIds: accounts, accountMap, ctaLink: resolved.ctaLink, videoUrl, thumbs: sel.thumbs }) : null;
     const caption = ai ? ai.caption : (sel.caption.trim() || captionFor(cfg, resolved));
     try {
       await drive.shareAnyone(sel.driveId);
       const result = await publish.createPost({
         accountIds: accounts,
         caption,
-        mediaUrl: publicDlUrl(sel.driveId),
+        mediaUrl: videoUrl,
         scheduledAt: scheduledIso || undefined,
         platformConfigurations: ai ? ai.platformConfigurations : platformConfigurations,
       });
@@ -435,7 +519,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
       const instanceId = await recordPostedInstance({
         funnel, driveId: sel.driveId, caption, scheduledIso, ref,
         copy: sel.copy ? normalizeCopy(sel.copy) : null, costs: sel.costs,
-        durationSec: (await videoDurations([sel.driveId]))[sel.driveId] || 0,
+        durationSec: (cleaned && cleaned.durationSec) || (await videoDurations([sel.driveId]))[sel.driveId] || 0,
       });
       try {
         await drive.renameFile(sel.driveId, `POSTED - ${sel.name || sel.driveId}`);
@@ -483,4 +567,4 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export default { listReadyVideos, videoDurations, generateCopy, saveDraftEdit, postSelections };
+export default { listReadyVideos, videoDurations, generateCopy, saveDraftEdit, startClean, cleanStatus, postSelections };

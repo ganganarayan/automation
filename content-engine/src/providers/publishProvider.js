@@ -10,6 +10,9 @@
  */
 import { request } from '../core/httpClient.js';
 import { ExternalAPIError } from '../core/errors.js';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 
 const BASE = 'https://api.postforme.dev/v1';
 
@@ -64,6 +67,25 @@ export function createPostForMeProvider(cfg, log) {
       const { media_url: mediaUrl, upload_url: uploadUrl } = res.data || {};
       if (!res.ok || !uploadUrl || !mediaUrl) throw new ExternalAPIError(`Post for Me upload URL failed (${res.status})`);
       const put = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body: buffer });
+      if (!put.ok) throw new ExternalAPIError(`Post for Me upload failed (${put.status})`);
+      return mediaUrl;
+    },
+
+    /** Like uploadMedia, but streams a file from disk (a whole video never sits in memory). */
+    async uploadFile(path, contentType = 'video/mp4') {
+      const headers = requireKey();
+      const res = await request(`${BASE}/media/create-upload-url`, {
+        method: 'POST', headers, body: {}, label: 'postforme.createUploadUrl', log, retries: 1,
+      });
+      const { media_url: mediaUrl, upload_url: uploadUrl } = res.data || {};
+      if (!res.ok || !uploadUrl || !mediaUrl) throw new ExternalAPIError(`Post for Me upload URL failed (${res.status})`);
+      const { size } = await stat(path);
+      const put = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': contentType, 'Content-Length': String(size) },
+        body: Readable.toWeb(createReadStream(path)),
+        duplex: 'half',
+      });
       if (!put.ok) throw new ExternalAPIError(`Post for Me upload failed (${put.status})`);
       return mediaUrl;
     },

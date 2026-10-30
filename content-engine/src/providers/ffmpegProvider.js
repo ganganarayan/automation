@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ffmpegConcatArgs } from '../utils/stageSpec.js';
 import { extractAudioArgs } from '../utils/aiCopySpec.js';
+import { cleanVideoArgs } from '../utils/cleanSpec.js';
 import { probeMp4DurationSeconds } from '../utils/videoSpec.js';
 import { ExternalAPIError } from '../core/errors.js';
 
@@ -114,6 +115,14 @@ export function createFfmpegProvider(cfg = {}, log) {
       } finally {
         await rm(dir, { recursive: true, force: true }).catch(() => {});
       }
+    },
+
+    /**
+     * Zoom from the top + trim the end (see utils/cleanSpec) into `outPath`.
+     * Reads the source straight from its URL — the video is never held in memory.
+     */
+    async cleanVideo({ url, outPath, zoomPct, keepSec }) {
+      await run(bin, cleanVideoArgs({ input: url, output: outPath, zoomPct, keepSec }), { maxBuffer: 16 * 1024 * 1024, timeout: 30 * 60 * 1000 });
     },
 
     /**

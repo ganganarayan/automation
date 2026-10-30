@@ -119,6 +119,29 @@ export function register(ctx) {
     }
   });
 
+  // ✂ Clean: zoom out a corner watermark + cut the outro, in the background.
+  router.post('/admin/instances/ready-ai/clean', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const { funnelId, driveId, zoomPct, trimEndSec } = req.body || {};
+      if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
+      res.json({ ok: true, ...(await readyPost.startClean({ funnelId, driveId, zoomPct, trimEndSec })) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  router.post('/admin/instances/ready-ai/clean-status', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const { funnelId, driveId } = req.body || {};
+      if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
+      res.json({ ok: true, ...(await readyPost.cleanStatus({ funnelId, driveId })) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   // Video lengths for the listed Drive videos (ffprobe on the public link).
   router.post('/admin/instances/ready-ai/durations', async (req, res) => {
     try {
@@ -541,6 +564,12 @@ function readyAiPickerPage({ funnel, videos, prefills, drafts = {}, ...src }) {
         <label class="fl">Transcript / text (optional — paste to skip transcription; blank = the app transcribes the video)<textarea id="tx-${esc(v.id)}" rows="6"></textarea></label>
         <div class="nowrow"><button class="act" id="gb-${esc(v.id)}" onclick="gen('${esc(v.id)}')">✨ Generate transcript + Thumbnail</button> <button class="act" id="sv-${esc(v.id)}" onclick="saveDraft('${esc(v.id)}')">💾 Save draft</button> <span class="hint" id="gs-${esc(v.id)}"></span></div>
         <div class="thumbs" id="th-${esc(v.id)}"></div>
+        <div class="nowrow cleanrow"><b>✂ Clean:</b>
+          <label class="nowrow">zoom % <input id="zm-${esc(v.id)}" class="cleanzm" type="number" min="0" max="30" step="0.5" style="width:4.5rem"></label>
+          <label class="nowrow">cut last s <input id="tr-${esc(v.id)}" class="cleantr" type="number" min="0" max="60" step="0.5" style="width:4.5rem"></label>
+          <button class="act" id="cl-${esc(v.id)}" onclick="cleanVid('${esc(v.id)}')">✂ Clean video</button>
+        </div>
+        <div class="hint" id="cs-${esc(v.id)}">Zooms in keeping the top fixed so the bottom-right watermark leaves the frame, and cuts the outro. Posting then uses the cleaned video.</div>
         </div>
         <div class="aicol">
         <label class="fl">YouTube title<input id="ti-${esc(v.id)}" maxlength="100"></label>
@@ -609,7 +638,39 @@ function readyAiPickerPage({ funnel, videos, prefills, drafts = {}, ...src }) {
       done[id]=true;
     }
     const SAVED = ${JSON.stringify(drafts).replace(/</g, '\\u003c')};
-    Object.keys(SAVED).forEach(id=>{ if(!$('cb',id)) return; applyGen(id, SAVED[id]); $('gs',id).textContent='💾 Saved draft from '+SAVED[id].atIst+' · $'+Number(SAVED[id].costUsd||0).toFixed(4); });
+    // ✂ Clean: the last zoom / cut used in this browser is the default for the next video.
+    const cleaning = {};
+    let CO = { zoomPct: 10, trimEndSec: 0 };
+    try{ CO = Object.assign(CO, JSON.parse(localStorage.getItem('cleanOpts')||'{}')); }catch(e){}
+    document.querySelectorAll('.cleanzm').forEach(e=>{ e.value=CO.zoomPct; }); document.querySelectorAll('.cleantr').forEach(e=>{ e.value=CO.trimEndSec; });
+    const mmss = n=>Math.floor(n/60)+':'+String(Math.round(n)%60).padStart(2,'0');
+    function showClean(id, c){
+      $('cs',id).innerHTML='🟢 Cleaned (zoom '+c.zoomPct+'%, cut last '+c.trimEndSec+' s → '+mmss(c.durationSec||0)+') · <a href="'+c.url+'" target="_blank" rel="noopener">▶ Preview cleaned video</a> · posting uses this copy';
+      if($('zm',id)) $('zm',id).value=c.zoomPct; if($('tr',id)) $('tr',id).value=c.trimEndSec;
+    }
+    async function pollClean(id){
+      try{
+        const r=await fetch('/api/v1/admin/instances/ready-ai/clean-status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, driveId:id })});
+        const j=await r.json();
+        if(j.ok && j.state==='running'){ $('cs',id).textContent='✂ Cleaning… '+Math.round((Date.now()-j.startedAt)/1000)+' s (a few minutes for a long video — you can work on other videos meanwhile)'; return setTimeout(()=>pollClean(id), 5000); }
+        cleaning[id]=false; $('cl',id).disabled=false;
+        if(j.ok && j.state==='done') showClean(id, j.clean);
+        else $('cs',id).textContent='⚠ Clean failed: '+(j.error||j.state||'unknown');
+      }catch(e){ setTimeout(()=>pollClean(id), 8000); }
+    }
+    async function cleanVid(id){
+      if(cleaning[id]) return;
+      const zoomPct=Number($('zm',id).value)||0, trimEndSec=Number($('tr',id).value)||0;
+      try{ localStorage.setItem('cleanOpts', JSON.stringify({ zoomPct, trimEndSec })); }catch(e){}
+      cleaning[id]=true; $('cl',id).disabled=true; $('cs',id).textContent='✂ Starting…';
+      try{
+        const r=await fetch('/api/v1/admin/instances/ready-ai/clean',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, driveId:id, zoomPct, trimEndSec })});
+        const j=await r.json();
+        if(!j.ok) throw new Error(j.error||'failed');
+        pollClean(id);
+      }catch(e){ cleaning[id]=false; $('cl',id).disabled=false; $('cs',id).textContent='⚠ '+e.message; }
+    }
+    Object.keys(SAVED).forEach(id=>{ if(!$('cb',id)) return; if(SAVED[id].clean) showClean(id, SAVED[id].clean); if(!SAVED[id].copy) return; applyGen(id, SAVED[id]); $('gs',id).textContent='💾 Saved draft from '+SAVED[id].atIst+' · $'+Number(SAVED[id].costUsd||0).toFixed(4); });
     // Keep this video's current fields (your edits too) without regenerating.
     async function saveDraft(id){
       if(busy[id]) return;
@@ -644,6 +705,7 @@ function readyAiPickerPage({ funnel, videos, prefills, drafts = {}, ...src }) {
       if(!order.length){ msg('Tick at least one video.'); return; }
       if(!pickedAccounts().length){ msg('Tick at least one account under "Post to".'); return; }
       if(order.some(id=>busy[id])){ msg('Wait for the copy to finish generating.'); return; }
+      if(order.some(id=>cleaning[id])){ msg('Wait for ✂ Clean to finish.'); return; }
       const nogen=order.filter(id=>!done[id]);
       if(nogen.length){ msg('Press ✨ Generate transcript + Thumbnail first for '+nogen.map(id=>$('ord',id).textContent).join(', ')+'.'); return; }
       const missing=order.filter(id=>!$('ti',id).value.trim()||!$('de',id).value.trim()||!$('ig',id).value.trim()||!$('sh',id).value.trim());
