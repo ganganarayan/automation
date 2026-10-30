@@ -15,16 +15,15 @@
  *     end date (a date, or "forever") with inline auto-save — no save button.
  *   - Each user has billing history and last login. Users manage their own
  *     password in their own login (not here).
- *   - Interim page access is a UI-settable key (accessService); real login later.
+ *   - Pages need an email + password sign-in (modules/auth.js, accessService).
  *
- * Routes (guarded by the access key when set):
+ * Routes (guarded by sign-in):
  *   GET  /api/v1/admin/settings              the control panel
  *   POST /api/v1/admin/settings/save         apply one app's config form
  *   POST /api/v1/admin/tenants               create a tenant
  *   POST /api/v1/admin/users/role            change a user's role (JSON, auto-save)
  *   POST /api/v1/admin/users/plan            change a user's plan end (JSON, auto-save)
  *   GET  /api/v1/admin/users/billing         a user's billing history (JSON)
- *   POST /api/v1/admin/access/key            set/clear the access key
  */
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
 import { navHtml, NAV_CSS } from '../utils/adminNav.js';
@@ -42,51 +41,29 @@ import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { buildProviders } from '../services/providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { listElevenLabsVoices } from '../providers/ttsProvider.js';
-import { keyOk, requiredKey, verifyKey, setAccessCookie, clearAccessCookie, ACCESS_KEY_STORE } from '../services/accessService.js';
+import { keyOk, gateState, currentSession } from '../services/accessService.js';
 
 export function register(ctx) {
   const { router, log } = ctx;
 
-  // Sign in: exchange the key for an httpOnly cookie, then land on a clean URL.
-  router.post('/admin/login', async (req, res, next) => {
-    try {
-      const nextTarget = req.body?.next === 'dashboard' ? '/api/v1/dashboard' : '/api/v1/admin/settings';
-      if (await verifyKey(req.body?.key)) {
-        await setAccessCookie(res);
-        return res.redirect(nextTarget);
-      }
-      return res.status(401).type('html').send(gatePage(nextTarget, 'Wrong key'));
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  router.post('/admin/logout', (req, res) => {
-    clearAccessCookie(res);
-    res.redirect('/api/v1/admin/settings');
-  });
-
   router.get('/admin/settings', async (req, res, next) => {
     try {
-      if (!(await keyOk(req))) return res.status(401).type('html').send(gatePage('/api/v1/admin/settings'));
-      // Migrate any ?key= visit onto the cookie and strip it from the URL.
-      if (req.query.key) {
-        await setAccessCookie(res);
-        const q = new URLSearchParams();
-        if (req.query.tenant) q.set('tenant', String(req.query.tenant));
-        return res.redirect(`/api/v1/admin/settings${q.toString() ? `?${q}` : ''}`);
+      const state = await gateState(req);
+      if (state !== 'ok') {
+        const back = encodeURIComponent(req.originalUrl || '/api/v1/admin/settings');
+        return res.redirect(state === 'change' ? `/api/v1/admin/password?next=${back}` : `/api/v1/admin/login?next=${back}`);
       }
       const tenantId = (req.query.tenant || 'default').toString();
-      const [configMap, userList, funnelList, hasKey] = await Promise.all([
+      const [configMap, userList, funnelList, session] = await Promise.all([
         configService.load(tenantId).catch(() => ({})),
         users.list().catch(() => []),
         funnels.listByTenant(tenantId).catch(() => []),
-        requiredKey().then((k) => !!k),
+        currentSession(req),
       ]);
       const funnelConfigs = {};
       for (const f of funnelList) funnelConfigs[f.id] = await funnels.getConfig(f.id).catch(() => ({}));
       res.type('html').send(
-        page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey, key: '', saved: req.query.saved }),
+        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', key: '', saved: req.query.saved }),
       );
     } catch (err) {
       next(err);
@@ -242,7 +219,7 @@ export function register(ctx) {
   // --- Video setup wizard (step-by-step; replaces the flat funnel form) ---
   router.get('/admin/funnels/:id/setup', async (req, res, next) => {
     try {
-      if (!(await keyOk(req))) return res.status(401).type('html').send(gatePage('/api/v1/admin/settings'));
+      if (!(await keyOk(req))) return res.redirect(`/api/v1/admin/login?next=${encodeURIComponent(req.originalUrl)}`);
       const id = Number(req.params.id);
       const funnel = await funnels.get(id);
       if (!funnel) return res.redirect('/api/v1/admin/settings#funnels');
@@ -356,29 +333,12 @@ export function register(ctx) {
     }
   });
 
-  router.post('/admin/access/key', async (req, res, next) => {
-    try {
-      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
-      const newKey = (req.body.new_key || '').toString();
-      if (newKey.trim() === '') {
-        await tenantConfig.del(ACCESS_KEY_STORE.tenant, ACCESS_KEY_STORE.key);
-        clearAccessCookie(res);
-      } else {
-        await tenantConfig.set(ACCESS_KEY_STORE.tenant, ACCESS_KEY_STORE.key, newKey);
-        await setAccessCookie(res); // refresh cookie to the new key (never in the URL)
-      }
-      res.redirect(`/api/v1/admin/settings?${new URLSearchParams({ tenant: req.body.tenant || 'default' })}#users`);
-    } catch (err) {
-      next(err);
-    }
-  });
-
   log.info('config UI routes registered');
 }
 
 // ---- rendering -------------------------------------------------------------
 
-function page({ tenantId, configMap, userList, funnelList, funnelConfigs, hasKey, key, saved }) {
+function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, key, saved }) {
   const menu = navHtml({ key, tabs: true });
 
   const appSections = APPS
@@ -467,7 +427,7 @@ ${NAV_CSS}
     ${saved ? `<div class="flash">Saved <b>${esc(saved)}</b>.</div>` : ''}
     <div id="flash-error" class="flash err" style="display:none"></div>
 
-    ${usersPanel({ userList, hasKey, tenantId, key })}
+    ${usersPanel({ userList, me })}
     ${funnelsPanel({ funnelList, funnelConfigs, tenantId, key })}
     ${appSections}
 
@@ -584,7 +544,7 @@ ${NAV_CSS}
 </script>`;
 }
 
-function usersPanel({ userList, hasKey, tenantId, key }) {
+function usersPanel({ userList, me }) {
   const rows = (userList || [])
     .map((u, i) => {
       const isSuper = u.email === users.SUPER_ADMIN_EMAIL;
@@ -612,25 +572,19 @@ function usersPanel({ userList, hasKey, tenantId, key }) {
     <h2>Users</h2>
     <p class="blurb">Accounts are created when people sign up from the landing page. Change a role or plan end date and it saves instantly — no save button. Users manage their own password in their own login.</p>
 
-    ${hasKey
-      ? '<div class="hint">🔒 An access key protects these pages.</div>'
-      : '<div class="warn">⚠️ No access key set — these pages (which edit config/secrets and show data) are open on the public URL. Set an access key below when ready. Full sign-in is a later phase.</div>'}
-
     <fieldset><legend>Users</legend>
       <table><thead><tr><th>Email</th><th>Role</th><th>Plan ends</th><th>Last login</th><th></th></tr></thead>
         <tbody>${rows || '<tr><td colspan="5" class="hint">No users yet — they appear here after signing up.</td></tr>'}</tbody></table>
       <p class="hint">The super admin (${esc(users.SUPER_ADMIN_EMAIL)}) is protected and cannot be demoted or removed.</p>
     </fieldset>
 
-    <fieldset><legend>Access key (interim page guard)</legend>
-      <form method="post" action="access/key" class="row">
-        <input type="hidden" name="key" value="${esc(key)}">
-        <input type="hidden" name="tenant" value="${esc(tenantId)}">
-        <div><label style="margin:0 0 .2rem">Set access key (blank = open / clear)</label>
-          <input name="new_key" type="password" placeholder="${hasKey ? '•••• (set)' : 'no key set'}" size="24" autocomplete="off"></div>
-        <button class="act" type="submit">Save key</button>
-      </form>
-      <p class="hint">Stored in the database (not an env var). This is the stopgap until password login is built.</p>
+    <fieldset><legend>Sign-in</legend>
+      <p class="hint" style="margin:0">Signed in as <b>${esc(me || 'machine key')}</b>. Everyone signs in with email + password.
+        Locked out? The super admin can set a new password at <a href="/api/v1/admin/reset">/api/v1/admin/reset</a> with the reset code kept on the server.</p>
+      <div class="row" style="margin-top:.6rem">
+        <a class="act" href="/api/v1/admin/password?next=${encodeURIComponent('/api/v1/admin/settings#users')}">Change my password</a>
+        <form method="post" action="/api/v1/admin/logout" style="margin:0"><button class="act" type="submit">Sign out</button></form>
+      </div>
     </fieldset>
   </section>`;
 }
@@ -1077,23 +1031,6 @@ function secretJsonSummary(raw) {
   return `<div class="field"><label>${esc(field.label)}</label>
     <input type="text" name="set[${esc(field.key)}]" value="${esc(has ? current : '')}"
       placeholder="${field.placeholder ? esc(field.placeholder) : ''}"></div>`;
-}
-
-function gatePage(next = '/api/v1/admin/settings', error = '') {
-  const nextName = next.includes('dashboard') ? 'dashboard' : 'settings';
-  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>automation — sign in</title>
-<style>body{font-family:system-ui;background:#0b0b12;color:#e8e8ef;display:grid;place-items:center;height:100vh;margin:0}
-form{background:#15151f;border:1px solid #24243a;padding:1.5rem;border-radius:12px;min-width:280px}
-input{width:100%;padding:.6rem;margin:.6rem 0;border-radius:8px;border:1px solid #333;background:#0b0b12;color:#fff}
-button{width:100%;padding:.6rem;border:0;border-radius:8px;background:#2a2a44;color:#fff;cursor:pointer}
-.err{color:#ff9a9a;font-size:.85rem;margin:.2rem 0}</style>
-<form method="post" action="/api/v1/admin/login">
-  <h1>⚙️ automation</h1>
-  ${error ? `<div class="err">${esc(error)}</div>` : ''}
-  <input type="hidden" name="next" value="${esc(nextName)}">
-  <input name="key" type="password" placeholder="Access key" autofocus autocomplete="current-password">
-  <button type="submit">Sign in</button></form>`;
 }
 
 // Monotonic id source for widgets that need unique DOM ids within a page.

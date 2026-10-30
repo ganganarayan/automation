@@ -59,7 +59,8 @@ export function navHtml({ current = '', key = '', tabs = false } = {}) {
     <div class="nvgroup">${work}</div>
     <div class="nvlabel">Setup</div>
     <div class="nvgroup">${setup}</div>
-    <a class="nv nvdash" href="${esc(withKey('/api/v1/dashboard', key))}"><span class="nvi">←</span>Dashboard</a>`;
+    <a class="nv nvdash" href="${esc(withKey('/api/v1/dashboard', key))}"><span class="nvi">←</span>Dashboard</a>
+    <form method="post" action="/api/v1/admin/logout" style="margin:0"><button type="submit" class="nv"><span class="nvi">⎋</span>Sign out</button></form>`;
 }
 
 /** Styling for the menu items themselves (every admin page includes this). */

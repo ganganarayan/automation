@@ -34,10 +34,14 @@ import * as instanceReview from './modules/instanceReview.js';
 import * as imageFactory from './modules/imageFactory.js';
 import * as dashboard from './modules/dashboard.js';
 import * as configUi from './modules/configUi.js';
+import * as authModule from './modules/auth.js';
 import * as admin from './modules/admin.js';
 
 export function createApp() {
   const app = express();
+  // Railway sits one proxy hop in front; req.ip then reads the real client
+  // (used to rate-limit the reset form).
+  app.set('trust proxy', 1);
   app.disable('x-powered-by');
 
   app.use(requestId);
@@ -96,6 +100,7 @@ export function createApp() {
     .add({ name: 'instance-review', enabled: true, register: instanceReview.register })
     .add({ name: 'image-factory', enabled: settings.modules.imageFactory, register: imageFactory.register })
     .add({ name: 'dashboard', enabled: settings.modules.dashboard, register: dashboard.register })
+    .add({ name: 'auth', enabled: settings.modules.admin, register: authModule.register })
     .add({ name: 'config-ui', enabled: settings.modules.admin, register: configUi.register })
     .add({ name: 'admin', enabled: settings.modules.admin, register: admin.register });
 

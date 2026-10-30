@@ -47,7 +47,7 @@ export function register(ctx) {
   const { router, log } = ctx;
   const guardHtml = async (req, res) => {
     if (await keyOk(req)) return true;
-    res.redirect('/api/v1/admin/settings');
+    res.redirect(`/api/v1/admin/login?next=${encodeURIComponent(req.originalUrl)}`);
     return false;
   };
 
