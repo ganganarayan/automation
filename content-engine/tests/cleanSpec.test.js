@@ -20,3 +20,17 @@ describe('cleanSpec', () => {
     expect(a[a.indexOf('-vf') + 1]).toBe('setsar=1');
   });
 });
+
+import { progressSeconds, progressPct } from '../src/utils/cleanSpec.js';
+
+describe('clean progress', () => {
+  it('reads the last out_time from an ffmpeg -progress chunk', () => {
+    expect(progressSeconds('frame=10\nout_time_us=1500000\nout_time_ms=2500000\nprogress=continue\n')).toBe(2.5);
+    expect(progressSeconds('progress=continue')).toBe(-1);
+  });
+  it('turns seconds into a running percent', () => {
+    expect(progressPct(30, 60)).toBe(50);
+    expect(progressPct(61, 60)).toBe(99);
+    expect(progressPct(10, 0)).toBe(0);
+  });
+});

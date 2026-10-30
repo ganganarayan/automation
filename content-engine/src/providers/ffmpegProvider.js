@@ -15,14 +15,14 @@
  * Dependencies: node:child_process / fs / os / path, utils/stageSpec,
  *               utils/videoSpec (duration probe), core/errors.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ffmpegConcatArgs } from '../utils/stageSpec.js';
 import { extractAudioArgs } from '../utils/aiCopySpec.js';
-import { cleanVideoArgs } from '../utils/cleanSpec.js';
+import { cleanVideoArgs, progressSeconds } from '../utils/cleanSpec.js';
 import { probeMp4DurationSeconds } from '../utils/videoSpec.js';
 import { ExternalAPIError } from '../core/errors.js';
 
@@ -121,8 +121,29 @@ export function createFfmpegProvider(cfg = {}, log) {
      * Zoom from the top + trim the end (see utils/cleanSpec) into `outPath`.
      * Reads the source straight from its URL — the video is never held in memory.
      */
-    async cleanVideo({ url, outPath, zoomPct, keepSec }) {
-      await run(bin, cleanVideoArgs({ input: url, output: outPath, zoomPct, keepSec }), { maxBuffer: 16 * 1024 * 1024, timeout: 30 * 60 * 1000 });
+    /**
+     * Re-encode a video (zoom from the top, cut the end). ffmpeg streams the
+     * URL, so download and encode run together; `onProgress(seconds)` gets the
+     * output time written so far, from ffmpeg's own -progress report.
+     */
+    cleanVideo({ url, outPath, zoomPct, keepSec, onProgress = null }) {
+      const args = ['-progress', 'pipe:1', '-nostats', ...cleanVideoArgs({ input: url, output: outPath, zoomPct, keepSec })];
+      return new Promise((resolve, reject) => {
+        const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+        let errTail = '';
+        const timer = setTimeout(() => child.kill('SIGKILL'), 30 * 60 * 1000);
+        child.stdout.on('data', (d) => {
+          const sec = progressSeconds(d);
+          if (sec >= 0 && onProgress) onProgress(sec);
+        });
+        child.stderr.on('data', (d) => { errTail = (errTail + d).slice(-600); });
+        child.on('error', (err) => { clearTimeout(timer); reject(err); });
+        child.on('close', (code, signal) => {
+          clearTimeout(timer);
+          if (code === 0) resolve();
+          else reject(new ExternalAPIError(`ffmpeg clean failed (${signal || code}): ${errTail.slice(-300)}`));
+        });
+      });
     },
 
     /**

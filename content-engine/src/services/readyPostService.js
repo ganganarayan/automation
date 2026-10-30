@@ -42,7 +42,7 @@ import sharp from 'sharp';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizeCleanOpts } from '../utils/cleanSpec.js';
+import { normalizeCleanOpts, progressPct } from '../utils/cleanSpec.js';
 import { TRANSCRIPT_REVIEW, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
 import { formatIst } from '../utils/time.js';
 import { driveEmbedUrl } from '../utils/reviewSpec.js';
@@ -411,7 +411,8 @@ function videoArt(steps, driveId, durationSec = 0) {
   return { ...prev, driveId, ...(durationSec ? { durationSec } : {}) };
 }
 
-// ✂ Clean jobs by Drive id: { state: running | done | failed, clean?, error? }.
+// ✂ Clean jobs by Drive id: { state: running | done | failed, phase, pct, clean?, error? }
+// — phase: starting → encoding (download + encode, with pct) → uploading.
 // In memory only — a restart loses a running job (just press Clean again);
 // a finished one is saved on the video's draft instance.
 const cleanJobs = new Map();
@@ -430,9 +431,10 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, name 
   const job = cleanJobs.get(id);
   if (job && job.state === 'running') return job;
   const opts = normalizeCleanOpts({ zoomPct, trimEndSec });
-  const running = { state: 'running', startedAt: Date.now(), ...opts };
+  const running = { state: 'running', startedAt: Date.now(), phase: 'starting', pct: 0, ...opts };
   cleanJobs.set(id, running);
-  runClean({ funnel, providers, driveId: id, opts, name, source })
+  const onPhase = (patch) => { const j = cleanJobs.get(id); if (j && j.state === 'running') Object.assign(j, patch); };
+  runClean({ funnel, providers, driveId: id, opts, name, source, onPhase })
     .then((clean) => cleanJobs.set(id, { state: 'done', clean }))
     .catch((err) => {
       log.error({ err: err.message, driveId: id }, 'video clean failed');
@@ -441,7 +443,7 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, name 
   return running;
 }
 
-async function runClean({ funnel, providers, driveId, opts, name, source }) {
+async function runClean({ funnel, providers, driveId, opts, name, source, onPhase = () => {} }) {
   const total = (await videoDurations([driveId]))[driveId] || 0;
   if (opts.trimEndSec && !total) throw new Error("couldn't read the video's length to trim its end");
   const keepSec = opts.trimEndSec ? Math.max(1, total - opts.trimEndSec) : 0;
@@ -449,7 +451,13 @@ async function runClean({ funnel, providers, driveId, opts, name, source }) {
   try {
     const outPath = join(dir, 'clean.mp4');
     const t0 = Date.now();
-    await createFfmpegProvider({}, log).cleanVideo({ url: publicDlUrl(driveId), outPath, zoomPct: opts.zoomPct, keepSec });
+    const outSec = keepSec || total;
+    onPhase({ phase: 'encoding', pct: 0, totalSec: outSec });
+    await createFfmpegProvider({}, log).cleanVideo({
+      url: publicDlUrl(driveId), outPath, zoomPct: opts.zoomPct, keepSec,
+      onProgress: (sec) => onPhase({ pct: progressPct(sec, outSec), doneSec: Math.round(sec) }),
+    });
+    onPhase({ phase: 'uploading', pct: 100 });
     const url = await createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log).uploadFile(outPath, 'video/mp4');
     const clean = { url, ...opts, durationSec: Math.round(keepSec || total), at: new Date().toISOString() };
     await saveClean(funnel, driveId, clean, { name, source });

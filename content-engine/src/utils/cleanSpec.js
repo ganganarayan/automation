@@ -42,4 +42,20 @@ export function cleanVideoArgs({ input, output, zoomPct = 10, keepSec = 0 }) {
   ];
 }
 
-export default { normalizeCleanOpts, cleanVideoArgs };
+/**
+ * Seconds of output written so far, from a chunk of `ffmpeg -progress` output
+ * (the last out_time_us / out_time_ms in it); -1 when the chunk has none.
+ * Both keys are microseconds (out_time_ms is misnamed by ffmpeg).
+ */
+export function progressSeconds(chunk) {
+  const m = [...String(chunk || '').matchAll(/out_time_(?:us|ms)=(\d+)/g)];
+  return m.length ? Number(m[m.length - 1][1]) / 1e6 : -1;
+}
+
+/** Whole percent of `totalSec` done (0–99 while running; 0 when unknown). */
+export function progressPct(doneSec, totalSec) {
+  if (!(totalSec > 0) || !(doneSec > 0)) return 0;
+  return Math.min(99, Math.floor((doneSec / totalSec) * 100));
+}
+
+export default { normalizeCleanOpts, cleanVideoArgs, progressSeconds, progressPct };

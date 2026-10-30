@@ -622,6 +622,7 @@ function sourcesBar(funnel, sources = [], folder = '') {
 }
 
 function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single = null, source = {}, ...src }) {
+  const cta = String((src.resolved || {}).ctaLink || '').trim();
   const cards = (videos || [])
     .map((v, i) => {
       const d = drafts[v.id] || {};
@@ -635,11 +636,12 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         <div class="chips" id="st-${id}">${stageChips(v.id, d.stage || 'prepare')}</div>
         <div class="aicol">
           <div class="panel"><h4>1 · Prepare <span class="hint">optional — only videos with a watermark / outro</span></h4>
-            <div class="nowrow cleanrow"><b>✂ Clean:</b>
+            <div class="nowrow cleanrow"><span>Remove watermark + outro —</span>
               <label class="nowrow">zoom % <input id="zm-${id}" class="cleanzm" type="number" min="0" max="30" step="0.5" style="width:4.5rem"></label>
               <label class="nowrow">cut last s <input id="tr-${id}" class="cleantr" type="number" min="0" max="60" step="0.5" style="width:4.5rem"></label>
               <button class="act" id="cl-${id}" onclick="cleanVid('${id}')">✂ Clean video</button>
             </div>
+            <div class="pbar" id="pb-${id}"><i></i></div>
             <div class="hint" id="cs-${id}">Zooms in keeping the top fixed so the bottom-right watermark leaves the frame, and cuts the outro. Posting then uses the cleaned video.</div>
           </div>
           <div class="panel"><h4>2 · Transcript <span class="hint">check the names, then approve</span></h4>
@@ -659,7 +661,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         <div class="aicol">
           <div class="panel"><h4>4 · Review &amp; schedule</h4>
             <label class="fl">YouTube title<input id="ti-${id}" maxlength="100"></label>
-            <label class="fl">Description — YouTube · LinkedIn · Facebook (link appended)<textarea id="de-${id}" rows="7"></textarea></label>
+            <label class="fl">Description — YouTube · LinkedIn · Facebook ${cta ? `(ends with the funnel's CTA link)` : `<span class="warnt">🟡 this funnel has no CTA link — set it in Funnels → setup</span>`}<textarea id="de-${id}" rows="7"></textarea></label>
             <label class="fl">Instagram caption<textarea id="ig-${id}" rows="6"></textarea></label>
             <label class="fl">Short — Threads · X (link appended) <span class="hint" id="sc-${id}"></span><textarea id="sh-${id}" rows="2" oninput="cnt('${id}')"></textarea></label>
             <div class="nowrow"><b>When:</b>
@@ -714,6 +716,9 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     const FUNNEL_ID = ${JSON.stringify(String(funnel.id))};
     const SOURCE = ${JSON.stringify({ type: source.type || 'drive_folder', id: source.id || null })};
     const SINGLE = ${single ? 'true' : 'false'};
+    const CTA = ${JSON.stringify(cta).replace(/</g, '\\u003c')};
+    // What the box shows is what posts: the CTA link ends the description (the post adds it only when missing).
+    const withCta = t=>{ t=String(t||'').trim(); return !CTA || t.indexOf(CTA)>=0 ? t : (t ? t+'\\n\\n'+CTA : CTA); };
     const STAGE_LABEL = ${JSON.stringify(Object.fromEntries(READY_STAGES.map((s) => [s.key, s.label])))};
     const order = [], costs = {}, busy = {}, done = {}, thumbs = {}, approved = {};
     (function(){
@@ -776,7 +781,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     }
     // Show one generation (fresh, or a saved draft restored after a reload).
     function applyGen(id, j){
-      $('ti',id).value=j.copy.title||''; $('de',id).value=j.copy.description||''; $('ig',id).value=j.copy.igCaption||''; $('sh',id).value=j.copy.short||''; cnt(id);
+      $('ti',id).value=j.copy.title||''; $('de',id).value=withCta(j.copy.description); $('ig',id).value=j.copy.igCaption||''; $('sh',id).value=j.copy.short||''; cnt(id);
       $('gb',id).textContent='✨ Regenerate copy + thumbnails';
       thumbs[id]=j.thumbs||{};
       $('th',id).innerHTML=(j.sizes||[]).map(z=>'<a class="'+(z.size==='landscape'?'wide':'tall')+'" href="'+z.url+'" target="_blank" rel="noopener" title="Open full size"><img src="'+z.url+'"><span>'+z.label+' · '+z.platforms.join(', ')+'</span></a>').join('')
@@ -790,15 +795,25 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     try{ CO = Object.assign(CO, JSON.parse(localStorage.getItem('cleanOpts')||'{}')); }catch(e){}
     document.querySelectorAll('.cleanzm').forEach(e=>{ e.value=CO.zoomPct; }); document.querySelectorAll('.cleantr').forEach(e=>{ e.value=CO.trimEndSec; });
     const mmss = n=>Math.floor(n/60)+':'+String(Math.round(n)%60).padStart(2,'0');
+    function bar(id, pct, on){ const b=$('pb',id); if(!b) return; b.classList.toggle('on', !!on); b.firstElementChild.style.width=Math.max(0,Math.min(100,pct||0))+'%'; b.classList.toggle('busy', on && !(pct>0)); }
     function showClean(id, c){
+      bar(id, 0, false);
       $('cs',id).innerHTML='🟢 Cleaned (zoom '+c.zoomPct+'%, cut last '+c.trimEndSec+' s → '+mmss(c.durationSec||0)+') · <a href="'+c.url+'" target="_blank" rel="noopener">▶ Preview cleaned video</a> · posting uses this copy';
       if($('zm',id)) $('zm',id).value=c.zoomPct; if($('tr',id)) $('tr',id).value=c.trimEndSec;
     }
     async function pollClean(id){
       try{
         const j=await post('clean-status', { driveId:id });
-        if(j.ok && j.state==='running'){ $('cs',id).textContent='✂ Cleaning… '+Math.round((Date.now()-j.startedAt)/1000)+' s (a few minutes for a long video — you can work on other videos meanwhile)'; return setTimeout(()=>pollClean(id), 5000); }
-        cleaning[id]=false; $('cl',id).disabled=false;
+        if(j.ok && j.state==='running'){
+          const secs=Math.round((Date.now()-j.startedAt)/1000);
+          const what = j.phase==='uploading' ? '⬆ Uploading the cleaned video to Post for Me…'
+            : j.phase==='encoding' ? '✂ Downloading + re-encoding… '+(j.pct||0)+'%'+(j.totalSec?(' ('+mmss(j.doneSec||0)+' of '+mmss(j.totalSec)+')'):'')
+            : '✂ Starting… reading the video length';
+          bar(id, j.phase==='uploading'?100:(j.pct||0), true);
+          $('cs',id).textContent=what+' · '+secs+' s — you can work on other videos meanwhile';
+          return setTimeout(()=>pollClean(id), 3000);
+        }
+        cleaning[id]=false; $('cl',id).disabled=false; bar(id, 0, false);
         if(j.ok && j.state==='done') showClean(id, j.clean);
         else $('cs',id).textContent='⚠ Clean failed: '+(j.error||j.state||'unknown');
       }catch(e){ setTimeout(()=>pollClean(id), 8000); }
@@ -807,12 +822,12 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if(cleaning[id]) return;
       const zoomPct=Number($('zm',id).value)||0, trimEndSec=Number($('tr',id).value)||0;
       try{ localStorage.setItem('cleanOpts', JSON.stringify({ zoomPct, trimEndSec })); }catch(e){}
-      cleaning[id]=true; $('cl',id).disabled=true; $('cs',id).textContent='✂ Starting…';
+      cleaning[id]=true; $('cl',id).disabled=true; bar(id, 0, true); $('cs',id).textContent='✂ Starting…';
       try{
         const j=await post('clean', { driveId:id, zoomPct, trimEndSec, name:$('nm',id).value, source:SOURCE });
         if(!j.ok) throw new Error(j.error||'failed');
         pollClean(id);
-      }catch(e){ cleaning[id]=false; $('cl',id).disabled=false; $('cs',id).textContent='⚠ '+e.message; }
+      }catch(e){ cleaning[id]=false; $('cl',id).disabled=false; bar(id, 0, false); $('cs',id).textContent='⚠ '+e.message; }
     }
     Object.keys(SAVED).forEach(id=>{
       if(!$('cb',id)) return;
@@ -1113,6 +1128,11 @@ ${NAV_CSS}
  .nowrow input{width:auto;margin:0}
  .fl textarea,.fl input{font:inherit;font-size:.82rem;background:#0b0b12;color:#e8e8ef;border:1px solid #24243a;border-radius:6px;padding:.4rem}
  .bar{position:sticky;bottom:0;background:#0b0b12;border-top:1px solid #24243a;padding:.9rem 0;margin-top:1rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
+ .pbar{display:none;height:6px;border-radius:3px;background:#24243a;overflow:hidden;margin:.4rem 0 .2rem}
+ .pbar.on{display:block}.pbar i{display:block;height:100%;width:0;background:#2ea043;transition:width .6s}
+ .pbar.busy i{width:30%!important;background:#2d6cdf;animation:pb 1.2s ease-in-out infinite}
+ @keyframes pb{0%{margin-left:-30%}100%{margin-left:100%}}
+ .warnt{color:#f0d68f}
  .panel{border:1px solid #24243a;border-radius:8px;padding:.5rem .7rem;margin-bottom:.6rem;background:#15151f}
  .panel h4{margin:0 0 .3rem;font-size:.86rem;color:#e8e8ef}
  .chips{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:.35rem}
