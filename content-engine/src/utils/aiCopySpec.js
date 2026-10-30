@@ -102,6 +102,13 @@ export function normalizeCopy(raw) {
 }
 
 /** Append a link on its own line when it's set and not already in the text. */
+/** Drop bare link lines at the end of a text (an old CTA baked into the copy). */
+export function stripTrailingLink(text) {
+  const lines = String(text || '').trimEnd().split('\n');
+  while (lines.length && /^\s*https?:\/\/\S+\s*$/.test(lines[lines.length - 1])) lines.pop();
+  return lines.join('\n').trimEnd();
+}
+
 export function withLink(text, link) {
   const body = String(text || '').trim();
   const l = String(link || '').trim();
@@ -144,7 +151,8 @@ export function platformKey(label) {
  */
 export function platformConfigsFor(copy, { accountIds = [], accountMap = {}, ctaLink = '', videoUrl = '', thumbs = {} } = {}) {
   const c = normalizeCopy(copy);
-  const longText = withLink(c.description, ctaLink);
+  // The CTA link is added here, once: the post's own link, else the funnel's.
+  const longText = withLink(stripTrailingLink(c.description), ctaLink);
   const all = {
     youtube: { title: c.title, caption: longText },
     linkedin: { caption: longText },
@@ -167,5 +175,5 @@ export function platformConfigsFor(copy, { accountIds = [], accountMap = {}, cta
 
 export default {
   LIMITS, extractAudioArgs, copySystemPrompt, copyUserPrompt, clip, normalizeCopy,
-  withLink, xPost, threadsPost, platformKey, platformConfigsFor, noDashes,
+  withLink, xPost, threadsPost, platformKey, platformConfigsFor, noDashes, stripTrailingLink,
 };

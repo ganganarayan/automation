@@ -549,7 +549,7 @@ export async function cleanStatus({ funnelId, driveId }) {
  * transcript and thumbnails as JSON on the steps (all generations kept in
  * script.artifacts.generations), and every generation's real cost added.
  */
-async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, edit = false }) {
+async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, edit = false, ctaLink }) {
   const { inst, steps: base, existing } = await ensureInstance({ funnel, driveId, title: copy.title || 'Ready video' });
   let steps = base;
   const at = new Date().toISOString();
@@ -558,7 +558,7 @@ async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, cos
   // added to the history.
   const generations = edit ? prev : [...prev, { at, copy, thumbs, sizes, thumbError }].slice(-20);
   // The transcript belongs to its own stage (transcribe / approve) — never touched here.
-  steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, generations } });
+  steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, generations, ...(ctaLink !== undefined ? { ctaLink } : {}) } });
   if (sizes.length || !edit) steps = patchStep(steps, 'images', { status: sizes.length ? 'done' : 'skipped', artifacts: { thumbs, sizes } });
   const durationSec = durationCache.get(driveId) || 0;
   steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
@@ -577,7 +577,7 @@ async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, cos
  * thumbnails) without regenerating. The transcript is saved by its own stage. Thumbnails sent only as
  * platform -> url are grouped back into their sizes.
  */
-export async function saveDraftEdit({ funnelId, driveId, copy, thumbs = {}, sizes = [], costs = [] }) {
+export async function saveDraftEdit({ funnelId, driveId, copy, thumbs = {}, sizes = [], costs = [], ctaLink = '' }) {
   if (!driveId) throw new Error('driveId required');
   const { funnel } = await loadFunnel(funnelId);
   const clean = normalizeCopy(copy);
@@ -593,7 +593,8 @@ export async function saveDraftEdit({ funnelId, driveId, copy, thumbs = {}, size
   }
   grouped = grouped.map((z) => ({ size: z.size, label: THUMB_SIZES[z.size].label, url: String(z.url), platforms: (z.platforms || []).filter((k) => PLATFORM_SIZE[k]) }));
   const okCosts = (Array.isArray(costs) ? costs : []).filter((c) => c && Number.isFinite(Number(c.costUsd))).slice(0, 8);
-  const instanceId = await saveDraft({ funnel, driveId: String(driveId), copy: clean, thumbs: urls, sizes: grouped, thumbError: '', costs: okCosts, edit: true });
+  const cta = /^https?:\/\/\S+$/.test(String(ctaLink || '').trim()) ? String(ctaLink).trim() : '';
+  const instanceId = await saveDraft({ funnel, driveId: String(driveId), ctaLink: cta, copy: clean, thumbs: urls, sizes: grouped, thumbError: '', costs: okCosts, edit: true });
   return { instanceId };
 }
 
@@ -619,21 +620,21 @@ function draftView(row) {
   if (!art('script').copy && !clean && !hasTranscript) return null;
   const t = art('transcript');
   return {
-    instanceId: row.id, stage: readyStage(row, steps), clean, copy: art('script').copy || null,
+    instanceId: row.id, stage: readyStage(row, steps), clean, copy: art('script').copy || null, ctaLink: art('script').ctaLink || '',
     transcript: t.text || '', headline: t.headline || '', subhead: t.subhead || '', imagePrompt: t.imagePrompt || '', hasTranscript, srt: !!t.srt, approved: !!t.approvedAt, approvedIst: t.approvedAt ? formatIst(t.approvedAt) : '',
     thumbs: art('images').thumbs || {}, sizes: art('images').sizes || [], costUsd, atIst: formatIst(row.updated_at),
   };
 }
 
 /** Record one direct post as a posted instance (stages skipped; AI-copy cost if any). */
-async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, ref, copy = null, costs = [], durationSec = 0, channels = [], request = null }) {
+async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, ref, copy = null, costs = [], durationSec = 0, channels = [], request = null, ctaLink = '' }) {
   const publishArt = { posts: ref ? [ref] : [], caption, channels, ...(request ? { request } : {}) };
   const sched = { postRefs: ref ? [ref] : [], scheduledFor: scheduledIso ? new Date(scheduledIso) : null, postNow: !scheduledIso };
   const draft = copy ? (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [driveId]).catch(() => ({})))[driveId] : null;
   if (draft) {
     // The generation (and its cost) is already on the draft — finish it.
     let steps = instanceService.parseSteps(draft);
-    steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy } });
+    steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, ctaLink } });
     steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
     steps = patchStep(steps, 'publish', { status: 'done', artifacts: publishArt });
     await instanceRepo.saveSteps(draft.id, steps, sumInstanceCost(steps));
@@ -711,7 +712,8 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
     // AI-copy lane: each platform gets its own copy for this video.
     const cleaned = (saved[sel.driveId] || {}).clean || null;
     const videoUrl = cleaned ? cleaned.url : publicDlUrl(sel.driveId);
-    const ai = sel.copy ? platformConfigsFor(sel.copy, { accountIds: accounts, accountMap, ctaLink: resolved.ctaLink, videoUrl, thumbs: sel.thumbs }) : null;
+    // CTA: this post's own link overrides the funnel's.
+    const ai = sel.copy ? platformConfigsFor(sel.copy, { accountIds: accounts, accountMap, ctaLink: sel.ctaLink || resolved.ctaLink, videoUrl, thumbs: sel.thumbs }) : null;
     const caption = ai ? ai.caption : (sel.caption.trim() || captionFor(cfg, resolved));
     try {
       await drive.shareAnyone(sel.driveId);
@@ -733,7 +735,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
       }
       const instanceId = await recordPostedInstance({
         funnel, driveId: sel.driveId, caption, scheduledIso, ref,
-        copy: sel.copy ? normalizeCopy(sel.copy) : null, costs: sel.costs, request,
+        copy: sel.copy ? normalizeCopy(sel.copy) : null, costs: sel.costs, request, ctaLink: sel.ctaLink,
         channels: accounts.map((id) => ({ id, platform: (accountMap[id] || {}).platform || '', name: (accountMap[id] || {}).account_name || id, state: 'waiting' })),
         durationSec: (cleaned && cleaned.durationSec) || (await videoDurations([sel.driveId]))[sel.driveId] || 0,
       });

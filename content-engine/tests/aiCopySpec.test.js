@@ -95,3 +95,14 @@ describe('platformConfigsFor', () => {
     expect(Object.keys(pc)).toEqual(expect.arrayContaining(['youtube', 'linkedin', 'facebook', 'instagram', 'threads', 'x']));
   });
 });
+
+import { stripTrailingLink, platformConfigsFor as pcf } from '../src/utils/aiCopySpec.js';
+
+describe('CTA: funnel default, post override, never twice', () => {
+  it('drops an old baked-in link before adding the right one', () => {
+    expect(stripTrailingLink('Body text\n\nhttps://gita.example/a')).toBe('Body text');
+    expect(stripTrailingLink('See https://x.y inside')).toBe('See https://x.y inside');
+    const out = pcf({ title: 't', description: 'Body\n\nhttps://gita.example/a', igCaption: 'i', short: 's' }, { ctaLink: 'https://corp.example/b' });
+    expect(out.caption).toBe('Body\n\nhttps://corp.example/b');
+  });
+});

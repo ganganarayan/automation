@@ -173,9 +173,9 @@ export function register(ctx) {
   router.post('/admin/instances/ready-ai/save', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      const { funnelId, driveId, copy, thumbs, sizes, costs } = req.body || {};
+      const { funnelId, driveId, copy, thumbs, sizes, costs, ctaLink } = req.body || {};
       if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
-      res.json({ ok: true, ...(await readyPost.saveDraftEdit({ funnelId, driveId, copy, thumbs, sizes, costs })) });
+      res.json({ ok: true, ...(await readyPost.saveDraftEdit({ funnelId, driveId, copy, thumbs, sizes, costs, ctaLink })) });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -735,7 +735,8 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         <div class="aicol">
           <div class="panel"><h4>4 · Review &amp; schedule</h4>
             <label class="fl">YouTube title<input id="ti-${id}" maxlength="100"></label>
-            <label class="fl">Description — YouTube · LinkedIn · Facebook ${cta ? `(ends with the funnel's CTA link)` : `<span class="warnt">🟡 this funnel has no CTA link — set it in Funnels → setup</span>`}<textarea id="de-${id}" rows="7"></textarea></label>
+            <label class="fl">Description — YouTube · LinkedIn · Facebook (the CTA link below is added at the end when posting)<textarea id="de-${id}" rows="7"></textarea></label>
+            <label class="fl">CTA link for this post — blank = the funnel's ${cta ? `(${esc(cta)})` : `<span class="warnt">🟡 this funnel has no CTA link: set it in Funnels → setup, or type one here</span>`}<input id="ct-${id}" placeholder="${esc(cta || 'https://…')}"></label>
             <label class="fl">Instagram caption<textarea id="ig-${id}" rows="6"></textarea></label>
             <label class="fl">Short — Threads · X (link appended) <span class="hint" id="sc-${id}"></span><textarea id="sh-${id}" rows="2" oninput="cnt('${id}')"></textarea></label>
             <div class="nowrow"><b>When:</b>
@@ -810,8 +811,8 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     const SOURCE = ${JSON.stringify({ type: source.type || 'drive_folder', id: source.id || null })};
     const SINGLE = ${single ? 'true' : 'false'};
     const CTA = ${JSON.stringify(cta).replace(/</g, '\\u003c')};
-    // What the box shows is what posts: the CTA link ends the description (the post adds it only when missing).
-    const withCta = t=>{ t=String(t||'').trim(); return !CTA || t.indexOf(CTA)>=0 ? t : (t ? t+'\\n\\n'+CTA : CTA); };
+    // The CTA link is not part of the description text: it is added when posting (this post's link, else the funnel's).
+    const noLink = t=>{ const nl=String.fromCharCode(10), ls=String(t||'').trimEnd().split(nl); while(ls.length){ const l=ls[ls.length-1].trim(); if(l.indexOf('http')===0 && l.indexOf(' ')<0) ls.pop(); else break; } return ls.join(nl).trimEnd(); };
     const STAGE_LABEL = ${JSON.stringify(Object.fromEntries(READY_STAGES.map((s) => [s.key, s.label])))};
     const order = [], costs = {}, busy = {}, done = {}, thumbs = {}, approved = {};
     (function(){
@@ -917,7 +918,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     }
     // Show one generation (fresh, or a saved draft restored after a reload).
     function applyGen(id, j){
-      $('ti',id).value=j.copy.title||''; $('de',id).value=withCta(j.copy.description); $('ig',id).value=j.copy.igCaption||''; $('sh',id).value=j.copy.short||''; cnt(id);
+      $('ti',id).value=j.copy.title||''; $('de',id).value=noLink(j.copy.description); if($('ct',id) && j.ctaLink!==undefined) $('ct',id).value=j.ctaLink||''; $('ig',id).value=j.copy.igCaption||''; $('sh',id).value=j.copy.short||''; cnt(id);
       $('gb',id).textContent='✅ Approve + regenerate copy & thumbnails';
       thumbs[id]=j.thumbs||{};
       $('th',id).innerHTML=(j.sizes||[]).map(z=>'<a class="'+(z.size==='landscape'?'wide':'tall')+'" href="'+z.url+'" target="_blank" rel="noopener" title="Open full size"><img src="'+z.url+'"><span>'+z.label+' · '+z.platforms.join(', ')+'</span></a>').join('')
@@ -984,7 +985,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       $('sv',id).disabled=true;
       try{
         const j=await post('save', { driveId:id,
-          copy:{ title:$('ti',id).value, description:$('de',id).value, igCaption:$('ig',id).value, short:$('sh',id).value }, thumbs:thumbs[id]||{}, costs:costs[id]||[] });
+          copy:{ title:$('ti',id).value, description:$('de',id).value, igCaption:$('ig',id).value, short:$('sh',id).value }, ctaLink:$('ct',id).value.trim(), thumbs:thumbs[id]||{}, costs:costs[id]||[] });
         if(!j.ok) throw new Error(j.error||'failed');
         done[id]=true; setInst(id, j.instanceId); $('gs',id).textContent='💾 Saved to the instance';
       }catch(e){ $('gs',id).textContent='⚠ Save failed: '+e.message; }
@@ -1017,7 +1018,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       const late=order.filter(id=>!(allNow||$('now',id).checked) && (!$('sch',id).value || $('sch',id).value < istNow()));
       if(late.length){ msg('Pick a future date and time for '+late.map(id=>$('ord',id).textContent||'this video').join(', ')+' (or choose ⚡ Post now).'); return; }
       const selections = order.map(id=>({ driveId:id, name:$('nm',id).value, caption:'', scheduledAt:toIst($('sch',id).value), now:allNow||$('now',id).checked,
-        copy:{ title:$('ti',id).value, description:$('de',id).value, igCaption:$('ig',id).value, short:$('sh',id).value }, costs:costs[id]||[], thumbs:thumbs[id]||{} }));
+        copy:{ title:$('ti',id).value, description:$('de',id).value, igCaption:$('ig',id).value, short:$('sh',id).value }, ctaLink:$('ct',id).value.trim(), costs:costs[id]||[], thumbs:thumbs[id]||{} }));
       const nowCount=selections.filter(s=>s.now).length;
       if(nowCount && !confirm(nowCount+' video(s) will go live on every channel right now. Continue?')) return;
       msg((nowCount===selections.length?'Posting now ':'Scheduling ')+selections.length+'…');

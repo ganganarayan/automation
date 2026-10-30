@@ -144,6 +144,8 @@ export function normalizeSelections(selections) {
       caption: String((s && s.caption) || ''),
       scheduledAt: s && s.scheduledAt ? String(s.scheduledAt).trim() : '',
       now: !!(s && s.now), // post immediately (ignore the schedule)
+      // This post's CTA link; blank = the funnel's.
+      ctaLink: /^https?:\/\/\S+$/.test(String((s && s.ctaLink) || '').trim()) ? String(s.ctaLink).trim() : '',
       // AI-copy lane: the per-video, per-platform copy and what generating it cost.
       copy: s && s.copy && typeof s.copy === 'object' ? s.copy : null,
       costs: (Array.isArray(s && s.costs) ? s.costs : [])
