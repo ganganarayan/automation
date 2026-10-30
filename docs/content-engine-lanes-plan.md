@@ -1,6 +1,6 @@
 # content-engine: lanes and stages restructure plan
 
-Drafted 30-10-2026. This is a plan only; nothing in it is built yet.
+Drafted 30-10-2026. Phase 1 (ready-video lane: funnel sources, transcript gate, glossary, SRT paste, merged menus) is built on staging; phases 2–5 are not.
 
 ## The problem
 

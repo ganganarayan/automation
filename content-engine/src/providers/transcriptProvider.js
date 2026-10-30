@@ -6,7 +6,8 @@
  *               transcription cost.
  * Responsibility:
  *               - createTranscriptProvider({ apiKey, model }, log)
- *                 => { transcribe({ buffer, filename }): { text, minutes, cues } }
+ *                 => { transcribe({ buffer, filename, prompt }): { text, minutes, cues } }
+ *                 `prompt` is the glossary (names / spellings) Whisper should use.
  * Dependencies: openai, core/errors.
  *
  * The key is per-funnel (transcript_api_key), falling back to the tenant's OpenAI
@@ -24,12 +25,12 @@ export function createTranscriptProvider(cfg = {}, log) {
   return {
     provider,
 
-    async transcribe({ buffer, filename = 'audio.mp3' }) {
+    async transcribe({ buffer, filename = 'audio.mp3', prompt = '' }) {
       if (!client) throw new ExternalAPIError('Transcription not configured (API key missing)');
       if (!buffer || !buffer.length) throw new ExternalAPIError('Transcription needs audio bytes');
 
       const file = await toFile(buffer, filename);
-      const res = await client.audio.transcriptions.create({ file, model, response_format: 'verbose_json' });
+      const res = await client.audio.transcriptions.create({ file, model, response_format: 'verbose_json', ...(prompt ? { prompt } : {}) });
 
       const segments = Array.isArray(res.segments) ? res.segments : [];
       const cues = segments.map((s) => ({ start: Number(s.start) || 0, end: Number(s.end) || 0, text: String(s.text || '').trim() }));

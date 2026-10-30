@@ -17,7 +17,7 @@ import { costText, costImages, costAnimation, costTts, costTranscript } from '..
 import { childLogger } from '../core/logger.js';
 
 /** Start a new instance for a funnel run. Returns the created row. */
-export async function createForFunnel({ tenantId = 'default', funnel, title = '', scheduledFor = null, status = 'script_review' }) {
+export async function createForFunnel({ tenantId = 'default', funnel, title = '', scheduledFor = null, status = 'script_review', sourceType = null, sourceId = null, sourceRef = null }) {
   const id = randomUUID();
   const row = await repo.create({
     id,
@@ -28,6 +28,9 @@ export async function createForFunnel({ tenantId = 'default', funnel, title = ''
     status,
     steps: buildInitialSteps(),
     scheduledFor,
+    sourceType,
+    sourceId,
+    sourceRef,
   });
   childLogger({ module: 'instance', tenant_id: tenantId }).info({ instance: id, funnel: funnel?.name }, 'instance created');
   return row;

@@ -20,8 +20,9 @@ const SETTINGS_PATH = '/api/v1/admin/settings';
 /** The screens you work in. Each one is a page of its own. */
 export const WORK_ITEMS = [
   { id: 'instances', label: 'Instances', icon: '🎬', href: '/api/v1/admin/instances' },
-  { id: 'manual', label: 'Manual run', icon: '🎛', href: '/api/v1/admin/instances/manual' },
-  { id: 'ready-ai', label: 'Ready video + AI copy', icon: '✨', href: '/api/v1/admin/instances/ready-ai' },
+  // Ready videos by funnel source; each video's stages open as its instance.
+  // (Manual run and Ready video + AI copy became instance stage panels.)
+  { id: 'prepare', label: 'Prepare', icon: '📥', href: '/api/v1/admin/instances/prepare' },
   { id: 'capture', label: 'Comments', icon: '🎯', href: '/api/v1/admin/capture' },
 ];
 

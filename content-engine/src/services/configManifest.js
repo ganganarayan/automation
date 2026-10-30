@@ -94,6 +94,7 @@ export const CONFIG_MANIFEST = {
           { key: 'system_prompt_copy', label: 'Ready video copy writer (title, description, captions, thumbnail hook + image prompt)', type: 'textarea', default: DEFAULT_COPY_PROMPT, help: 'The app always adds the JSON output keys, the funnel comment keyword, brand brief and audience after this.' },
           { key: 'system_prompt_script', label: 'Video script writer (automated pipeline)', type: 'textarea', default: DEFAULT_SCRIPT_PROMPT, help: "The funnel's script tone is added after this." },
           { key: 'system_prompt_refill', label: 'VidaPulse post refill', type: 'textarea', default: VIDAPULSE_SYSTEM },
+          { key: 'transcript_glossary', label: 'Transcript glossary — names and terms to spell exactly (one per line)', type: 'textarea', help: 'Passed to Whisper as its prompt so names like STHIRA or PrATS come out right, and given to the copy writer as the correct spellings. Example: STHIRA, PrATS, Apply Gita Wisdom.' },
         ],
       },
     ],

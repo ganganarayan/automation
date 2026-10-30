@@ -137,6 +137,8 @@ export async function forTenant(tenantId = 'default') {
       copy: pick('system_prompt_copy', ''),
       script: pick('system_prompt_script', ''),
       refill: pick('system_prompt_refill', ''),
+      // Names / spellings, passed to Whisper as its prompt.
+      glossary: pick('transcript_glossary', ''),
     },
     video: {
       json2videoApiKey: pick('json2video_api_key', settings.video.json2videoApiKey),

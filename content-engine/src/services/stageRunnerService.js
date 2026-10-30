@@ -46,6 +46,7 @@ import {
   buildMediaName,
   buildSrt,
 } from '../utils/stageSpec.js';
+import { whisperPrompt } from '../utils/laneSpec.js';
 import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'stageRunner' });
@@ -195,7 +196,7 @@ async function runTranscript(ctx, audioBuffer, audioDriveId) {
   const tp = createTranscriptProvider({ apiKey: providers.resolved.transcriptKey || providers.resolved.openai.apiKey }, log);
 
   await instanceService.updateStep(instance.id, 'transcript', { status: 'running', startedAt: new Date().toISOString() });
-  const { text, minutes, durationSeconds, cues } = await tp.transcribe({ buffer: audioBuffer });
+  const { text, minutes, durationSeconds, cues } = await tp.transcribe({ buffer: audioBuffer, prompt: whisperPrompt(providers.resolved.prompts?.glossary) });
   // Persist cues too, so a manual stitch (run separately) can burn captions.
   await instanceService.updateStep(instance.id, 'transcript', { status: 'done', artifacts: { text, cues: cues || [] }, finishedAt: new Date().toISOString() });
   await instanceService.recordCost(instance.id, 'transcript', costTranscript({ provider: tp.provider, minutes }));

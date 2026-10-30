@@ -63,11 +63,13 @@ export function copySystemPrompt({ brief = '', audience = '', keyword = '', base
 }
 
 /** User prompt: the transcript (or, for a silent video, just its file name). */
-export function copyUserPrompt({ transcript = '', fileName = '' } = {}) {
+export function copyUserPrompt({ transcript = '', fileName = '', glossary = [] } = {}) {
   const t = String(transcript || '').trim();
+  const terms = (Array.isArray(glossary) ? glossary : []).filter(Boolean);
+  const spell = terms.length ? `\n\nSpell these names and terms exactly as written: ${terms.join(', ')}.` : '';
   return t
-    ? `Video file: ${fileName}\n\nTranscript:\n${t.slice(0, 12000)}`
-    : `Video file: ${fileName}\n\nThe video has no speech (music / visuals only). Write the copy from the file name and the brand brief.`;
+    ? `Video file: ${fileName}\n\nTranscript:\n${t.slice(0, 12000)}${spell}`
+    : `Video file: ${fileName}\n\nThe video has no speech (music / visuals only). Write the copy from the file name and the brand brief.${spell}`;
 }
 
 /** Cut text to `max` characters at a word boundary, adding an ellipsis. */

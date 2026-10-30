@@ -19,12 +19,15 @@ export async function create({
   status = 'script_review',
   steps = [],
   scheduledFor = null,
+  sourceType = null,
+  sourceId = null,
+  sourceRef = null,
 }) {
   const { rows } = await query(
-    `INSERT INTO instances (id, tenant_id, funnel_id, funnel_name, title, status, steps, scheduled_for)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO instances (id, tenant_id, funnel_id, funnel_name, title, status, steps, scheduled_for, source_type, source_id, source_ref)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
-    [id, tenantId, funnelId, funnelName, title, status, JSON.stringify(steps), scheduledFor],
+    [id, tenantId, funnelId, funnelName, title, status, JSON.stringify(steps), scheduledFor, sourceType, sourceId, sourceRef],
   );
   return rows[0];
 }
@@ -54,7 +57,7 @@ export async function list({ tenantId = 'default', status = null, limit = 100 })
 export async function logRows({ tenantId = 'default', limit = 200 }) {
   const { rows } = await query(
     `SELECT id, title, funnel_name, status, duration_seconds, cost_usd,
-            post_status, posted_at, created_at
+            post_status, posted_at, created_at, source_type
        FROM instances WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2`,
     [tenantId, limit],
   );
@@ -89,6 +92,20 @@ export async function setMeta(id, { title, durationSeconds, scheduledFor } = {})
             updated_at = now()
       WHERE id = $1 AND locked = false`,
     [id, title ?? null, durationSeconds ?? null, scheduledFor ?? null],
+  );
+  return rowCount > 0;
+}
+
+/** Record the one source this instance came from (fills only what's given). */
+export async function setSource(id, { sourceType, sourceId, sourceRef } = {}) {
+  const { rowCount } = await query(
+    `UPDATE instances
+        SET source_type = COALESCE($2, source_type),
+            source_id = COALESCE($3, source_id),
+            source_ref = COALESCE($4, source_ref),
+            updated_at = now()
+      WHERE id = $1 AND locked = false`,
+    [id, sourceType ?? null, sourceId ?? null, sourceRef ?? null],
   );
   return rowCount > 0;
 }
@@ -164,15 +181,15 @@ export async function postedDriveIds(funnelId, tenantId = 'default') {
 }
 
 /**
- * Ready-video AI drafts (unposted generations) for these Drive files, newest
- * first per file: { driveId: row }.
+ * Ready-video work in progress (cleaned, transcribed or AI-drafted, not yet
+ * posted) for these Drive files, newest first per file: { driveId: row }.
  */
 export async function draftsByDriveIds(funnelId, tenantId = 'default', driveIds = []) {
   if (!funnelId || !driveIds.length) return {};
   const { rows } = await query(
     `SELECT DISTINCT ON (s->'artifacts'->'video'->>'driveId') s->'artifacts'->'video'->>'driveId' AS drive_id, i.*
        FROM instances i, jsonb_array_elements(i.steps) s
-      WHERE i.tenant_id = $1 AND i.funnel_id = $2 AND i.status = 'draft' AND i.locked = false
+      WHERE i.tenant_id = $1 AND i.funnel_id = $2 AND i.status IN ('draft', 'transcript_review') AND i.locked = false
         AND s->>'key' = 'stitch' AND s->'artifacts'->'video'->>'driveId' = ANY($3)
       ORDER BY s->'artifacts'->'video'->>'driveId', i.updated_at DESC`,
     [tenantId, funnelId, driveIds],
@@ -181,6 +198,6 @@ export async function draftsByDriveIds(funnelId, tenantId = 'default', driveIds 
 }
 
 export default {
-  create, get, list, logRows, saveSteps, setStatus, setMeta, bumpRound, lockAsPosted, setPostStatus, remove,
+  create, get, list, logRows, saveSteps, setStatus, setMeta, setSource, bumpRound, lockAsPosted, setPostStatus, remove,
   existsForFunnelOnDate, postedDriveIds, draftsByDriveIds,
 };

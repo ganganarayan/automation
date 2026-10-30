@@ -68,6 +68,7 @@ export async function runDueVideo({ windowMin = 15, now = nowIst(), log } = {}) 
         title: `${funnel.name} — ${formatIst(scheduledFor, { withTime: false })}`,
         scheduledFor: scheduledFor.toJSDate(),
         status: manual ? 'manual' : 'script_review',
+        sourceType: 'generated',
       });
       created.push({ funnel: funnel.name, instanceId: instance.id, scheduledFor: scheduledFor.toISO(), manual });
       log?.info(

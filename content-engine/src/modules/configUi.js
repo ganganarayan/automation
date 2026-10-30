@@ -774,7 +774,7 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
         <p class="hint">This screen is the setup. To actually build a video stage-by-stage — Generate/edit each prompt → Execute → Preview → Approve → next → post — start a manual run. Each run opens a page with one card per stage (Script, Images, Image→video, Voiceover, Transcript, Final reel, Post), each with its input, an Execute button, and a Preview.</p>
         <div class="row">
           <button type="button" class="act" onclick="startManualRun()">▶ Start a manual run of this funnel</button>
-          <a class="act" href="/api/v1/admin/instances/manual">All manual runs</a>
+          <a class="act" href="/api/v1/admin/instances">All instances</a>
         </div>
       </div>
       <script>

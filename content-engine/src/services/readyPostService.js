@@ -11,11 +11,12 @@
  *               instance so it shows in the same log, with its stages marked
  *               skipped and zero AI cost.
  *
- *               AI-copy lane: the same picker, but per video the app first
- *               downloads the file, transcribes its audio and writes the YouTube
- *               title + description (also the LinkedIn / Facebook post), the
- *               Instagram caption and a short Threads / X post. The operator
- *               edits them, then posts — each platform gets its own copy.
+ *               AI-copy lane, in stages, each video one instance:
+ *                 prepare (✂ Clean, optional) → transcript (Whisper with the
+ *                 glossary, or a pasted SRT; stops at 'transcript_review' until
+ *                 the operator approves it) → AI copy + thumbnails (only from an
+ *                 approved transcript) → review & schedule → posted.
+ *               Regenerating the copy never re-runs the transcription.
  * Responsibility: Orchestration + side effects; pure logic in utils/readyPostSpec
  *               and utils/aiCopySpec.
  * Dependencies: funnelsRepository, instanceService, instanceRepository,
@@ -25,6 +26,7 @@
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as instanceService from '../services/instanceService.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
+import * as sourcesRepo from '../repositories/funnelSourcesRepository.js';
 import { buildProviders } from './providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { createTranscriptProvider } from '../providers/transcriptProvider.js';
@@ -41,6 +43,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeCleanOpts } from '../utils/cleanSpec.js';
+import { TRANSCRIPT_REVIEW, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
 import { formatIst } from '../utils/time.js';
 import { driveEmbedUrl } from '../utils/reviewSpec.js';
 import {
@@ -106,11 +109,13 @@ function driveFor(providers, accessToken) {
 export async function listReadyVideos({ tenantId = 'default', funnelId, folder: override = '', picked = [] }) {
   const { funnel, resolved, cfg } = await loadFunnel(funnelId);
   const providers = await buildProviders(funnel.tenant_id || tenantId);
-  const folder = override || readyFolder(cfg, resolved);
+  const sources = await sourcesRepo.listByFunnel(funnel.id).catch(() => []);
+  const firstFolder = (sources.find((x) => x.type === 'drive_folder') || {}).ref || '';
+  const folder = override || readyFolder(cfg, resolved) || firstFolder;
   const g = providers.resolved.google || {};
   const saEmail = (g.serviceAccount && g.serviceAccount.client_email) || '';
   const picker = { clientId: g.oauthClientId || '', apiKey: g.pickerApiKey || '', appId: g.projectNumber || '' };
-  const base = { funnel, resolved, cfg, folder, saEmail, picker, defaultCaption: captionFor(cfg, resolved) };
+  const base = { funnel, resolved, cfg, folder, saEmail, picker, sources, source: { type: 'drive_pick', id: null }, defaultCaption: captionFor(cfg, resolved) };
   if (picked && picked.length) return { ...base, folder: '', picked: true, videos: picked, drafts: await loadDrafts(funnel, picked.map((f) => f.id)) };
   if (!folder) return { ...base, videos: [] };
   let files;
@@ -123,11 +128,47 @@ export async function listReadyVideos({ tenantId = 'default', funnelId, folder: 
   // Posted files are hidden by the app's own record too — a public folder
   // can't be renamed "POSTED".
   const posted = new Set(await instanceRepo.postedDriveIds(funnel.id, funnel.tenant_id).catch(() => []));
+  // A folder that lists is saved as one of the funnel's sources.
+  const saved = await sourcesRepo.upsert({ tenantId: funnel.tenant_id, funnelId: funnel.id, type: 'drive_folder', ref: folder, label: `Drive folder …${folder.slice(-6)}` }).catch((err) => {
+    log.warn({ err: err.message }, 'source save failed');
+    return null;
+  });
+  if (saved && !sources.some((x) => String(x.id) === String(saved.id))) sources.push(saved);
+  base.source = { type: 'drive_folder', id: saved ? saved.id : null };
   const videos = filterReadyVideos(files)
     .filter((f) => !posted.has(f.id))
     .map((f) => ({ id: f.id, name: f.name, createdTime: f.createdTime }))
     .sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
   return { ...base, videos, totalFiles: files.length, drafts: await loadDrafts(funnel, videos.map((v) => v.id)) };
+}
+
+/**
+ * One ready-video instance as its own stage view: the same panels as the
+ * Prepare list, for just this video.
+ */
+export async function instanceView(row) {
+  const { funnel, resolved, cfg } = await loadFunnel(row.funnel_id);
+  const steps = instanceService.parseSteps(row);
+  const video = ((steps.find((x) => x.key === 'stitch') || {}).artifacts || {}).video || {};
+  const driveId = row.source_ref || video.driveId;
+  if (!driveId) throw new Error('this instance has no source video');
+  const drafts = await loadDrafts(funnel, [driveId]);
+  if (!drafts[driveId]) {
+    const d = draftView(row);
+    if (d) drafts[driveId] = d;
+  }
+  return {
+    funnel, resolved, cfg, single: row,
+    source: { type: row.source_type || 'drive_folder', id: row.source_id || null },
+    videos: [{ id: driveId, name: video.name || row.title || driveId }],
+    drafts,
+    defaultCaption: captionFor(cfg, resolved),
+  };
+}
+
+/** Forget one of the funnel's saved sources (its instances keep their history). */
+export async function removeSource({ funnelId, sourceId }) {
+  return sourcesRepo.remove(Number(funnelId), Number(sourceId));
 }
 
 // Video lengths by Drive id — a file's length never changes, so probe once.
@@ -159,38 +200,136 @@ export async function videoDurations(driveIds) {
 // Whisper rejects uploads over 25 MB.
 const WHISPER_MAX_BYTES = 25 * 1024 * 1024;
 
-/**
- * AI-copy lane: download one ready video, transcribe it and write its copy.
- * A pasted `transcript` (or any text) skips the download + transcription.
- * Returns { copy, transcript, costs, transcribed } — costs are the real
- * transcription and token costs, carried back with the selection and recorded
- * on the instance.
- */
-export async function generateCopy({ tenantId = 'default', funnelId, driveId, name = '', transcript: pasted = '', accessToken = '', accounts: pickedAccounts = null }) {
-  if (!driveId) throw new Error('driveId required');
-  const { funnel, resolved, cfg } = await loadFunnel(funnelId, pickedAccounts);
-  const providers = await buildProviders(funnel.tenant_id || tenantId);
-  const costs = [];
+/** Normalise the page's { type, id } source. */
+function sourceOf(source) {
+  const o = source && typeof source === 'object' ? source : {};
+  const type = ['drive_folder', 'drive_pick'].includes(o.type) ? o.type : 'drive_folder';
+  const id = Number(o.id) > 0 ? Number(o.id) : null;
+  return { type, id };
+}
 
-  // A pasted transcript / text skips the download + transcription entirely.
-  let transcript = String(pasted || '').trim();
+/**
+ * The video's one instance (made when there's none yet), stamped with the
+ * source it came from. Returns { inst, steps, existing }.
+ */
+async function ensureInstance({ funnel, driveId, name = '', title = 'Ready video', source = null }) {
+  const src = sourceOf(source);
+  const existing = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [driveId]))[driveId];
+  if (existing) {
+    if (!existing.source_type || !existing.source_ref || (!existing.source_id && src.id)) {
+      await instanceRepo.setSource(existing.id, {
+        sourceType: existing.source_type ? undefined : src.type,
+        sourceId: existing.source_id ? undefined : src.id,
+        sourceRef: driveId,
+      });
+    }
+    let steps = instanceService.parseSteps(existing);
+    if (name && !videoArt(steps, driveId).name) steps = patchStep(steps, 'stitch', { artifacts: { video: { ...videoArt(steps, driveId), name } } });
+    return { inst: existing, steps, existing: true };
+  }
+  const inst = await instanceService.createForFunnel({
+    tenantId: funnel.tenant_id, funnel, title, status: 'draft', sourceType: src.type, sourceId: src.id, sourceRef: driveId,
+  });
+  let steps = buildInitialSteps();
+  for (const k of ['animate', 'voiceover']) steps = patchStep(steps, k, { status: 'skipped' });
+  steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: { driveId, ...(name ? { name } : {}) } } });
+  return { inst, steps, existing: false };
+}
+
+/**
+ * Stage 2a — transcribe one ready video (Whisper, with the glossary as its
+ * prompt) and stop: the instance waits in 'transcript_review' until the
+ * operator approves the text. Nothing paid runs after this.
+ */
+export async function transcribeVideo({ tenantId = 'default', funnelId, driveId, name = '', accessToken = '', source = null }) {
+  if (!driveId) throw new Error('driveId required');
+  const id = String(driveId);
+  const { funnel } = await loadFunnel(funnelId);
+  const providers = await buildProviders(funnel.tenant_id || tenantId);
   const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
   const ffmpeg = createFfmpegProvider({}, log);
-  let video = null; // downloaded only when transcription (or a non-public file) needs it
-  const getVideo = async () => video || (video = await driveFor(providers, accessToken).download(driveId));
-  const audio = transcript ? Buffer.alloc(0) : await ffmpeg.extractAudio({ videoBuffer: await getVideo(), ext });
+  const video = await driveFor(providers, accessToken).download(id);
+  const audio = await ffmpeg.extractAudio({ videoBuffer: video, ext });
+  let text = '';
+  let cues = [];
+  let cost = null;
   if (audio.length) {
     if (audio.length > WHISPER_MAX_BYTES) throw new Error('video audio is too long to transcribe (over ~70 minutes)');
     const tp = createTranscriptProvider({ apiKey: providers.resolved.transcriptKey || providers.resolved.openai.apiKey }, log);
-    const t = await tp.transcribe({ buffer: audio, filename: 'audio.mp3' });
-    transcript = t.text;
-    if (t.durationSeconds > 0) durationCache.set(driveId, Math.round(t.durationSeconds));
-    costs.push({ step: 'transcript', ...costTranscript({ provider: tp.provider, minutes: t.minutes }) });
+    const t = await tp.transcribe({ buffer: audio, filename: 'audio.mp3', prompt: whisperPrompt(providers.resolved.prompts?.glossary) });
+    text = t.text;
+    cues = t.cues || [];
+    if (t.durationSeconds > 0) durationCache.set(id, Math.round(t.durationSeconds));
+    cost = { ...costTranscript({ provider: tp.provider, minutes: t.minutes }), at: new Date().toISOString() };
   }
+  const { inst, steps: base } = await ensureInstance({ funnel, driveId: id, name, source });
+  let steps = patchStep(base, 'transcript', {
+    status: 'done', artifacts: { text, cues, srt: '', source: 'whisper', approvedAt: null }, finishedAt: new Date().toISOString(), error: null,
+  });
+  if (cost) steps = addCostToSteps(steps, 'transcript', { ...cost, costUsd: Number(cost.costUsd) || 0 });
+  await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
+  await instanceRepo.setStatus(inst.id, TRANSCRIPT_REVIEW);
+  const durationSec = durationCache.get(id) || 0;
+  if (durationSec) await instanceRepo.setMeta(inst.id, { durationSeconds: durationSec });
+  log.info({ funnel: funnel.name, driveId: id, words: text.split(/\s+/).filter(Boolean).length }, 'ready video transcribed (awaiting approval)');
+  return { instanceId: inst.id, transcript: text, transcribed: audio.length > 0, costs: cost ? [{ step: 'transcript', ...cost }] : [], stage: 'transcript' };
+}
+
+/**
+ * Stage 2b — keep the operator's transcript: edited text, or a pasted SRT
+ * (cue numbers + timestamps stripped for the LLM, the raw SRT kept for
+ * captions). `approve` passes the gate; a changed text without it needs
+ * approving again. One video at a time — there is no bulk approve.
+ */
+export async function saveTranscript({ funnelId, driveId, name = '', text = '', approve = false, source = null }) {
+  if (!driveId) throw new Error('driveId required');
+  const id = String(driveId);
+  const { funnel } = await loadFunnel(funnelId);
+  const { inst, steps: base } = await ensureInstance({ funnel, driveId: id, name, source });
+  const prev = ((base.find((x) => x.key === 'transcript') || {}).artifacts) || {};
+  const next = prepareTranscript(text);
+  const unchanged = next.text === String(prev.text || '').trim();
+  const srt = next.srt || (unchanged ? prev.srt || '' : '');
+  const approvedAt = approve ? new Date().toISOString() : (unchanged ? prev.approvedAt || null : null);
+  const steps = patchStep(base, 'transcript', {
+    status: 'done',
+    artifacts: {
+      text: next.text, srt, cues: unchanged ? prev.cues || [] : [],
+      source: unchanged ? prev.source || 'edited' : (next.srt ? 'srt' : 'edited'), approvedAt,
+    },
+  });
+  const status = approvedAt ? 'draft' : TRANSCRIPT_REVIEW;
+  await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
+  await instanceRepo.setStatus(inst.id, status);
+  return {
+    instanceId: inst.id, transcript: next.text, srt: !!srt, approved: !!approvedAt,
+    approvedIst: approvedAt ? formatIst(approvedAt) : '', stage: readyStage({ status }, steps),
+  };
+}
+
+/**
+ * Stage 3 — write one video's copy and thumbnails from its APPROVED
+ * transcript (read from the instance, never from the page). Regenerating
+ * never re-runs the transcription. Returns { copy, transcript, costs, ... } —
+ * costs are the real token / image costs, recorded on the instance.
+ */
+export async function generateCopy({ tenantId = 'default', funnelId, driveId, name = '', accessToken = '', accounts: pickedAccounts = null }) {
+  if (!driveId) throw new Error('driveId required');
+  const { funnel, resolved, cfg } = await loadFunnel(funnelId, pickedAccounts);
+  const draft = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [String(driveId)]))[String(driveId)];
+  const draftSteps = draft ? instanceService.parseSteps(draft) : [];
+  if (!draft || !canGenerateCopy(draftSteps)) throw new Error('Approve the transcript first — copy and thumbnails are written only from an approved transcript');
+  const transcript = String((((draftSteps.find((x) => x.key === 'transcript') || {}).artifacts) || {}).text || '');
+  const providers = await buildProviders(funnel.tenant_id || tenantId);
+  const costs = [];
+  const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
+  const ffmpeg = createFfmpegProvider({}, log);
+  let video = null; // downloaded only when a non-public file needs it for the frame
+  const getVideo = async () => video || (video = await driveFor(providers, accessToken).download(driveId));
 
   const { data, model, usage } = await providers.llm.generateJsonDetailed({
     system: copySystemPrompt({ brief: cfg && cfg.direct_copy_brief, audience: resolved.audiencePrefix, keyword: resolved.captureKeyword, base: providers.resolved.prompts.copy }),
-    user: copyUserPrompt({ transcript, fileName: name }),
+    user: copyUserPrompt({ transcript, fileName: name, glossary: glossaryTerms(providers.resolved.prompts?.glossary) }),
     maxTokens: 8000,
   });
   costs.push({ step: 'script', ...costText({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, model }) });
@@ -225,11 +364,11 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
     thumbError = err.message;
     log.warn({ err: err.message, driveId }, 'thumbnail generation failed (first frame will be used)');
   }
-  const instanceId = await saveDraft({ funnel, driveId, transcript, copy, thumbs, sizes, thumbError, costs }).catch((err) => {
+  const instanceId = await saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs }).catch((err) => {
     log.warn({ err: err.message, driveId }, 'draft save failed (generation still returned)');
     return null;
   });
-  return { copy, transcript, costs, transcribed: audio.length > 0, thumbs, sizes, thumbError, instanceId };
+  return { copy, transcript, costs, thumbs, sizes, thumbError, instanceId, stage: 'review' };
 }
 
 /**
@@ -266,7 +405,7 @@ function thumbPlatforms(resolved) {
   return (present.length ? present : Object.keys(THUMB_SPECS)).filter((k) => THUMB_SPECS[k]);
 }
 
-/** The stitch step's video artifact, keeping what's already there (e.g. the cleaned copy). */
+/** The stitch step's video artifact, keeping what's already there (e.g. the cleaned copy, the file name). */
 function videoArt(steps, driveId, durationSec = 0) {
   const prev = ((steps.find((x) => x.key === 'stitch') || {}).artifacts || {}).video || {};
   return { ...prev, driveId, ...(durationSec ? { durationSec } : {}) };
@@ -282,7 +421,7 @@ const cleanJobs = new Map();
  * corner watermark leaves the frame, cut the outro), then upload it to Post for
  * Me. The page polls cleanStatus.
  */
-export async function startClean({ funnelId, driveId, zoomPct, trimEndSec }) {
+export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, name = '', source = null }) {
   if (!driveId) throw new Error('driveId required');
   const id = String(driveId);
   const { funnel } = await loadFunnel(funnelId);
@@ -293,7 +432,7 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec }) {
   const opts = normalizeCleanOpts({ zoomPct, trimEndSec });
   const running = { state: 'running', startedAt: Date.now(), ...opts };
   cleanJobs.set(id, running);
-  runClean({ funnel, providers, driveId: id, opts })
+  runClean({ funnel, providers, driveId: id, opts, name, source })
     .then((clean) => cleanJobs.set(id, { state: 'done', clean }))
     .catch((err) => {
       log.error({ err: err.message, driveId: id }, 'video clean failed');
@@ -302,7 +441,7 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec }) {
   return running;
 }
 
-async function runClean({ funnel, providers, driveId, opts }) {
+async function runClean({ funnel, providers, driveId, opts, name, source }) {
   const total = (await videoDurations([driveId]))[driveId] || 0;
   if (opts.trimEndSec && !total) throw new Error("couldn't read the video's length to trim its end");
   const keepSec = opts.trimEndSec ? Math.max(1, total - opts.trimEndSec) : 0;
@@ -313,7 +452,7 @@ async function runClean({ funnel, providers, driveId, opts }) {
     await createFfmpegProvider({}, log).cleanVideo({ url: publicDlUrl(driveId), outPath, zoomPct: opts.zoomPct, keepSec });
     const url = await createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log).uploadFile(outPath, 'video/mp4');
     const clean = { url, ...opts, durationSec: Math.round(keepSec || total), at: new Date().toISOString() };
-    await saveClean(funnel, driveId, clean);
+    await saveClean(funnel, driveId, clean, { name, source });
     log.info({ driveId, ...opts, seconds: Math.round((Date.now() - t0) / 1000) }, 'video cleaned + uploaded');
     return clean;
   } finally {
@@ -322,11 +461,9 @@ async function runClean({ funnel, providers, driveId, opts }) {
 }
 
 /** Keep the cleaned video on the video's draft instance (made if there's none yet). */
-async function saveClean(funnel, driveId, clean) {
-  const existing = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [driveId]))[driveId];
-  const inst = existing || await instanceService.createForFunnel({ tenantId: funnel.tenant_id, funnel, title: 'Ready video (cleaned)', status: 'draft' });
-  let steps = existing ? instanceService.parseSteps(existing) : buildInitialSteps();
-  if (!existing) for (const k of ['animate', 'voiceover']) steps = patchStep(steps, k, { status: 'skipped' });
+async function saveClean(funnel, driveId, clean, { name = '', source = null } = {}) {
+  const { inst, steps: base } = await ensureInstance({ funnel, driveId, name, title: 'Ready video (cleaned)', source });
+  let steps = base;
   steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: { ...videoArt(steps, driveId, clean.durationSec), clean } } });
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   await instanceRepo.setMeta(inst.id, { durationSeconds: clean.durationSec || undefined });
@@ -346,17 +483,15 @@ export async function cleanStatus({ funnelId, driveId }) {
  * transcript and thumbnails as JSON on the steps (all generations kept in
  * script.artifacts.generations), and every generation's real cost added.
  */
-async function saveDraft({ funnel, driveId, transcript, copy, thumbs, sizes, thumbError, costs, edit = false }) {
-  const existing = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [driveId]))[driveId];
-  const inst = existing || await instanceService.createForFunnel({ tenantId: funnel.tenant_id, funnel, title: copy.title || 'Ready video', status: 'draft' });
-  let steps = existing ? instanceService.parseSteps(existing) : buildInitialSteps();
-  if (!existing) for (const k of ['animate', 'voiceover']) steps = patchStep(steps, k, { status: 'skipped' });
+async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, edit = false }) {
+  const { inst, steps: base, existing } = await ensureInstance({ funnel, driveId, title: copy.title || 'Ready video' });
+  let steps = base;
   const at = new Date().toISOString();
   const prev = ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).generations || [];
   // A manual save (edits) updates the current copy; only a real generation is
   // added to the history.
   const generations = edit ? prev : [...prev, { at, copy, thumbs, sizes, thumbError }].slice(-20);
-  steps = patchStep(steps, 'transcript', { status: transcript ? 'done' : 'skipped', artifacts: { text: transcript } });
+  // The transcript belongs to its own stage (transcribe / approve) — never touched here.
   steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, generations } });
   if (sizes.length || !edit) steps = patchStep(steps, 'images', { status: sizes.length ? 'done' : 'skipped', artifacts: { thumbs, sizes } });
   const durationSec = durationCache.get(driveId) || 0;
@@ -373,10 +508,10 @@ async function saveDraft({ funnel, driveId, transcript, copy, thumbs, sizes, thu
 
 /**
  * 💾 Save draft: keep what's on the page for one video (edited copy,
- * transcript, thumbnails) without regenerating. Thumbnails sent only as
+ * thumbnails) without regenerating. The transcript is saved by its own stage. Thumbnails sent only as
  * platform -> url are grouped back into their sizes.
  */
-export async function saveDraftEdit({ funnelId, driveId, transcript = '', copy, thumbs = {}, sizes = [], costs = [] }) {
+export async function saveDraftEdit({ funnelId, driveId, copy, thumbs = {}, sizes = [], costs = [] }) {
   if (!driveId) throw new Error('driveId required');
   const { funnel } = await loadFunnel(funnelId);
   const clean = normalizeCopy(copy);
@@ -392,7 +527,7 @@ export async function saveDraftEdit({ funnelId, driveId, transcript = '', copy, 
   }
   grouped = grouped.map((z) => ({ size: z.size, label: THUMB_SIZES[z.size].label, url: String(z.url), platforms: (z.platforms || []).filter((k) => PLATFORM_SIZE[k]) }));
   const okCosts = (Array.isArray(costs) ? costs : []).filter((c) => c && Number.isFinite(Number(c.costUsd))).slice(0, 8);
-  const instanceId = await saveDraft({ funnel, driveId: String(driveId), transcript: String(transcript || ''), copy: clean, thumbs: urls, sizes: grouped, thumbError: '', costs: okCosts, edit: true });
+  const instanceId = await saveDraft({ funnel, driveId: String(driveId), copy: clean, thumbs: urls, sizes: grouped, thumbError: '', costs: okCosts, edit: true });
   return { instanceId };
 }
 
@@ -401,14 +536,27 @@ async function loadDrafts(funnel, driveIds) {
   const rows = await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, driveIds).catch(() => ({}));
   const out = {};
   for (const [driveId, row] of Object.entries(rows)) {
-    const steps = instanceService.parseSteps(row);
-    const art = (k) => (steps.find((x) => x.key === k) || {}).artifacts || {};
-    const costUsd = steps.reduce((t, x) => t + (x.costs || []).reduce((u, c) => u + (Number(c.costUsd) || 0), 0), 0);
-    const clean = (art('stitch').video || {}).clean || null;
-    if (!art('script').copy && !clean) continue;
-    out[driveId] = { instanceId: row.id, clean, copy: art('script').copy || null, transcript: art('transcript').text || '', thumbs: art('images').thumbs || {}, sizes: art('images').sizes || [], costUsd, atIst: formatIst(row.updated_at) };
+    const d = draftView(row);
+    if (d) out[driveId] = d;
   }
   return out;
+}
+
+/** What the stage panels need from one instance (null when it holds nothing yet). */
+function draftView(row) {
+  const steps = instanceService.parseSteps(row);
+  const step = (k) => steps.find((x) => x.key === k) || {};
+  const art = (k) => step(k).artifacts || {};
+  const costUsd = steps.reduce((t, x) => t + (x.costs || []).reduce((u, c) => u + (Number(c.costUsd) || 0), 0), 0);
+  const clean = (art('stitch').video || {}).clean || null;
+  const hasTranscript = step('transcript').status === 'done';
+  if (!art('script').copy && !clean && !hasTranscript) return null;
+  const t = art('transcript');
+  return {
+    instanceId: row.id, stage: readyStage(row, steps), clean, copy: art('script').copy || null,
+    transcript: t.text || '', hasTranscript, srt: !!t.srt, approved: !!t.approvedAt, approvedIst: t.approvedAt ? formatIst(t.approvedAt) : '',
+    thumbs: art('images').thumbs || {}, sizes: art('images').sizes || [], costUsd, atIst: formatIst(row.updated_at),
+  };
 }
 
 /** Record one direct post as a posted instance (stages skipped; AI-copy cost if any). */
@@ -434,6 +582,8 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
     funnel,
     title: `${copy && copy.title ? copy.title : 'Ready video'} — ${scheduledIso ? formatIst(scheduledIso, { withTime: false }) : 'now'}`,
     scheduledFor: scheduledIso ? new Date(scheduledIso) : null,
+    sourceType: 'drive_folder',
+    sourceRef: driveId,
   });
   let steps = buildInitialSteps();
   for (const k of ['script', 'images', 'animate', 'voiceover', 'transcript']) steps = patchStep(steps, k, { status: 'skipped' });
@@ -567,4 +717,6 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export default { listReadyVideos, videoDurations, generateCopy, saveDraftEdit, startClean, cleanStatus, postSelections };
+export default {
+  listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, postSelections,
+};
