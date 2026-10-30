@@ -133,13 +133,25 @@ export async function lockAsPosted(id, { postRefs = [], postedAt = new Date() } 
 }
 
 /** Handed to Post for Me: scheduled (still editable) until it really goes out. */
-export async function markScheduled(id, { postRefs = [], scheduledFor = null } = {}) {
+export async function markScheduled(id, { postRefs = [], scheduledFor = null, postNow = false } = {}) {
+  // Post now: no scheduled time (the posted time comes from Post for Me).
   const { rowCount } = await query(
     `UPDATE instances
         SET status = 'scheduled', post_status = 'scheduled', post_refs = $2,
-            scheduled_for = COALESCE($3, scheduled_for), approved_at = COALESCE(approved_at, now()), updated_at = now()
+            scheduled_for = CASE WHEN $4 THEN NULL ELSE COALESCE($3, scheduled_for) END,
+            approved_at = COALESCE(approved_at, now()), updated_at = now()
       WHERE id = $1 AND locked = false`,
-    [id, JSON.stringify(postRefs), scheduledFor],
+    [id, JSON.stringify(postRefs), scheduledFor, postNow],
+  );
+  return rowCount > 0;
+}
+
+/** Some channels failed: posted where it worked, open for a retry of the rest. */
+export async function markPartial(id, { note = null, postedAt = new Date() } = {}) {
+  const { rowCount } = await query(
+    `UPDATE instances SET status = 'partial', post_status = 'partial', note = COALESCE($2, note), posted_at = $3, updated_at = now()
+      WHERE id = $1 AND locked = false`,
+    [id, note, postedAt],
   );
   return rowCount > 0;
 }
@@ -206,9 +218,9 @@ export async function videoOnDate(funnelId, dateKey, tenantId = 'default') {
   if (!funnelId || !dateKey) return false;
   const { rows } = await query(
     `SELECT 1 FROM instances
-       WHERE tenant_id = $1 AND funnel_id = $2 AND status IN ('scheduled', 'posted')
-         AND scheduled_for IS NOT NULL
-         AND (scheduled_for AT TIME ZONE 'Asia/Kolkata')::date = $3::date
+       WHERE tenant_id = $1 AND funnel_id = $2 AND status IN ('scheduled', 'posted', 'partial')
+         AND COALESCE(scheduled_for, posted_at) IS NOT NULL
+         AND (COALESCE(scheduled_for, posted_at) AT TIME ZONE 'Asia/Kolkata')::date = $3::date
        LIMIT 1`,
     [tenantId, funnelId, dateKey],
   );
@@ -224,7 +236,7 @@ export async function postedDriveIds(funnelId, tenantId = 'default') {
   const { rows } = await query(
     `SELECT DISTINCT s->'artifacts'->'video'->>'driveId' AS drive_id
        FROM instances, jsonb_array_elements(steps) s
-      WHERE tenant_id = $1 AND funnel_id = $2 AND status IN ('posted', 'scheduled')
+      WHERE tenant_id = $1 AND funnel_id = $2 AND status IN ('posted', 'scheduled', 'partial', 'failed')
         AND s->>'key' = 'stitch'`,
     [tenantId, funnelId],
   );
@@ -249,6 +261,6 @@ export async function draftsByDriveIds(funnelId, tenantId = 'default', driveIds 
 }
 
 export default {
-  create, get, list, logRows, saveSteps, setStatus, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, unschedule, scheduledDue, setPostStatus, remove,
+  create, get, list, logRows, saveSteps, setStatus, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, unschedule, scheduledDue, setPostStatus, remove,
   existsForFunnelOnDate, videoOnDate, postedDriveIds, draftsByDriveIds,
 };

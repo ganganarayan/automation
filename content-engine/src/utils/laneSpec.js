@@ -157,7 +157,38 @@ export function istToInputValue(text) {
 }
 
 export default {
-  postOutcome, istToInputValue,
+  postOutcome, istToInputValue, mergeChannels, channelOutcome, channelText,
   SOURCE_TYPES, READY_STAGES, TRANSCRIPT_REVIEW, laneOf, transcriptApproved, canGenerateCopy, readyStage, stageLabel,
   isSrt, srtToText, prepareTranscript, glossaryTerms, whisperPrompt,
 };
+
+/**
+ * Post for Me's per-account results → the instance's channel list. A channel
+ * is ✅ once any of its posts succeeded (a retry fixes an earlier failure),
+ * ❌ with the error if it failed, ⏳ until there's a result.
+ * `results` is { accountId: { success, error, url } }.
+ */
+export function mergeChannels(channels = [], results = {}) {
+  return (Array.isArray(channels) ? channels : []).map((c) => {
+    const r = results[c.id];
+    if (!r || c.state === 'ok') return c;
+    return r.success
+      ? { ...c, state: 'ok', error: '', url: r.url || c.url || '' }
+      : { ...c, state: 'failed', error: String(r.error || 'failed').slice(0, 200) };
+  });
+}
+
+/** 'posted' (every channel ✅), 'partial', 'failed' (none ✅) or 'pending' (any ⏳). */
+export function channelOutcome(channels = []) {
+  const list = Array.isArray(channels) ? channels : [];
+  if (!list.length || list.some((c) => c.state !== 'ok' && c.state !== 'failed')) return 'pending';
+  const ok = list.filter((c) => c.state === 'ok').length;
+  if (ok === list.length) return 'posted';
+  return ok ? 'partial' : 'failed';
+}
+
+/** One channel as "✅ youtube Ganga" / "❌ x (error)" / "⏳ threads name". */
+export function channelText(c = {}) {
+  const icon = c.state === 'ok' ? '✅' : c.state === 'failed' ? '❌' : '⏳';
+  return `${icon} ${[c.platform, c.name].filter(Boolean).join(' ')}${c.state === 'failed' && c.error ? ` (${c.error})` : ''}`;
+}

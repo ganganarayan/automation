@@ -30,7 +30,9 @@ import * as stageRunner from '../services/stageRunnerService.js';
 import * as jobRunner from '../core/jobRunner.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import { INSTANCE_STEPS, sumInstanceCost, costBreakdown, shortId, formatDuration } from '../utils/instanceSpec.js';
-import { READY_STAGES, SOURCE_TYPES, laneOf, readyStage, stageLabel, istToInputValue } from '../utils/laneSpec.js';
+import { READY_STAGES, SOURCE_TYPES, laneOf, readyStage, stageLabel, istToInputValue, channelText } from '../utils/laneSpec.js';
+import cron from 'node-cron';
+import { settings } from '../settings/index.js';
 import { MANUAL_STAGES, STAGE_LABEL, inputKind, canExecute } from '../utils/manualStepSpec.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst } from '../utils/time.js';
@@ -242,7 +244,7 @@ export function register(ctx) {
       if (!(await guardHtml(req, res))) return;
       let row = await instances.get(req.params.id);
       if (!row) return res.redirect('/api/v1/admin/instances');
-      if (row.status === 'scheduled' && await readyPost.refreshScheduled({ tenantId: row.tenant_id }).catch(() => 0)) row = await instances.get(row.id);
+      if (['scheduled', 'partial'].includes(row.status) && await readyPost.refreshScheduled({ tenantId: row.tenant_id }).catch(() => 0)) row = await instances.get(row.id);
       const steps = instances.parseSteps(row);
       const lane = laneOf(row);
       // A ready video in progress opens on its stage panels.
@@ -304,6 +306,28 @@ export function register(ctx) {
     }
   });
 
+  // Every 5 minutes: did Post for Me publish what was scheduled? (✅/❌ per
+  // channel + the go-live email). In 'external' scheduler mode the
+  // /jobs/run-due ping does the same.
+  if (settings.schedulerInternal) {
+    let checking = false;
+    cron.schedule('*/5 * * * *', async () => {
+      if (checking) return;
+      checking = true;
+      try { await readyPost.refreshAllTenants(); } catch (err) { log.warn({ err: err.message }, 'scheduled post check failed'); } finally { checking = false; }
+    });
+  }
+
+  // ↻ Re-post to the ❌ channels only (after reconnecting them in Post for Me).
+  router.post('/admin/instances/:id/retry', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      res.json({ ok: true, ...(await readyPost.retryFailed({ instanceId: req.params.id })) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   // ✏ Edit a scheduled post: delete it on Post for Me, back to a draft.
   router.post('/admin/instances/:id/unschedule', async (req, res) => {
     try {
@@ -355,7 +379,13 @@ const STATUS_LABEL = {
   draft: 'Ready video',
   transcript_review: 'Transcript review',
   scheduled: 'Scheduled',
+  partial: 'Partly posted',
 };
+
+function channelsOf(steps) {
+  const pub = ((steps || []).find((s) => s.key === 'publish') || {}).artifacts || {};
+  return Array.isArray(pub.channels) ? pub.channels : [];
+}
 
 function statusPill(status) {
   const cls = status === 'posted' ? 'ok' : status === 'failed' ? 'bad' : status === 'superseded' ? 'mut' : status === 'scheduled' ? 'info' : 'warn';
@@ -390,9 +420,10 @@ function listPage(rows, status) {
         <td>${esc(r.funnel_name || '—')}</td>
         <td>${r.duration_seconds != null ? esc(formatDuration(r.duration_seconds)) : '—'}</td>
         <td>${esc(usd(r.cost_usd))}</td>
-        <td>${statusPill(r.status)}${laneOf(r) === 'ready' && !r.locked ? ` <span class="hint">${esc(stageLabel(readyStage(r, steps)))}</span>` : ''}</td>
-        <td>${r.status === 'scheduled' ? `📅 ${esc(formatIst(r.scheduled_for))}` : esc(formatIst(r.posted_at))}</td>
+        <td>${statusPill(r.status)}${['draft', 'transcript_review'].includes(r.status) && laneOf(r) === 'ready' ? `<div class="hint">next: ${esc(stageLabel(readyStage(r, steps)))}</div>` : ''}</td>
+        <td class="when"><div title="Scheduled">📅 ${r.scheduled_for ? esc(formatIst(r.scheduled_for)) : '-'}</div><div title="Posted">✅ ${r.posted_at && ['posted', 'partial'].includes(r.status) ? esc(formatIst(r.posted_at)) : '-'}</div></td>
         <td class="actions">${preview} <a class="act" href="/api/v1/admin/instances/${esc(r.id)}">Open</a> ${del}</td>
+        <td class="chans">${esc(channelsOf(steps).map(channelText).join(', ')) || '<span class="hint">-</span>'}</td>
       </tr>`;
     })
     .join('');
@@ -407,8 +438,8 @@ function listPage(rows, status) {
       </div>
     </div>
     <table>
-      <thead><tr><th>Instance</th><th>Title</th><th>Funnel</th><th>Length</th><th>Cost</th><th>Status</th><th>Posted / scheduled</th><th></th></tr></thead>
-      <tbody>${body || '<tr><td colspan="8" class="hint">No instances yet. A run creates one; use + Sample to preview the UI.</td></tr>'}</tbody>
+      <thead><tr><th>Instance</th><th>Title</th><th>Funnel</th><th>Length</th><th>Cost</th><th>Status</th><th>Scheduled / posted</th><th>Actions</th><th>Channels</th></tr></thead>
+      <tbody>${body || '<tr><td colspan="9" class="hint">No instances yet. A run creates one; use + Sample to preview the UI.</td></tr>'}</tbody>
     </table>
     ${previewModal()}
   `, `
@@ -705,11 +736,19 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
 
   const scheduled = !!(single && single.status === 'scheduled');
   const failed = !!(single && single.status === 'failed');
-  const banner = scheduled
+  const partial = !!(single && single.status === 'partial');
+  const chans = single ? channelsOf(instances.parseSteps(single)) : [];
+  const chanList = chans.length ? `<div class="chans">${chans.map((c) => esc(channelText(c))).join('<br>')}</div>` : '';
+  const retryBtn = chans.some((c) => c.state === 'failed') ? '<button class="act primary" onclick="retryFailed()">↻ Post to the failed channels only</button>' : '';
+  const banner = partial
+    ? `<div class="schedbar bad">🟡 Partly posted. Reconnect the ❌ accounts in Post for Me, then re-post to just those (the ✅ ones are not posted again). ${retryBtn} <span class="hint" id="edmsg"></span>${chanList}</div>`
+    : scheduled && chans.some((c) => c.state === 'ok')
+      ? `<div class="schedbar">⏳ Re-posting to the failed channels… ${chanList}</div>`
+      : scheduled
     ? `<div class="schedbar">📅 Scheduled on Post for Me for <b>${esc(formatIst(single.scheduled_for))} IST</b>. To change anything, ✏ Edit first: the scheduled post is deleted, so nothing goes out while you correct it. It goes out again only when you press Schedule or Post now.
-        <button class="act primary" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span></div>`
+        <button class="act primary" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span>${chanList}</div>`
     : failed
-      ? `<div class="schedbar bad">⚠ Post for Me reported this post failed: ${esc(single.note || '')}. <button class="act primary" onclick="editSched()">✏ Edit and post again</button> <span class="hint" id="edmsg"></span></div>`
+      ? `<div class="schedbar bad">🔴 Post for Me reported this post failed on every channel. Reconnect the accounts in Post for Me, then ${retryBtn || 'post again'} — or ✏ Edit it first. <button class="act" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span>${chanList}</div>`
       : '';
   const head = single
     ? `<div class="top">
@@ -740,8 +779,8 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     ${head}
     ${banner}
     ${acctBar(src.resolved)}
-    <fieldset class="ro-set"${scheduled || failed ? ' disabled' : ''}><div class="grid">${cards}</div></fieldset>
-    <div class="bar"${scheduled || failed ? ' style="display:none"' : ''}>
+    <fieldset class="ro-set"${scheduled || failed || partial ? ' disabled' : ''}><div class="grid">${cards}</div></fieldset>
+    <div class="bar"${scheduled || failed || partial ? ' style="display:none"' : ''}>
       <button class="approve" onclick="postSel(false)">📅 Schedule ${single ? 'this video' : 'selected'}</button>
       <button class="approve" onclick="postSel(true)">⚡ Post ${single ? 'it' : 'selected'} now</button>
       <span id="rmsg" class="hint"></span>
@@ -771,6 +810,16 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     const toIst = v => v ? v.slice(8,10)+'-'+v.slice(5,7)+'-'+v.slice(0,4)+' '+v.slice(11,16) : '';
     const istNow = () => new Date(Date.now()+330*60000).toISOString().slice(0,16);
     document.querySelectorAll('input[type="datetime-local"]').forEach(e=>{ e.min=istNow(); });
+    async function retryFailed(){
+      const m=document.getElementById('edmsg'); if(m) m.textContent='Re-posting…';
+      try{
+        const r=await fetch(${JSON.stringify(single ? `/api/v1/admin/instances/${single.id}/retry` : '')},{method:'POST'});
+        const j=await r.json();
+        if(!j.ok) throw new Error(j.error||'failed');
+        if(m) m.textContent='🟢 Sent to '+j.retried+' channel(s). You get an email once Post for Me reports back.';
+        setTimeout(()=>location.reload(), 2500);
+      }catch(e){ if(m) m.textContent='⚠ '+e.message; }
+    }
     async function editSched(){
       const m=document.getElementById('edmsg'); if(m) m.textContent='Pausing…';
       try{
@@ -952,8 +1001,10 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         const j=await r.json();
         if(j.ok){
           const bad=(j.results||[]).filter(x=>!x.ok);
-          msg('Handed to Post for Me: '+j.posted+(bad.length?(', '+bad.length+' failed: '+bad.map(x=>x.name+' — '+x.error).join('; ')):'. Opening the log…'));
-          if(!bad.length) setTimeout(()=>location.href='/api/v1/admin/instances',1300);
+          const okd=(j.results||[]).filter(x=>x.ok);
+          const when=okd.map(x=>x.scheduledIso?('📅 '+x.whenIst):'⚡ now').join(', ');
+          msg((okd.length?'🟢 '+(nowCount===selections.length?'Sent to Post for Me to post now':'Scheduled')+' ('+when+'). You get an email when it goes live.':'')+(bad.length?(' 🔴 '+bad.length+' failed: '+bad.map(x=>x.name+': '+x.error).join('; ')):' Opening Instances…'));
+          if(!bad.length) setTimeout(()=>location.href='/api/v1/admin/instances?status=scheduled',2500);
         }
         else msg('Failed: '+(j.error||''));
       }catch(e){ msg('Failed: '+e.message); }
@@ -1149,6 +1200,7 @@ ${NAV_CSS}
  .pill.warn{background:#3a2f12;border-color:#7a5a1f;color:#f0d68f}
  .pill.bad{background:#3b1212;border-color:#6b1f1f;color:#ff9a9a}
  .pill.mut{background:#1c1c2a;color:#9a9ab0}
+ td.when div{white-space:nowrap}td.chans{font-size:.78rem;min-width:220px;line-height:1.5}
  .pill.info{background:#12263b;border-color:#1f4f7a;color:#8fc4ff}
  .ro{color:#8a8aa2;font-size:.85rem;margin:.2rem 0 1rem}
  .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.4rem 0 1rem}
@@ -1202,6 +1254,7 @@ ${NAV_CSS}
  @keyframes pb{0%{margin-left:-30%}100%{margin-left:100%}}
  .warnt{color:#f0d68f}
  .schedbar{border:1px solid #1f4f7a;background:#12263b;border-radius:8px;padding:.6rem .8rem;margin:.4rem 0 .8rem;font-size:.86rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+ .schedbar .chans{flex-basis:100%;font-size:.82rem;line-height:1.6}
  .schedbar.bad{border-color:#6b1f1f;background:#3b1212}
  fieldset.ro-set{border:0;margin:0;padding:0;min-width:0}
  .endcard{border-top:1px dashed #24243a;margin-top:.5rem;padding-top:.2rem}

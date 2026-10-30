@@ -99,3 +99,23 @@ describe('no em dashes in copy', () => {
     expect(normalizeCopy({ title: 'Why it fails — and what works', description: 'x', igCaption: 'y', short: 'z' }).title).toBe('Why it fails, and what works');
   });
 });
+
+import { mergeChannels, channelOutcome, channelText } from '../src/utils/laneSpec.js';
+
+describe('channels', () => {
+  const ch = [{ id: 'a', platform: 'youtube', name: 'G', state: 'waiting' }, { id: 'b', platform: 'x', name: 'GN', state: 'waiting' }];
+  it('marks each channel from Post for Me results', () => {
+    const m = mergeChannels(ch, { a: { success: true, url: 'https://y' }, b: { success: false, error: 'token expired' } });
+    expect(m.map((c) => c.state)).toEqual(['ok', 'failed']);
+    expect(channelOutcome(m)).toBe('partial');
+    expect(channelText(m[1])).toBe('❌ x GN (token expired)');
+    expect(channelOutcome(ch)).toBe('pending');
+  });
+  it('a retry fixes the failed one without touching the ✅ one', () => {
+    const first = mergeChannels(ch, { a: { success: true }, b: { success: false } });
+    const retry = first.map((c) => (c.state === 'failed' ? { ...c, state: 'waiting' } : c));
+    const after = mergeChannels(retry, { a: { success: false }, b: { success: true } });
+    expect(after.map((c) => c.state)).toEqual(['ok', 'ok']);
+    expect(channelOutcome(after)).toBe('posted');
+  });
+});

@@ -44,7 +44,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanWithCardArgs, progressPct } from '../utils/cleanSpec.js';
 import { writeFile } from 'node:fs/promises';
-import { TRANSCRIPT_REVIEW, postOutcome, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
+import { TRANSCRIPT_REVIEW, postOutcome, mergeChannels, channelOutcome, channelText, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
 import { formatIst } from '../utils/time.js';
 import { driveEmbedUrl } from '../utils/reviewSpec.js';
 import {
@@ -55,6 +55,8 @@ import {
   normalizeSelections,
   normalizePickedAccounts,
 } from '../utils/readyPostSpec.js';
+import * as tenantRepo from '../repositories/tenantRepository.js';
+import { settings } from '../settings/index.js';
 import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'readyPost' });
@@ -624,14 +626,16 @@ function draftView(row) {
 }
 
 /** Record one direct post as a posted instance (stages skipped; AI-copy cost if any). */
-async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, ref, copy = null, costs = [], durationSec = 0 }) {
+async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, ref, copy = null, costs = [], durationSec = 0, channels = [], request = null }) {
+  const publishArt = { posts: ref ? [ref] : [], caption, channels, ...(request ? { request } : {}) };
+  const sched = { postRefs: ref ? [ref] : [], scheduledFor: scheduledIso ? new Date(scheduledIso) : null, postNow: !scheduledIso };
   const draft = copy ? (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [driveId]).catch(() => ({})))[driveId] : null;
   if (draft) {
     // The generation (and its cost) is already on the draft — finish it.
     let steps = instanceService.parseSteps(draft);
     steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy } });
     steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
-    steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: ref ? [ref] : [], caption } });
+    steps = patchStep(steps, 'publish', { status: 'done', artifacts: publishArt });
     await instanceRepo.saveSteps(draft.id, steps, sumInstanceCost(steps));
     await instanceRepo.setMeta(draft.id, {
       title: `${copy.title || 'Ready video'} · ${scheduledIso ? formatIst(scheduledIso, { withTime: false }) : 'now'}`,
@@ -639,7 +643,7 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
       scheduledFor: scheduledIso ? new Date(scheduledIso) : undefined,
     });
     // Scheduled (still editable) until Post for Me reports it published — see refreshScheduled.
-    await instanceRepo.markScheduled(draft.id, { postRefs: ref ? [ref] : [], scheduledFor: scheduledIso ? new Date(scheduledIso) : new Date() });
+    await instanceRepo.markScheduled(draft.id, sched);
     return draft.id;
   }
   const inst = await instanceService.createForFunnel({
@@ -662,10 +666,10 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
     steps = addCostToSteps(steps, ['transcript', 'images'].includes(step) ? step : 'script', { ...entry, costUsd: Number(entry.costUsd) || 0, at: new Date().toISOString() });
   }
   steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
-  steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: ref ? [ref] : [], caption } });
+  steps = patchStep(steps, 'publish', { status: 'done', artifacts: publishArt });
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   if (durationSec) await instanceRepo.setMeta(inst.id, { durationSeconds: durationSec });
-  await instanceRepo.markScheduled(inst.id, { postRefs: ref ? [ref] : [], scheduledFor: scheduledIso ? new Date(scheduledIso) : new Date() });
+  await instanceRepo.markScheduled(inst.id, sched);
   return inst.id;
 }
 
@@ -711,13 +715,9 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
     const caption = ai ? ai.caption : (sel.caption.trim() || captionFor(cfg, resolved));
     try {
       await drive.shareAnyone(sel.driveId);
-      const result = await publish.createPost({
-        accountIds: accounts,
-        caption,
-        mediaUrl: videoUrl,
-        scheduledAt: scheduledIso || undefined,
-        platformConfigurations: ai ? ai.platformConfigurations : platformConfigurations,
-      });
+      // Kept on the instance so failed channels can be re-posted exactly.
+      const request = { caption, mediaUrl: videoUrl, platformConfigurations: ai ? ai.platformConfigurations : platformConfigurations };
+      const result = await publish.createPost({ accountIds: accounts, scheduledAt: scheduledIso || undefined, ...request });
       const ref = result && result.id ? result.id : null;
       // Arm comment-to-DM for this post (funnel-level keyword/dm defaults).
       if (ref && resolved.captureKeyword) {
@@ -733,7 +733,8 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
       }
       const instanceId = await recordPostedInstance({
         funnel, driveId: sel.driveId, caption, scheduledIso, ref,
-        copy: sel.copy ? normalizeCopy(sel.copy) : null, costs: sel.costs,
+        copy: sel.copy ? normalizeCopy(sel.copy) : null, costs: sel.costs, request,
+        channels: accounts.map((id) => ({ id, platform: (accountMap[id] || {}).platform || '', name: (accountMap[id] || {}).account_name || id, state: 'waiting' })),
         durationSec: (cleaned && cleaned.durationSec) || (await videoDurations([sel.driveId]))[sel.driveId] || 0,
       });
       try {
@@ -741,7 +742,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
       } catch (err) {
         log.warn({ err: err.message, driveId: sel.driveId }, 'POSTED tag failed (posted anyway)');
       }
-      results.push({ driveId: sel.driveId, name: sel.name, scheduledIso, caption, ref, instanceId, ok: true });
+      results.push({ driveId: sel.driveId, name: sel.name, scheduledIso, whenIst: scheduledIso ? formatIst(scheduledIso) : '', caption, ref, instanceId, ok: true });
       log.info({ funnel: funnel.name, driveId: sel.driveId, scheduledIso, ref }, 'ready video posted');
     } catch (err) {
       log.error({ err: err.message, driveId: sel.driveId }, 'ready video post failed');
@@ -754,10 +755,12 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
 }
 
 /**
- * Scheduled → posted only when Post for Me says so: for each scheduled
- * instance whose time has come, read its post; all accounts published =
- * posted (locked), some = posted with a note, none = failed (editable).
- * Runs when the instances list or an instance opens. Returns how many changed.
+ * Scheduled → posted only when Post for Me says so. For each scheduled
+ * instance whose time has come: read every post it made, mark each channel
+ * ✅ / ❌ from Post for Me's per-account results, then posted (locked, all ✅),
+ * partly posted (some ✅ — open for a retry of the rest) or failed (none ✅),
+ * and email the outcome. Runs on a 5-minute timer, on /jobs/run-due, and when
+ * the instances list or an instance opens. Returns how many changed.
  */
 export async function refreshScheduled({ tenantId = 'default' } = {}) {
   const rows = await instanceRepo.scheduledDue(tenantId).catch(() => []);
@@ -770,28 +773,114 @@ export async function refreshScheduled({ tenantId = 'default' } = {}) {
     try {
       const refs = (Array.isArray(row.post_refs) ? row.post_refs : JSON.parse(row.post_refs || '[]')).filter(Boolean);
       if (!refs.length) continue;
-      const outcomes = [];
-      const errors = [];
+      let steps = instanceService.parseSteps(row);
+      const pub = ((steps.find((x) => x.key === 'publish') || {}).artifacts) || {};
+      const results = {};
+      let pending = false;
+      let postedAt = null;
       for (const ref of refs) {
         const post = await publish.getPost(ref);
-        const results = post && post.status === 'processed' ? await publish.postResults(ref) : [];
-        outcomes.push(postOutcome(post, results));
-        for (const r of results) if (!r.success) errors.push(String((r.error && (r.error.message || JSON.stringify(r.error))) || 'failed').slice(0, 160));
+        if (postOutcome(post) === 'pending') { pending = true; continue; }
+        if (post.updated_at && (!postedAt || new Date(post.updated_at) > postedAt)) postedAt = new Date(post.updated_at);
+        for (const r of await publish.postResults(ref)) {
+          const prev = results[r.social_account_id];
+          if (prev && prev.success) continue;
+          results[r.social_account_id] = {
+            success: !!r.success,
+            error: r.error ? (r.error.message || JSON.stringify(r.error)) : '',
+            url: (r.platform_data && (r.platform_data.url || r.platform_data.permalink)) || '',
+          };
+        }
       }
-      if (outcomes.some((o) => o === 'pending')) continue;
-      if (outcomes.every((o) => o === 'failed')) {
-        await instanceRepo.setStatus(row.id, 'failed', `Post for Me: ${errors.join('; ') || 'failed'}`);
+      if (pending) continue;
+      // Older instances have no channel list: build it from the results.
+      const base = Array.isArray(pub.channels) && pub.channels.length
+        ? pub.channels
+        : Object.keys(results).map((id) => ({ id, platform: '', name: id, state: 'waiting' }));
+      const channels = mergeChannels(base, results);
+      const outcome = channelOutcome(channels);
+      if (outcome === 'pending') continue;
+      steps = patchStep(steps, 'publish', { artifacts: { channels } });
+      await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
+      const when = postedAt || new Date();
+      const failedNote = channels.filter((c) => c.state === 'failed').map((c) => channelText(c)).join('; ');
+      if (outcome === 'posted') await instanceRepo.lockAsPosted(row.id, { postRefs: refs, postedAt: when });
+      else if (outcome === 'partial') await instanceRepo.markPartial(row.id, { note: failedNote, postedAt: when });
+      else {
+        await instanceRepo.setStatus(row.id, 'failed', failedNote || 'Post for Me reported a failure');
         await instanceRepo.setPostStatus(row.id, 'failed');
-      } else {
-        if (errors.length) await instanceRepo.setStatus(row.id, 'scheduled', `Some accounts failed: ${errors.join('; ')}`);
-        await instanceRepo.lockAsPosted(row.id, { postRefs: refs, postedAt: row.scheduled_for || new Date() });
       }
+      await sendOutcomeEmail({ providers, row, steps, channels, outcome, postedAt: when }).catch((err) => log.warn({ err: err.message }, 'post outcome email failed'));
       changed += 1;
     } catch (err) {
       log.warn({ err: err.message, instance: row.id }, 'scheduled post check failed (will retry)');
     }
   }
   return changed;
+}
+
+/** refreshScheduled for every tenant (the timer / run-due ping). */
+export async function refreshAllTenants() {
+  const list = await tenantRepo.list().catch(() => [{ id: 'default' }]);
+  let n = 0;
+  for (const t of list) n += await refreshScheduled({ tenantId: t.id }).catch(() => 0);
+  return n;
+}
+
+/**
+ * ↻ Post to the failed channels only: the same post (caption, video,
+ * per-platform copy and thumbnails), sent again to just the ❌ accounts —
+ * after you reconnect them in Post for Me. The ✅ ones are not posted twice.
+ */
+export async function retryFailed({ instanceId }) {
+  const row = await instanceRepo.get(instanceId);
+  if (!row) throw new Error('instance not found');
+  if (!['partial', 'failed'].includes(row.status)) throw new Error('nothing failed on this instance');
+  let steps = instanceService.parseSteps(row);
+  const pub = ((steps.find((x) => x.key === 'publish') || {}).artifacts) || {};
+  const req = pub.request;
+  if (!req || !req.mediaUrl) throw new Error('this post was made before retries existed — use ✏ Edit and post it again');
+  const failed = (pub.channels || []).filter((c) => c.state === 'failed');
+  if (!failed.length) throw new Error('no failed channels to retry');
+  const providers = await buildProviders(row.tenant_id);
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+  const platforms = new Set(failed.map((c) => platformKey(c.platform)).filter(Boolean));
+  const configs = req.platformConfigurations
+    ? Object.fromEntries(Object.entries(req.platformConfigurations).filter(([k]) => !platforms.size || platforms.has(k)))
+    : undefined;
+  const result = await publish.createPost({ accountIds: failed.map((c) => c.id), caption: req.caption, mediaUrl: req.mediaUrl, platformConfigurations: configs });
+  const ref = result && result.id ? result.id : null;
+  if (!ref) throw new Error('Post for Me did not return a post id');
+  const refs = [...(Array.isArray(row.post_refs) ? row.post_refs : JSON.parse(row.post_refs || '[]')), ref];
+  const channels = (pub.channels || []).map((c) => (c.state === 'failed' ? { ...c, state: 'waiting', error: '' } : c));
+  steps = patchStep(steps, 'publish', { artifacts: { channels, posts: refs } });
+  await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
+  await instanceRepo.markScheduled(row.id, { postRefs: refs });
+  log.info({ instance: row.id, retried: failed.length, ref }, 'failed channels re-posted');
+  return { instanceId: row.id, retried: failed.length };
+}
+
+/** The go-live email: what went out and, per channel, ✅ or ❌ with the error. */
+async function sendOutcomeEmail({ providers, row, steps, channels, outcome, postedAt }) {
+  const funnel = row.funnel_id ? await funnels.get(row.funnel_id) : null;
+  const resolved = funnel ? await funnels.resolve(funnel) : {};
+  const to = resolved.approvalEmail || providers.resolved?.emails?.approvalGita || '';
+  if (!to) return;
+  const art = (k) => ((steps.find((x) => x.key === k) || {}).artifacts) || {};
+  const copy = art('script').copy || {};
+  const req = art('publish').request || {};
+  const head = { posted: '🟢 Posted', partial: '🟡 Partly posted', failed: '🔴 Post failed' }[outcome];
+  const base = settings.app.publicBaseUrl || '';
+  const link = `${base}/api/v1/admin/instances/${row.id}`;
+  const rows = channels.map((c) => `<tr><td>${c.state === 'ok' ? '✅' : '❌'}</td><td>${esc(c.platform)}</td><td>${esc(c.name)}</td><td>${c.url ? `<a href="${esc(c.url)}">open</a>` : esc(c.error || '')}</td></tr>`).join('');
+  const html = `<p><b>${head}</b> · ${esc(row.funnel_name || '')} · video</p>
+    <p><b>${esc(copy.title || row.title || '')}</b></p>
+    <p>Scheduled: ${esc(row.scheduled_for ? formatIst(row.scheduled_for) : '— (posted now)')}<br>Posted: ${esc(formatIst(postedAt))}</p>
+    <table border="1" cellpadding="6" style="border-collapse:collapse"><thead><tr><th></th><th>Platform</th><th>Account</th><th>Post / error</th></tr></thead><tbody>${rows}</tbody></table>
+    ${outcome !== 'posted' ? '<p>Reconnect the ❌ accounts in Post for Me, then open the instance and press <b>↻ Post to the failed channels only</b>.</p>' : ''}
+    <p>${req.mediaUrl ? `<a href="${esc(req.mediaUrl)}">▶ The video</a> · ` : ''}<a href="${esc(link)}">Open the instance</a></p>
+    <pre style="white-space:pre-wrap;font:inherit">${esc(copy.description || req.caption || '')}</pre>`;
+  await providers.mail.send({ to, subject: `${head}: ${copy.title || row.title || 'video'}`, html });
 }
 
 /**
@@ -838,7 +927,7 @@ async function sendPostedEmail({ providers, funnel, resolved, results }) {
       <tbody>${rows}</tbody>
     </table>`;
   try {
-    await providers.mail.send({ to, subject: `Posted ${ok.length} ready video(s) — ${funnel.name}`, html });
+    await providers.mail.send({ to, subject: `📅 Scheduled ${ok.length} ready video(s) · ${funnel.name} (a second email comes when each goes live)`, html });
   } catch (err) {
     log.warn({ err: err.message }, 'posted-summary email failed');
   }
@@ -849,5 +938,5 @@ function esc(s) {
 }
 
 export default {
-  refreshScheduled, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, postSelections,
+  refreshScheduled, refreshAllTenants, retryFailed, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, postSelections,
 };

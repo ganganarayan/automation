@@ -19,6 +19,7 @@ import cron from 'node-cron';
 import { DateTime } from 'luxon';
 import * as poster from '../services/funnelPosterService.js';
 import * as approvalService from '../services/approvalService.js';
+import * as readyPost from '../services/readyPostService.js';
 import * as funnels from '../repositories/funnelsRepository.js';
 import { requireAdminKey } from '../middleware/auth.js';
 import { settings } from '../settings/index.js';
@@ -85,6 +86,8 @@ export function register(ctx) {
       // Symmetric window: catches a funnel pinged ~10 min early and tolerates a
       // late run, without touching funnels scheduled far away.
       runDue(windowMin, windowMin, log).catch((e) => log.error({ err: e.message }, 'run-due failed'));
+      // Same ping: check scheduled ready videos against Post for Me (✅/❌ + email).
+      readyPost.refreshAllTenants().catch((e) => log.warn({ err: e.message }, 'scheduled post check failed'));
     } catch (err) {
       next(err);
     }
