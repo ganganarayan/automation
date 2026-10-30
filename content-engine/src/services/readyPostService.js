@@ -44,7 +44,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanWithCardArgs, progressPct } from '../utils/cleanSpec.js';
 import { writeFile } from 'node:fs/promises';
-import { TRANSCRIPT_REVIEW, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
+import { TRANSCRIPT_REVIEW, postOutcome, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
 import { formatIst } from '../utils/time.js';
 import { driveEmbedUrl } from '../utils/reviewSpec.js';
 import {
@@ -167,8 +167,10 @@ export async function instanceView(row) {
     const d = draftView(row);
     if (d) drafts[driveId] = d;
   }
+  const when = row.scheduled_for && new Date(row.scheduled_for) > new Date() ? formatIst(row.scheduled_for) : '';
   return {
     funnel, resolved, cfg, single: row,
+    prefills: [when || formatIst(defaultSlotsIso(resolved.publishTime, 1)[0])],
     source: { type: row.source_type || 'drive_folder', id: row.source_id || null },
     videos: [{ id: driveId, name: video.name || row.title || driveId }],
     drafts,
@@ -632,17 +634,18 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
     steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: ref ? [ref] : [], caption } });
     await instanceRepo.saveSteps(draft.id, steps, sumInstanceCost(steps));
     await instanceRepo.setMeta(draft.id, {
-      title: `${copy.title || 'Ready video'} — ${scheduledIso ? formatIst(scheduledIso, { withTime: false }) : 'now'}`,
+      title: `${copy.title || 'Ready video'} · ${scheduledIso ? formatIst(scheduledIso, { withTime: false }) : 'now'}`,
       durationSeconds: durationSec || undefined,
       scheduledFor: scheduledIso ? new Date(scheduledIso) : undefined,
     });
-    await instanceRepo.lockAsPosted(draft.id, { postRefs: ref ? [ref] : [], postedAt: scheduledIso ? new Date(scheduledIso) : new Date() });
+    // Scheduled (still editable) until Post for Me reports it published — see refreshScheduled.
+    await instanceRepo.markScheduled(draft.id, { postRefs: ref ? [ref] : [], scheduledFor: scheduledIso ? new Date(scheduledIso) : new Date() });
     return draft.id;
   }
   const inst = await instanceService.createForFunnel({
     tenantId: funnel.tenant_id,
     funnel,
-    title: `${copy && copy.title ? copy.title : 'Ready video'} — ${scheduledIso ? formatIst(scheduledIso, { withTime: false }) : 'now'}`,
+    title: `${copy && copy.title ? copy.title : 'Ready video'} · ${scheduledIso ? formatIst(scheduledIso, { withTime: false }) : 'now'}`,
     scheduledFor: scheduledIso ? new Date(scheduledIso) : null,
     sourceType: 'drive_folder',
     sourceRef: driveId,
@@ -662,7 +665,7 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
   steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: ref ? [ref] : [], caption } });
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   if (durationSec) await instanceRepo.setMeta(inst.id, { durationSeconds: durationSec });
-  await instanceRepo.lockAsPosted(inst.id, { postRefs: ref ? [ref] : [], postedAt: scheduledIso ? new Date(scheduledIso) : new Date() });
+  await instanceRepo.markScheduled(inst.id, { postRefs: ref ? [ref] : [], scheduledFor: scheduledIso ? new Date(scheduledIso) : new Date() });
   return inst.id;
 }
 
@@ -750,6 +753,72 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
   return { funnel: funnel.name, posted: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
 }
 
+/**
+ * Scheduled → posted only when Post for Me says so: for each scheduled
+ * instance whose time has come, read its post; all accounts published =
+ * posted (locked), some = posted with a note, none = failed (editable).
+ * Runs when the instances list or an instance opens. Returns how many changed.
+ */
+export async function refreshScheduled({ tenantId = 'default' } = {}) {
+  const rows = await instanceRepo.scheduledDue(tenantId).catch(() => []);
+  if (!rows.length) return 0;
+  const providers = await buildProviders(tenantId);
+  if (!providers.resolved.postformeKey) return 0;
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log);
+  let changed = 0;
+  for (const row of rows) {
+    try {
+      const refs = (Array.isArray(row.post_refs) ? row.post_refs : JSON.parse(row.post_refs || '[]')).filter(Boolean);
+      if (!refs.length) continue;
+      const outcomes = [];
+      const errors = [];
+      for (const ref of refs) {
+        const post = await publish.getPost(ref);
+        const results = post && post.status === 'processed' ? await publish.postResults(ref) : [];
+        outcomes.push(postOutcome(post, results));
+        for (const r of results) if (!r.success) errors.push(String((r.error && (r.error.message || JSON.stringify(r.error))) || 'failed').slice(0, 160));
+      }
+      if (outcomes.some((o) => o === 'pending')) continue;
+      if (outcomes.every((o) => o === 'failed')) {
+        await instanceRepo.setStatus(row.id, 'failed', `Post for Me: ${errors.join('; ') || 'failed'}`);
+        await instanceRepo.setPostStatus(row.id, 'failed');
+      } else {
+        if (errors.length) await instanceRepo.setStatus(row.id, 'scheduled', `Some accounts failed: ${errors.join('; ')}`);
+        await instanceRepo.lockAsPosted(row.id, { postRefs: refs, postedAt: row.scheduled_for || new Date() });
+      }
+      changed += 1;
+    } catch (err) {
+      log.warn({ err: err.message, instance: row.id }, 'scheduled post check failed (will retry)');
+    }
+  }
+  return changed;
+}
+
+/**
+ * ✏ Edit a scheduled post: delete it on Post for Me first (so nothing goes out
+ * while you correct it), then the instance is a draft again. Schedule or Post
+ * now creates a fresh post. Refused once Post for Me has started publishing.
+ */
+export async function unscheduleInstance({ instanceId }) {
+  const row = await instanceRepo.get(instanceId);
+  if (!row) throw new Error('instance not found');
+  if (row.locked) throw new Error('already posted — it can no longer be edited');
+  if (!['scheduled', 'failed'].includes(row.status)) throw new Error('this instance is not scheduled');
+  const refs = (Array.isArray(row.post_refs) ? row.post_refs : JSON.parse(row.post_refs || '[]')).filter(Boolean);
+  if (row.status === 'scheduled' && refs.length) {
+    const providers = await buildProviders(row.tenant_id);
+    const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+    for (const ref of refs) {
+      const post = await publish.getPost(ref).catch(() => null);
+      if (post && ['processing', 'processed'].includes(post.status)) throw new Error('Post for Me is already publishing this post — it can no longer be edited');
+      await publish.deletePost(ref);
+    }
+  }
+  await instanceRepo.unschedule(row.id);
+  log.info({ instance: row.id, deleted: refs.length }, 'scheduled post paused for editing');
+  return { instanceId: row.id };
+}
+
 async function sendPostedEmail({ providers, funnel, resolved, results }) {
   const to = resolved.approvalEmail || providers.resolved?.emails?.approvalGita || '';
   const ok = results.filter((r) => r.ok);
@@ -780,5 +849,5 @@ function esc(s) {
 }
 
 export default {
-  listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, postSelections,
+  refreshScheduled, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, postSelections,
 };

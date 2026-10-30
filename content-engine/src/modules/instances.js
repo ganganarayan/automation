@@ -30,7 +30,7 @@ import * as stageRunner from '../services/stageRunnerService.js';
 import * as jobRunner from '../core/jobRunner.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import { INSTANCE_STEPS, sumInstanceCost, costBreakdown, shortId, formatDuration } from '../utils/instanceSpec.js';
-import { READY_STAGES, SOURCE_TYPES, laneOf, readyStage, stageLabel } from '../utils/laneSpec.js';
+import { READY_STAGES, SOURCE_TYPES, laneOf, readyStage, stageLabel, istToInputValue } from '../utils/laneSpec.js';
 import { MANUAL_STAGES, STAGE_LABEL, inputKind, canExecute } from '../utils/manualStepSpec.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst } from '../utils/time.js';
@@ -52,6 +52,8 @@ export function register(ctx) {
     try {
       if (!(await guardHtml(req, res))) return;
       const status = req.query.status ? String(req.query.status) : null;
+      // Scheduled posts whose time has come: ask Post for Me whether they went out.
+      await readyPost.refreshScheduled({ tenantId: req.tenantId }).catch((err) => log.warn({ err: err.message }, 'scheduled refresh failed'));
       const rows = await instances.list({ tenantId: req.tenantId, status });
       res.type('html').send(listPage(rows, status));
     } catch (err) {
@@ -238,8 +240,9 @@ export function register(ctx) {
   router.get('/admin/instances/:id', async (req, res, next) => {
     try {
       if (!(await guardHtml(req, res))) return;
-      const row = await instances.get(req.params.id);
+      let row = await instances.get(req.params.id);
       if (!row) return res.redirect('/api/v1/admin/instances');
+      if (row.status === 'scheduled' && await readyPost.refreshScheduled({ tenantId: row.tenant_id }).catch(() => 0)) row = await instances.get(row.id);
       const steps = instances.parseSteps(row);
       const lane = laneOf(row);
       // A ready video in progress opens on its stage panels.
@@ -301,6 +304,16 @@ export function register(ctx) {
     }
   });
 
+  // ✏ Edit a scheduled post: delete it on Post for Me, back to a draft.
+  router.post('/admin/instances/:id/unschedule', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      res.json({ ok: true, ...(await readyPost.unscheduleInstance({ instanceId: req.params.id })) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   router.post('/admin/instances/:id/delete', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -341,10 +354,11 @@ const STATUS_LABEL = {
   manual: 'Generated (manual)',
   draft: 'Ready video',
   transcript_review: 'Transcript review',
+  scheduled: 'Scheduled',
 };
 
 function statusPill(status) {
-  const cls = status === 'posted' ? 'ok' : status === 'failed' ? 'bad' : status === 'superseded' ? 'mut' : 'warn';
+  const cls = status === 'posted' ? 'ok' : status === 'failed' ? 'bad' : status === 'superseded' ? 'mut' : status === 'scheduled' ? 'info' : 'warn';
   return `<span class="pill ${cls}">${esc(STATUS_LABEL[status] || status)}</span>`;
 }
 
@@ -358,7 +372,7 @@ function finalVideoId(steps) {
 }
 
 function listPage(rows, status) {
-  const tabs = [['', 'All'], ['transcript_review', 'Transcripts to verify'], ['draft', 'Ready videos'], ['final_review', 'In review'], ['posted', 'Posted']]
+  const tabs = [['', 'All'], ['transcript_review', 'Transcripts to verify'], ['draft', 'Ready videos'], ['scheduled', 'Scheduled'], ['final_review', 'In review'], ['posted', 'Posted']]
     .map(([v, l]) => `<a class="tab${(status || '') === v ? ' on' : ''}" href="/api/v1/admin/instances${v ? `?status=${v}` : ''}">${esc(l)}</a>`)
     .join('');
 
@@ -369,7 +383,7 @@ function listPage(rows, status) {
       const preview = vid
         ? `<button class="act" onclick="openVideo('${esc(vid)}')">▶ Preview</button>`
         : '<span class="hint">—</span>';
-      const del = r.locked ? '' : `<button class="act danger" onclick="del('${esc(r.id)}')">Delete</button>`;
+      const del = r.locked || r.status === 'scheduled' ? '' : `<button class="act danger" onclick="del('${esc(r.id)}')">Delete</button>`;
       return `<tr>
         <td><a href="/api/v1/admin/instances/${esc(r.id)}">${esc(shortId(r.id))}</a></td>
         <td>${esc(r.title || '—')}</td>
@@ -377,7 +391,7 @@ function listPage(rows, status) {
         <td>${r.duration_seconds != null ? esc(formatDuration(r.duration_seconds)) : '—'}</td>
         <td>${esc(usd(r.cost_usd))}</td>
         <td>${statusPill(r.status)}${laneOf(r) === 'ready' && !r.locked ? ` <span class="hint">${esc(stageLabel(readyStage(r, steps)))}</span>` : ''}</td>
-        <td>${esc(formatIst(r.posted_at))}</td>
+        <td>${r.status === 'scheduled' ? `📅 ${esc(formatIst(r.scheduled_for))}` : esc(formatIst(r.posted_at))}</td>
         <td class="actions">${preview} <a class="act" href="/api/v1/admin/instances/${esc(r.id)}">Open</a> ${del}</td>
       </tr>`;
     })
@@ -393,7 +407,7 @@ function listPage(rows, status) {
       </div>
     </div>
     <table>
-      <thead><tr><th>Instance</th><th>Title</th><th>Funnel</th><th>Length</th><th>Cost</th><th>Status</th><th>Posted</th><th></th></tr></thead>
+      <thead><tr><th>Instance</th><th>Title</th><th>Funnel</th><th>Length</th><th>Cost</th><th>Status</th><th>Posted / scheduled</th><th></th></tr></thead>
       <tbody>${body || '<tr><td colspan="8" class="hint">No instances yet. A run creates one; use + Sample to preview the UI.</td></tr>'}</tbody>
     </table>
     ${previewModal()}
@@ -681,7 +695,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
               <label class="nowrow"><input type="radio" name="when-${id}" checked onchange="toggleNow('${id}')"> 📅 Schedule</label>
               <label class="nowrow"><input type="radio" name="when-${id}" id="now-${id}" onchange="toggleNow('${id}')"> ⚡ Post now</label>
             </div>
-            <label class="fl">Schedule (IST DD-MM-YYYY HH:MM)<input id="sch-${id}" value="${esc(prefills[i] || '')}"></label>
+            <label class="fl">Schedule (IST) — pick the date and time<input id="sch-${id}" type="datetime-local" value="${esc(istToInputValue(prefills[i] || ''))}"></label>
           </div>
         </div>
       </div>
@@ -689,6 +703,14 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     })
     .join('');
 
+  const scheduled = !!(single && single.status === 'scheduled');
+  const failed = !!(single && single.status === 'failed');
+  const banner = scheduled
+    ? `<div class="schedbar">📅 Scheduled on Post for Me for <b>${esc(formatIst(single.scheduled_for))} IST</b>. To change anything, ✏ Edit first: the scheduled post is deleted, so nothing goes out while you correct it. It goes out again only when you press Schedule or Post now.
+        <button class="act primary" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span></div>`
+    : failed
+      ? `<div class="schedbar bad">⚠ Post for Me reported this post failed: ${esc(single.note || '')}. <button class="act primary" onclick="editSched()">✏ Edit and post again</button> <span class="hint" id="edmsg"></span></div>`
+      : '';
   const head = single
     ? `<div class="top">
       <div>
@@ -716,9 +738,10 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
 
   return shell(single ? `Instance ${shortId(single.id)}` : `Prepare — ${funnel.name}`, `
     ${head}
+    ${banner}
     ${acctBar(src.resolved)}
-    <div class="grid">${cards}</div>
-    <div class="bar">
+    <fieldset class="ro-set"${scheduled || failed ? ' disabled' : ''}><div class="grid">${cards}</div></fieldset>
+    <div class="bar"${scheduled || failed ? ' style="display:none"' : ''}>
       <button class="approve" onclick="postSel(false)">📅 Schedule ${single ? 'this video' : 'selected'}</button>
       <button class="approve" onclick="postSel(true)">⚡ Post ${single ? 'it' : 'selected'} now</button>
       <span id="rmsg" class="hint"></span>
@@ -744,6 +767,19 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     const $ = (p,id)=>document.getElementById(p+'-'+id);
     const post = (path, body)=>fetch('/api/v1/admin/instances/ready-ai/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({ funnelId:FUNNEL_ID }, body))}).then(r=>r.json());
     function msg(t){ const m=document.getElementById('rmsg'); if(m) m.textContent=t; }
+    // Date-time picker value (YYYY-MM-DDTHH:MM, IST) ⇄ "DD-MM-YYYY HH:MM" for the server.
+    const toIst = v => v ? v.slice(8,10)+'-'+v.slice(5,7)+'-'+v.slice(0,4)+' '+v.slice(11,16) : '';
+    const istNow = () => new Date(Date.now()+330*60000).toISOString().slice(0,16);
+    document.querySelectorAll('input[type="datetime-local"]').forEach(e=>{ e.min=istNow(); });
+    async function editSched(){
+      const m=document.getElementById('edmsg'); if(m) m.textContent='Pausing…';
+      try{
+        const r=await fetch(${JSON.stringify(single ? `/api/v1/admin/instances/${single.id}/unschedule` : '')},{method:'POST'});
+        const j=await r.json();
+        if(!j.ok) throw new Error(j.error||'failed');
+        location.reload();
+      }catch(e){ if(m) m.textContent='⚠ '+e.message; }
+    }
     function renumber(){ order.forEach((id,i)=>{ const b=$('ord',id); if(b) b.textContent='#'+(i+1); }); document.querySelectorAll('.ord').forEach(b=>{ if(order.indexOf(b.dataset.id)<0) b.textContent=''; }); }
     function cnt(id){ $('sc',id).textContent='('+$('sh',id).value.length+'/220)'; }
     function toggle(id){
@@ -904,7 +940,9 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if(nogen.length){ msg('✅ Approve + generate first for '+nogen.map(id=>$('ord',id).textContent||'this video').join(', ')+'.'); return; }
       const missing=order.filter(id=>!$('ti',id).value.trim()||!$('de',id).value.trim()||!$('ig',id).value.trim()||!$('sh',id).value.trim());
       if(missing.length){ msg('Fill every copy field for '+missing.map(id=>$('ord',id).textContent||'this video').join(', ')+'.'); return; }
-      const selections = order.map(id=>({ driveId:id, name:$('nm',id).value, caption:'', scheduledAt:$('sch',id).value, now:allNow||$('now',id).checked,
+      const late=order.filter(id=>!(allNow||$('now',id).checked) && (!$('sch',id).value || $('sch',id).value < istNow()));
+      if(late.length){ msg('Pick a future date and time for '+late.map(id=>$('ord',id).textContent||'this video').join(', ')+' (or choose ⚡ Post now).'); return; }
+      const selections = order.map(id=>({ driveId:id, name:$('nm',id).value, caption:'', scheduledAt:toIst($('sch',id).value), now:allNow||$('now',id).checked,
         copy:{ title:$('ti',id).value, description:$('de',id).value, igCaption:$('ig',id).value, short:$('sh',id).value }, costs:costs[id]||[], thumbs:thumbs[id]||{} }));
       const nowCount=selections.filter(s=>s.now).length;
       if(nowCount && !confirm(nowCount+' video(s) will go live on every channel right now. Continue?')) return;
@@ -914,7 +952,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         const j=await r.json();
         if(j.ok){
           const bad=(j.results||[]).filter(x=>!x.ok);
-          msg('Posted '+j.posted+(bad.length?(', '+bad.length+' failed: '+bad.map(x=>x.name+' — '+x.error).join('; ')):'. Opening the log…'));
+          msg('Handed to Post for Me: '+j.posted+(bad.length?(', '+bad.length+' failed: '+bad.map(x=>x.name+' — '+x.error).join('; ')):'. Opening the log…'));
           if(!bad.length) setTimeout(()=>location.href='/api/v1/admin/instances',1300);
         }
         else msg('Failed: '+(j.error||''));
@@ -1111,6 +1149,7 @@ ${NAV_CSS}
  .pill.warn{background:#3a2f12;border-color:#7a5a1f;color:#f0d68f}
  .pill.bad{background:#3b1212;border-color:#6b1f1f;color:#ff9a9a}
  .pill.mut{background:#1c1c2a;color:#9a9ab0}
+ .pill.info{background:#12263b;border-color:#1f4f7a;color:#8fc4ff}
  .ro{color:#8a8aa2;font-size:.85rem;margin:.2rem 0 1rem}
  .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.4rem 0 1rem}
  .steps .stepname{display:flex;align-items:center;gap:.5rem}
@@ -1162,6 +1201,9 @@ ${NAV_CSS}
  .pbar.busy i{width:30%!important;background:#2d6cdf;animation:pb 1.2s ease-in-out infinite}
  @keyframes pb{0%{margin-left:-30%}100%{margin-left:100%}}
  .warnt{color:#f0d68f}
+ .schedbar{border:1px solid #1f4f7a;background:#12263b;border-radius:8px;padding:.6rem .8rem;margin:.4rem 0 .8rem;font-size:.86rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+ .schedbar.bad{border-color:#6b1f1f;background:#3b1212}
+ fieldset.ro-set{border:0;margin:0;padding:0;min-width:0}
  .endcard{border-top:1px dashed #24243a;margin-top:.5rem;padding-top:.2rem}
  .panel{border:1px solid #24243a;border-radius:8px;padding:.5rem .7rem;margin-bottom:.6rem;background:#15151f}
  .panel h4{margin:0 0 .3rem;font-size:.86rem;color:#e8e8ef}

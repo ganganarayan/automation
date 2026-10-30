@@ -56,6 +56,7 @@ export function copySystemPrompt({ brief = '', audience = '', keyword = '', base
   return [
     String(base || '').trim() || DEFAULT_COPY_PROMPT,
     'Return ONLY a JSON object with exactly these string keys: "title", "description", "igCaption", "short", "thumbText", "thumbPrompt".',
+    'Never use em dashes or en dashes anywhere. Use a comma, a full stop or a colon instead.',
     keyword ? `Comment keyword: tell people to comment "${keyword}" to get the link in their DMs.` : '',
     brief ? `Brand / voice brief:\n${brief}` : '',
     audience ? `Audience: ${audience}` : '',
@@ -81,10 +82,15 @@ export function clip(text, max) {
   return `${(sp > max * 0.6 ? cut.slice(0, sp) : cut).trimEnd()}…`;
 }
 
+/** Em / en dashes → a comma (the copy must never carry them, whatever the model wrote). */
+export function noDashes(text) {
+  return String(text ?? '').replace(/\s*[—–]\s*/g, ', ').replace(/^, |, $/g, '').replace(/,\s*([,.:;!?])/g, '$1');
+}
+
 /** Normalise the model's JSON (or an edited copy from the UI) into the four fields. */
 export function normalizeCopy(raw) {
   const o = raw && typeof raw === 'object' ? raw : {};
-  const str = (v) => String(v ?? '').trim();
+  const str = (v) => noDashes(String(v ?? '').trim()).trim();
   return {
     title: clip(str(o.title).replace(/[<>]/g, ''), LIMITS.title),
     description: clip(str(o.description), LIMITS.description),
@@ -161,5 +167,5 @@ export function platformConfigsFor(copy, { accountIds = [], accountMap = {}, cta
 
 export default {
   LIMITS, extractAudioArgs, copySystemPrompt, copyUserPrompt, clip, normalizeCopy,
-  withLink, xPost, threadsPost, platformKey, platformConfigsFor,
+  withLink, xPost, threadsPost, platformKey, platformConfigsFor, noDashes,
 };

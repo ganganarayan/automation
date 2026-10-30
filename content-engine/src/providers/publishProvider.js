@@ -58,6 +58,27 @@ export function createPostForMeProvider(cfg, log) {
       return res.data;
     },
 
+    /** One post: { id, status: draft | scheduled | processing | processed, scheduled_at, ... }. */
+    async getPost(id) {
+      const res = await request(`${BASE}/social-posts/${encodeURIComponent(id)}`, { headers: requireKey(), label: 'postforme.getPost', log, retries: 1 });
+      if (!res.ok) throw new ExternalAPIError(`Post for Me post lookup failed (${res.status})`, { details: res.text?.slice(0, 300) });
+      return res.data;
+    },
+
+    /** Per-account outcome of a processed post: [{ social_account_id, success, error }]. */
+    async postResults(postId) {
+      const res = await request(`${BASE}/social-post-results?post_id=${encodeURIComponent(postId)}&limit=50`, { headers: requireKey(), label: 'postforme.postResults', log, retries: 1 });
+      if (!res.ok) throw new ExternalAPIError(`Post for Me results lookup failed (${res.status})`, { details: res.text?.slice(0, 300) });
+      return Array.isArray(res.data?.data) ? res.data.data : [];
+    },
+
+    /** Delete a post that hasn't gone out yet (a scheduled one). */
+    async deletePost(id) {
+      const res = await request(`${BASE}/social-posts/${encodeURIComponent(id)}`, { method: 'DELETE', headers: requireKey(), label: 'postforme.deletePost', log, retries: 0 });
+      if (!res.ok && res.status !== 404) throw new ExternalAPIError(`Post for Me delete failed (${res.status})`, { details: res.text?.slice(0, 300) });
+      return true;
+    },
+
     /** Upload a file (e.g. a thumbnail) to Post for Me's storage; returns its public URL. */
     async uploadMedia(buffer, contentType = 'image/jpeg') {
       const headers = requireKey();

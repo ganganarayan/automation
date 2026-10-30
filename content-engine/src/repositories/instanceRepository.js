@@ -132,6 +132,40 @@ export async function lockAsPosted(id, { postRefs = [], postedAt = new Date() } 
   return rowCount > 0;
 }
 
+/** Handed to Post for Me: scheduled (still editable) until it really goes out. */
+export async function markScheduled(id, { postRefs = [], scheduledFor = null } = {}) {
+  const { rowCount } = await query(
+    `UPDATE instances
+        SET status = 'scheduled', post_status = 'scheduled', post_refs = $2,
+            scheduled_for = COALESCE($3, scheduled_for), approved_at = COALESCE(approved_at, now()), updated_at = now()
+      WHERE id = $1 AND locked = false`,
+    [id, JSON.stringify(postRefs), scheduledFor],
+  );
+  return rowCount > 0;
+}
+
+/** Back to an editable draft (its scheduled post was deleted). */
+export async function unschedule(id) {
+  const { rowCount } = await query(
+    `UPDATE instances SET status = 'draft', post_status = 'pending', post_refs = '[]'::jsonb, updated_at = now()
+      WHERE id = $1 AND locked = false AND status IN ('scheduled', 'failed')`,
+    [id],
+  );
+  return rowCount > 0;
+}
+
+/** Scheduled instances whose time has come (Post for Me should have published them). */
+export async function scheduledDue(tenantId = 'default', limit = 25) {
+  const { rows } = await query(
+    `SELECT * FROM instances
+      WHERE tenant_id = $1 AND status = 'scheduled' AND locked = false
+        AND (scheduled_for IS NULL OR scheduled_for <= now())
+      ORDER BY scheduled_for NULLS FIRST LIMIT $2`,
+    [tenantId, limit],
+  );
+  return rows;
+}
+
 export async function setPostStatus(id, postStatus) {
   await query('UPDATE instances SET post_status = $2, updated_at = now() WHERE id = $1', [id, postStatus]);
 }
@@ -165,7 +199,24 @@ export async function existsForFunnelOnDate(funnelId, dateKey, tenantId = 'defau
 }
 
 /**
- * Drive file ids this funnel has already posted (the stitch step's video) — how
+ * Is a video (scheduled or posted) already going out for this funnel on this
+ * IST date (yyyy-MM-dd)? The sheet image lane skips such days.
+ */
+export async function videoOnDate(funnelId, dateKey, tenantId = 'default') {
+  if (!funnelId || !dateKey) return false;
+  const { rows } = await query(
+    `SELECT 1 FROM instances
+       WHERE tenant_id = $1 AND funnel_id = $2 AND status IN ('scheduled', 'posted')
+         AND scheduled_for IS NOT NULL
+         AND (scheduled_for AT TIME ZONE 'Asia/Kolkata')::date = $3::date
+       LIMIT 1`,
+    [tenantId, funnelId, dateKey],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Drive file ids this funnel has already posted or scheduled (the stitch step's video) — how
  * the ready-video lanes hide posted files when they can't rename them in Drive.
  */
 export async function postedDriveIds(funnelId, tenantId = 'default') {
@@ -173,7 +224,7 @@ export async function postedDriveIds(funnelId, tenantId = 'default') {
   const { rows } = await query(
     `SELECT DISTINCT s->'artifacts'->'video'->>'driveId' AS drive_id
        FROM instances, jsonb_array_elements(steps) s
-      WHERE tenant_id = $1 AND funnel_id = $2 AND status = 'posted'
+      WHERE tenant_id = $1 AND funnel_id = $2 AND status IN ('posted', 'scheduled')
         AND s->>'key' = 'stitch'`,
     [tenantId, funnelId],
   );
@@ -198,6 +249,6 @@ export async function draftsByDriveIds(funnelId, tenantId = 'default', driveIds 
 }
 
 export default {
-  create, get, list, logRows, saveSteps, setStatus, setMeta, setSource, bumpRound, lockAsPosted, setPostStatus, remove,
-  existsForFunnelOnDate, postedDriveIds, draftsByDriveIds,
+  create, get, list, logRows, saveSteps, setStatus, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, unschedule, scheduledDue, setPostStatus, remove,
+  existsForFunnelOnDate, videoOnDate, postedDriveIds, draftsByDriveIds,
 };

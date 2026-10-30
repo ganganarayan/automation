@@ -137,7 +137,27 @@ export function whisperPrompt(glossary, max = 800) {
   return s ? `${s}.` : '';
 }
 
+/**
+ * What Post for Me says about one post: 'pending' (not out yet), 'posted'
+ * (every account published), 'partial' (some did) or 'failed' (none did).
+ */
+export function postOutcome(post, results = []) {
+  if (!post || post.status !== 'processed') return 'pending';
+  const list = Array.isArray(results) ? results : [];
+  if (!list.length) return 'posted';
+  const ok = list.filter((r) => r && r.success).length;
+  if (ok === list.length) return 'posted';
+  return ok ? 'partial' : 'failed';
+}
+
+/** "DD-MM-YYYY HH:MM" (IST) → the "YYYY-MM-DDTHH:MM" a date-time picker holds; '' if not that shape. */
+export function istToInputValue(text) {
+  const m = String(text || '').trim().match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}` : '';
+}
+
 export default {
+  postOutcome, istToInputValue,
   SOURCE_TYPES, READY_STAGES, TRANSCRIPT_REVIEW, laneOf, transcriptApproved, canGenerateCopy, readyStage, stageLabel,
   isSrt, srtToText, prepareTranscript, glossaryTerms, whisperPrompt,
 };

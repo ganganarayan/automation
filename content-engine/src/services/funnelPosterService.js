@@ -30,6 +30,8 @@ import { createPostForMeProvider } from '../providers/publishProvider.js';
 import * as captureRules from './captureRules.js';
 import { extractRow, composePrompt, composeCaptions, buildPlatformConfigs } from '../utils/postCompose.js';
 import { publishAtIst } from '../utils/scheduling.js';
+import { targetPostAt, postDateKey } from '../utils/videoSchedule.js';
+import { videoOnDate } from '../repositories/instanceRepository.js';
 import { request } from '../core/httpClient.js';
 import { childLogger } from '../core/logger.js';
 import { settings } from '../settings/index.js';
@@ -85,6 +87,16 @@ export async function runFunnel(funnelRow) {
   if (!f.sheetId) {
     log.warn('funnel has no content sheet; skipping');
     return;
+  }
+  // Videos first: by default the sheet image only goes out on a day with no
+  // video scheduled, so posting never gaps when the video runway runs dry.
+  const cfg = await funnels.getConfig(funnelRow.id).catch(() => ({}));
+  if ((cfg.image_when || 'no_video') === 'no_video') {
+    const day = postDateKey(targetPostAt({ publishTime: f.publishTime }));
+    if (await videoOnDate(f.id, day, f.tenantId).catch(() => false)) {
+      log.info({ day }, 'a video is scheduled that day; sheet image skipped');
+      return;
+    }
   }
   const providers = await buildProviders(f.tenantId);
   const tab = await tabFor(providers.sheets, f);

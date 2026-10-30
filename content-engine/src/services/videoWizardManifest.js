@@ -45,6 +45,13 @@ export const WIZARD_STEPS = [
       { key: 'generate_time', label: 'Generate/approval time (IST)', type: 'time', default: '22:00' },
       { key: 'generate_days', label: 'Days to run (blank = every day)', type: 'weekdays' },
       { key: 'publish_time', label: 'Publish time (IST)', type: 'time', default: '08:02' },
+      {
+        key: 'image_when', label: 'Sheet image posts', type: 'select', default: 'no_video',
+        options: [
+          { value: 'no_video', label: 'Only on days with no video scheduled (fills gaps in the video runway)' },
+          { value: 'always', label: 'Every run, even when a video posts that day' },
+        ],
+      },
     ],
   },
   {

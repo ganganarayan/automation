@@ -72,3 +72,30 @@ describe('stages', () => {
     expect(laneOf({ status: 'final_review' })).toBe('pipeline');
   });
 });
+
+import { postOutcome, istToInputValue } from '../src/utils/laneSpec.js';
+import { noDashes, normalizeCopy } from '../src/utils/aiCopySpec.js';
+
+describe('scheduled → posted', () => {
+  it('is posted only once Post for Me processed it', () => {
+    expect(postOutcome({ status: 'scheduled' }, [])).toBe('pending');
+    expect(postOutcome({ status: 'processing' }, [])).toBe('pending');
+    expect(postOutcome(null)).toBe('pending');
+    expect(postOutcome({ status: 'processed' }, [{ success: true }, { success: true }])).toBe('posted');
+    expect(postOutcome({ status: 'processed' }, [{ success: true }, { success: false }])).toBe('partial');
+    expect(postOutcome({ status: 'processed' }, [{ success: false }])).toBe('failed');
+  });
+  it('turns DD-MM-YYYY HH:MM into a picker value', () => {
+    expect(istToInputValue('30-10-2026 23:30')).toBe('2026-10-30T23:30');
+    expect(istToInputValue('tomorrow')).toBe('');
+  });
+});
+
+describe('no em dashes in copy', () => {
+  it('replaces em / en dashes with a comma', () => {
+    expect(noDashes('Manifestation stops working — the Gita fixes it')).toBe('Manifestation stops working, the Gita fixes it');
+    expect(noDashes('Three days – one shift.')).toBe('Three days, one shift.');
+    expect(noDashes('a-b stays')).toBe('a-b stays');
+    expect(normalizeCopy({ title: 'Why it fails — and what works', description: 'x', igCaption: 'y', short: 'z' }).title).toBe('Why it fails, and what works');
+  });
+});
