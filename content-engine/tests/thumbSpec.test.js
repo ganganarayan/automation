@@ -42,3 +42,12 @@ describe('thumbSpec', () => {
     expect(pc.instagram.media).toEqual([{ url: 'https://v', thumbnail_timestamp_ms: 0 }]);
   });
 });
+
+describe('thumbSvg sub-head', () => {
+  it('draws the sub-head under the headline in the accent colour', () => {
+    const svg = thumbSvg({ ...THUMB_SPECS.youtube, text: 'Why STHIRA works', sub: 'The combat engine, repaired' });
+    expect(svg).toContain('The combat engine');
+    expect(svg).toContain(`fill="${THUMB_SPECS.youtube.accent}"`);
+    expect(thumbSvg({ ...THUMB_SPECS.youtube, text: 'Only headline' })).not.toContain('font-weight="700"');
+  });
+});

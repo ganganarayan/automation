@@ -128,9 +128,12 @@ export function register(ctx) {
   router.post('/admin/instances/ready-ai/transcript', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      const { funnelId, driveId, name, text, approve, source } = req.body || {};
+      const { funnelId, driveId, name, text, headline, subhead, imagePrompt, approve, source } = req.body || {};
       if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
-      res.json({ ok: true, ...(await readyPost.saveTranscript({ funnelId, driveId: String(driveId), name: String(name || ''), text: String(text || ''), approve: approve === true, source })) });
+      res.json({ ok: true, ...(await readyPost.saveTranscript({
+        funnelId, driveId: String(driveId), name: String(name || ''), text: String(text || ''),
+        headline: String(headline || ''), subhead: String(subhead || ''), imagePrompt: String(imagePrompt || ''), approve: approve === true, source,
+      })) });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -177,9 +180,9 @@ export function register(ctx) {
   router.post('/admin/instances/ready-ai/clean', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      const { funnelId, driveId, zoomPct, trimEndSec, name, source } = req.body || {};
+      const { funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, name, source } = req.body || {};
       if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
-      res.json({ ok: true, ...(await readyPost.startClean({ funnelId, driveId, zoomPct, trimEndSec, name: String(name || ''), source })) });
+      res.json({ ok: true, ...(await readyPost.startClean({ funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, name: String(name || ''), source })) });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -641,20 +644,30 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
               <label class="nowrow">cut last s <input id="tr-${id}" class="cleantr" type="number" min="0" max="60" step="0.5" style="width:4.5rem"></label>
               <button class="act" id="cl-${id}" onclick="cleanVid('${id}')">✂ Clean video</button>
             </div>
+            <div class="endcard">
+              <label class="fl">End card text — black screen, white text, centred (blank = no end card)<textarea id="ec-${id}" class="endtx" rows="2" placeholder="e.g. Take the free assessment"></textarea></label>
+              <div class="nowrow">
+                <label class="nowrow" style="flex:1">link <input id="el-${id}" class="endln" style="flex:1" placeholder="https://…"></label>
+                <label class="nowrow">seconds <input id="es-${id}" class="endsec" type="number" min="0" max="15" step="0.5" style="width:4.5rem"></label>
+              </div>
+            </div>
             <div class="pbar" id="pb-${id}"><i></i></div>
-            <div class="hint" id="cs-${id}">Zooms in keeping the top fixed so the bottom-right watermark leaves the frame, and cuts the outro. Posting then uses the cleaned video.</div>
+            <div class="hint" id="cs-${id}">Zooms in keeping the top fixed so the bottom-right watermark leaves the frame, and cuts the outro. The end card plays after the video. Posting then uses the cleaned video.</div>
           </div>
           <div class="panel"><h4>2 · Transcript <span class="hint">check the names, then approve</span></h4>
             <label class="fl">Edit the transcript, or paste an SRT — cue numbers and timestamps are removed before the AI reads it (the SRT itself is kept)<textarea id="tx-${id}" rows="7" oninput="txEdited('${id}')"></textarea></label>
+            <label class="fl">Thumbnail headline — big text on the image (you write it)<input id="hl-${id}" maxlength="80" placeholder="e.g. Why STHIRA works"></label>
+            <label class="fl">Thumbnail sub-head — smaller line under it (optional)<input id="su-${id}" maxlength="120"></label>
+            <label class="fl">Image prompt — drafted from the transcript; edit it to change the artwork<textarea id="ip-${id}" rows="4"></textarea></label>
             <div class="nowrow">
               <button class="act" id="tb-${id}" onclick="transcribe('${id}')">🎙 Transcribe</button>
-              <button class="act" id="ts-${id}" onclick="saveTx('${id}', false)">💾 Save transcript</button>
-              <button class="act primary" id="ta-${id}" onclick="saveTx('${id}', true)">✅ Approve transcript</button>
+              <button class="act" id="ts-${id}" onclick="saveTx('${id}', false)">💾 Save</button>
+              <button class="act primary" id="gb-${id}" onclick="approveGen('${id}')">✅ Approve + generate copy &amp; thumbnails</button>
             </div>
-            <div class="hint" id="tg-${id}">Not transcribed yet — 🎙 Transcribe, or paste the text / SRT and approve.</div>
+            <div class="hint" id="tg-${id}">Not transcribed yet — 🎙 Transcribe, or paste the text / SRT. Then type the headline, check the image prompt and approve.</div>
           </div>
-          <div class="panel"><h4>3 · AI copy + thumbnails <span class="hint">runs only from an approved transcript</span></h4>
-            <div class="nowrow"><button class="act" id="gb-${id}" disabled onclick="gen('${id}')">✨ Generate copy + thumbnails</button> <button class="act" id="sv-${id}" onclick="saveDraft('${id}')">💾 Save draft</button> <span class="hint" id="gs-${id}"></span></div>
+          <div class="panel"><h4>3 · AI copy + thumbnails <span class="hint">written from the approved transcript, with your headline</span></h4>
+            <div class="nowrow"><button class="act" id="sv-${id}" onclick="saveDraft('${id}')">💾 Save draft</button> <span class="hint" id="gs-${id}"></span></div>
             <div class="thumbs" id="th-${id}"></div>
           </div>
         </div>
@@ -746,11 +759,11 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     }
     function setInst(id, instanceId){ const o=$('ol',id); if(!SINGLE && o && instanceId) o.innerHTML='<a class="hint" href="/api/v1/admin/instances/'+instanceId+'">Open instance ›</a>'; }
     // The gate: ✨ Generate is live only for an approved transcript.
-    function gateUi(id){ $('gb',id).disabled = !approved[id] || !!busy[id]; }
+    function gateUi(id){ $('gb',id).disabled = !!busy[id]; }
     function txEdited(id){
       if(!approved[id]) return;
       approved[id]=false; gateUi(id); setStage(id, 'transcript');
-      $('tg',id).textContent='🟡 Edited — 💾 Save or ✅ Approve again before generating.';
+      $('tg',id).textContent='🟡 Edited — ✅ Approve again to use it.';
     }
     async function transcribe(id){
       if(busy[id]) return;
@@ -760,29 +773,42 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         const j=await post('transcribe', { driveId:id, name:$('nm',id).value, source:SOURCE, accessToken: await driveToken() });
         if(!j.ok) throw new Error(j.error||'failed');
         $('tx',id).value=j.transcript||''; approved[id]=false; setStage(id, 'transcript'); setInst(id, j.instanceId);
+        if(j.imagePrompt) $('ip',id).value=j.imagePrompt;
         costs[id]=(costs[id]||[]).concat(j.costs||[]);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
-        $('tg',id).textContent=(j.transcribed?'🟡 Transcribed':'🟡 No speech found — type a description, or approve empty to write from the file name')+' · $'+usd.toFixed(4)+' — check the names, edit, then ✅ Approve.';
+        $('tg',id).textContent=(j.transcribed?'🟡 Transcribed':'🟡 No speech found — type a description, or approve empty to write from the file name')+' · $'+usd.toFixed(4)+' — check the names, type the headline, check the image prompt, then ✅ Approve + generate.'+(j.promptError?' (Image prompt draft failed: '+j.promptError+' — write one.)':'');
       }catch(e){ $('tg',id).textContent='⚠ '+e.message; }
       busy[id]=false; $('tb',id).disabled=false; gateUi(id);
     }
     async function saveTx(id, approve){
-      if(busy[id]) return;
+      if(busy[id] && !approve) return false;
       const text=$('tx',id).value;
-      if(approve && !text.trim() && !confirm('The transcript is empty — the copy will be written from the file name and the brand brief. Approve anyway?')) return;
-      $('ts',id).disabled=true; $('ta',id).disabled=true;
+      if(approve && !$('hl',id).value.trim()){ $('tg',id).textContent='🟡 Type the thumbnail headline first.'; $('hl',id).focus(); return false; }
+      if(approve && !text.trim() && !confirm('The transcript is empty — the copy will be written from the file name and the brand brief. Approve anyway?')) return false;
+      $('ts',id).disabled=true;
+      let ok=false;
       try{
-        const j=await post('transcript', { driveId:id, name:$('nm',id).value, source:SOURCE, text, approve });
+        const j=await post('transcript', { driveId:id, name:$('nm',id).value, source:SOURCE, text, approve, headline:$('hl',id).value, subhead:$('su',id).value, imagePrompt:$('ip',id).value });
         if(!j.ok) throw new Error(j.error||'failed');
         $('tx',id).value=j.transcript||''; approved[id]=!!j.approved; setStage(id, j.stage); setInst(id, j.instanceId);
-        $('tg',id).textContent=(j.approved?'🟢 Approved '+j.approvedIst+' — ✨ Generate copy + thumbnails is unlocked.':'💾 Saved — not approved yet.')+(j.srt?' SRT timestamps removed for the AI; the SRT is kept.':'');
+        $('tg',id).textContent=(j.approved?'🟢 Approved '+j.approvedIst+'.':'💾 Saved — not approved yet.')+(j.srt?' SRT timestamps removed for the AI; the SRT is kept.':'');
+        ok=true;
       }catch(e){ $('tg',id).textContent='⚠ '+e.message; }
-      $('ts',id).disabled=false; $('ta',id).disabled=false; gateUi(id);
+      $('ts',id).disabled=false;
+      return ok;
+    }
+    // One step: save the transcript + your headline / sub-head / image prompt, approve, then write the copy and thumbnails.
+    async function approveGen(id){
+      if(busy[id]) return;
+      busy[id]=true; gateUi(id);
+      const ok=await saveTx(id, true);
+      busy[id]=false;
+      if(ok) await gen(id); else gateUi(id);
     }
     // Show one generation (fresh, or a saved draft restored after a reload).
     function applyGen(id, j){
       $('ti',id).value=j.copy.title||''; $('de',id).value=withCta(j.copy.description); $('ig',id).value=j.copy.igCaption||''; $('sh',id).value=j.copy.short||''; cnt(id);
-      $('gb',id).textContent='✨ Regenerate copy + thumbnails';
+      $('gb',id).textContent='✅ Approve + regenerate copy & thumbnails';
       thumbs[id]=j.thumbs||{};
       $('th',id).innerHTML=(j.sizes||[]).map(z=>'<a class="'+(z.size==='landscape'?'wide':'tall')+'" href="'+z.url+'" target="_blank" rel="noopener" title="Open full size"><img src="'+z.url+'"><span>'+z.label+' · '+z.platforms.join(', ')+'</span></a>').join('')
         +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':' — the first frame will be used')+'</div>':'');
@@ -791,14 +817,15 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     const SAVED = ${JSON.stringify(drafts).replace(/</g, '\\u003c')};
     // ✂ Clean: the last zoom / cut used in this browser is the default for the next video.
     const cleaning = {};
-    let CO = { zoomPct: 10, trimEndSec: 0 };
+    let CO = { zoomPct: 10, trimEndSec: 0, endText: '', endLink: '', endSec: 4 };
     try{ CO = Object.assign(CO, JSON.parse(localStorage.getItem('cleanOpts')||'{}')); }catch(e){}
     document.querySelectorAll('.cleanzm').forEach(e=>{ e.value=CO.zoomPct; }); document.querySelectorAll('.cleantr').forEach(e=>{ e.value=CO.trimEndSec; });
+    document.querySelectorAll('.endtx').forEach(e=>{ e.value=CO.endText||''; }); document.querySelectorAll('.endln').forEach(e=>{ e.value=CO.endLink||CTA; }); document.querySelectorAll('.endsec').forEach(e=>{ e.value=CO.endSec; });
     const mmss = n=>Math.floor(n/60)+':'+String(Math.round(n)%60).padStart(2,'0');
     function bar(id, pct, on){ const b=$('pb',id); if(!b) return; b.classList.toggle('on', !!on); b.firstElementChild.style.width=Math.max(0,Math.min(100,pct||0))+'%'; b.classList.toggle('busy', on && !(pct>0)); }
     function showClean(id, c){
       bar(id, 0, false);
-      $('cs',id).innerHTML='🟢 Cleaned (zoom '+c.zoomPct+'%, cut last '+c.trimEndSec+' s → '+mmss(c.durationSec||0)+') · <a href="'+c.url+'" target="_blank" rel="noopener">▶ Preview cleaned video</a> · posting uses this copy';
+      $('cs',id).innerHTML='🟢 Cleaned (zoom '+c.zoomPct+'%, cut last '+c.trimEndSec+' s'+(c.endSec?', end card '+c.endSec+' s':'')+' → '+mmss(c.durationSec||0)+') · <a href="'+c.url+'" target="_blank" rel="noopener">▶ Preview cleaned video</a> · posting uses this copy';
       if($('zm',id)) $('zm',id).value=c.zoomPct; if($('tr',id)) $('tr',id).value=c.trimEndSec;
     }
     async function pollClean(id){
@@ -821,10 +848,11 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     async function cleanVid(id){
       if(cleaning[id]) return;
       const zoomPct=Number($('zm',id).value)||0, trimEndSec=Number($('tr',id).value)||0;
-      try{ localStorage.setItem('cleanOpts', JSON.stringify({ zoomPct, trimEndSec })); }catch(e){}
+      const endText=$('ec',id).value, endLink=$('el',id).value.trim(), endSec=(endText.trim()||endLink)?(Number($('es',id).value)||0):0;
+      try{ localStorage.setItem('cleanOpts', JSON.stringify({ zoomPct, trimEndSec, endText, endLink, endSec:Number($('es',id).value)||0 })); }catch(e){}
       cleaning[id]=true; $('cl',id).disabled=true; bar(id, 0, true); $('cs',id).textContent='✂ Starting…';
       try{
-        const j=await post('clean', { driveId:id, zoomPct, trimEndSec, name:$('nm',id).value, source:SOURCE });
+        const j=await post('clean', { driveId:id, zoomPct, trimEndSec, endText, endLink, endSec, name:$('nm',id).value, source:SOURCE });
         if(!j.ok) throw new Error(j.error||'failed');
         pollClean(id);
       }catch(e){ cleaning[id]=false; $('cl',id).disabled=false; bar(id, 0, false); $('cs',id).textContent='⚠ '+e.message; }
@@ -834,8 +862,9 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       const d=SAVED[id];
       if(d.clean) showClean(id, d.clean);
       if(d.hasTranscript || d.transcript) $('tx',id).value=d.transcript||'';
+      $('hl',id).value=d.headline||''; $('su',id).value=d.subhead||''; $('ip',id).value=d.imagePrompt||'';
       approved[id]=!!d.approved; gateUi(id);
-      if(d.hasTranscript) $('tg',id).textContent=d.approved?('🟢 Approved '+d.approvedIst+(d.srt?' · SRT kept':'')):'🟡 Waiting for your approval — check the names, then ✅ Approve.';
+      if(d.hasTranscript) $('tg',id).textContent=d.approved?('🟢 Approved '+d.approvedIst+(d.srt?' · SRT kept':'')):'🟡 Waiting for you — check the names, type the headline, check the image prompt, then ✅ Approve + generate.';
       if(d.copy){ applyGen(id, d); $('gs',id).textContent='💾 Saved draft from '+d.atIst+' · $'+Number(d.costUsd||0).toFixed(4); }
     });
     // Keep this video's current copy (your edits too) without regenerating.
@@ -853,7 +882,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     }
     async function gen(id){
       if(busy[id]) return;
-      if(!approved[id]){ $('gs',id).textContent='✅ Approve the transcript first.'; return; }
+      if(!approved[id]){ $('gs',id).textContent='✅ Approve the transcript first.'; gateUi(id); return; }
       busy[id]=true; gateUi(id); $('gs',id).textContent='Writing copy + designing thumbnails… (about a minute)';
       try{
         const j=await post('generate', { driveId:id, name:$('nm',id).value, accounts: pickedAccounts(), accessToken: await driveToken() });
@@ -872,7 +901,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if(order.some(id=>busy[id])){ msg('Wait for the transcript / copy to finish.'); return; }
       if(order.some(id=>cleaning[id])){ msg('Wait for ✂ Clean to finish.'); return; }
       const nogen=order.filter(id=>!done[id]);
-      if(nogen.length){ msg('✅ Approve the transcript and ✨ Generate copy first for '+nogen.map(id=>$('ord',id).textContent||'this video').join(', ')+'.'); return; }
+      if(nogen.length){ msg('✅ Approve + generate first for '+nogen.map(id=>$('ord',id).textContent||'this video').join(', ')+'.'); return; }
       const missing=order.filter(id=>!$('ti',id).value.trim()||!$('de',id).value.trim()||!$('ig',id).value.trim()||!$('sh',id).value.trim());
       if(missing.length){ msg('Fill every copy field for '+missing.map(id=>$('ord',id).textContent||'this video').join(', ')+'.'); return; }
       const selections = order.map(id=>({ driveId:id, name:$('nm',id).value, caption:'', scheduledAt:$('sch',id).value, now:allNow||$('now',id).checked,
@@ -1133,6 +1162,7 @@ ${NAV_CSS}
  .pbar.busy i{width:30%!important;background:#2d6cdf;animation:pb 1.2s ease-in-out infinite}
  @keyframes pb{0%{margin-left:-30%}100%{margin-left:100%}}
  .warnt{color:#f0d68f}
+ .endcard{border-top:1px dashed #24243a;margin-top:.5rem;padding-top:.2rem}
  .panel{border:1px solid #24243a;border-radius:8px;padding:.5rem .7rem;margin-bottom:.6rem;background:#15151f}
  .panel h4{margin:0 0 .3rem;font-size:.86rem;color:#e8e8ef}
  .chips{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:.35rem}

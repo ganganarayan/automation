@@ -42,7 +42,8 @@ import sharp from 'sharp';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizeCleanOpts, progressPct } from '../utils/cleanSpec.js';
+import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanWithCardArgs, progressPct } from '../utils/cleanSpec.js';
+import { writeFile } from 'node:fs/promises';
 import { TRANSCRIPT_REVIEW, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
 import { formatIst } from '../utils/time.js';
 import { driveEmbedUrl } from '../utils/reviewSpec.js';
@@ -57,6 +58,15 @@ import {
 import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'readyPost' });
+
+// Drafts the thumbnail artwork prompt at the transcript stage (reviewed by the
+// operator before anything is paid for).
+const IMAGE_PROMPT_SYSTEM = [
+  'You write one English prompt for an image model to create the thumbnail artwork of a short video, from its transcript.',
+  'Describe one vivid, emotionally striking scene that captures the core idea (subject, setting, mood, lighting, colours, camera angle).',
+  'No text, letters, words or logos in the image. Stay faithful to the video.',
+  'Return ONLY a JSON object: {"imagePrompt": "..."}',
+].join('\n');
 
 async function loadFunnel(funnelId, pickedAccounts = null) {
   const funnel = await funnels.get(Number(funnelId));
@@ -262,17 +272,42 @@ export async function transcribeVideo({ tenantId = 'default', funnelId, driveId,
     if (t.durationSeconds > 0) durationCache.set(id, Math.round(t.durationSeconds));
     cost = { ...costTranscript({ provider: tp.provider, minutes: t.minutes }), at: new Date().toISOString() };
   }
+  // Draft the thumbnail image prompt from the same transcript, for the operator
+  // to review with it. The headline + sub-head are typed by the operator.
+  let imagePrompt = '';
+  let promptCost = null;
+  let promptError = '';
+  try {
+    const r = await providers.llm.generateJsonDetailed({
+      system: IMAGE_PROMPT_SYSTEM,
+      user: copyUserPrompt({ transcript: text, fileName: name, glossary: glossaryTerms(providers.resolved.prompts?.glossary) }),
+      maxTokens: 1500,
+    });
+    imagePrompt = String((r.data || {}).imagePrompt || '').trim().slice(0, 1500);
+    promptCost = { ...costText({ inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, model: r.model }), at: new Date().toISOString() };
+  } catch (err) {
+    promptError = err.message;
+    log.warn({ err: err.message, driveId: id }, 'image prompt draft failed (write it by hand)');
+  }
   const { inst, steps: base } = await ensureInstance({ funnel, driveId: id, name, source });
+  const prevArt = ((base.find((x) => x.key === 'transcript') || {}).artifacts) || {};
   let steps = patchStep(base, 'transcript', {
-    status: 'done', artifacts: { text, cues, srt: '', source: 'whisper', approvedAt: null }, finishedAt: new Date().toISOString(), error: null,
+    status: 'done',
+    artifacts: { text, cues, srt: '', source: 'whisper', approvedAt: null, headline: prevArt.headline || '', subhead: prevArt.subhead || '', imagePrompt: imagePrompt || prevArt.imagePrompt || '' },
+    finishedAt: new Date().toISOString(), error: null,
   });
   if (cost) steps = addCostToSteps(steps, 'transcript', { ...cost, costUsd: Number(cost.costUsd) || 0 });
+  if (promptCost) steps = addCostToSteps(steps, 'images', { ...promptCost, costUsd: Number(promptCost.costUsd) || 0 });
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   await instanceRepo.setStatus(inst.id, TRANSCRIPT_REVIEW);
   const durationSec = durationCache.get(id) || 0;
   if (durationSec) await instanceRepo.setMeta(inst.id, { durationSeconds: durationSec });
   log.info({ funnel: funnel.name, driveId: id, words: text.split(/\s+/).filter(Boolean).length }, 'ready video transcribed (awaiting approval)');
-  return { instanceId: inst.id, transcript: text, transcribed: audio.length > 0, costs: cost ? [{ step: 'transcript', ...cost }] : [], stage: 'transcript' };
+  return {
+    instanceId: inst.id, transcript: text, transcribed: audio.length > 0, imagePrompt: imagePrompt || prevArt.imagePrompt || '', promptError,
+    headline: prevArt.headline || '', subhead: prevArt.subhead || '',
+    costs: [...(cost ? [{ step: 'transcript', ...cost }] : []), ...(promptCost ? [{ step: 'images', ...promptCost }] : [])], stage: 'transcript',
+  };
 }
 
 /**
@@ -281,13 +316,17 @@ export async function transcribeVideo({ tenantId = 'default', funnelId, driveId,
  * captions). `approve` passes the gate; a changed text without it needs
  * approving again. One video at a time — there is no bulk approve.
  */
-export async function saveTranscript({ funnelId, driveId, name = '', text = '', approve = false, source = null }) {
+export async function saveTranscript({ funnelId, driveId, name = '', text = '', headline = '', subhead = '', imagePrompt = '', approve = false, source = null }) {
   if (!driveId) throw new Error('driveId required');
   const id = String(driveId);
   const { funnel } = await loadFunnel(funnelId);
   const { inst, steps: base } = await ensureInstance({ funnel, driveId: id, name, source });
   const prev = ((base.find((x) => x.key === 'transcript') || {}).artifacts) || {};
   const next = prepareTranscript(text);
+  const head = String(headline || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const sub = String(subhead || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const prompt = String(imagePrompt || '').trim().slice(0, 1500);
+  if (approve && !head) throw new Error('Type the thumbnail headline before approving');
   const unchanged = next.text === String(prev.text || '').trim();
   const srt = next.srt || (unchanged ? prev.srt || '' : '');
   const approvedAt = approve ? new Date().toISOString() : (unchanged ? prev.approvedAt || null : null);
@@ -296,6 +335,7 @@ export async function saveTranscript({ funnelId, driveId, name = '', text = '', 
     artifacts: {
       text: next.text, srt, cues: unchanged ? prev.cues || [] : [],
       source: unchanged ? prev.source || 'edited' : (next.srt ? 'srt' : 'edited'), approvedAt,
+      headline: head, subhead: sub, imagePrompt: prompt,
     },
   });
   const status = approvedAt ? 'draft' : TRANSCRIPT_REVIEW;
@@ -319,7 +359,8 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   const draft = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [String(driveId)]))[String(driveId)];
   const draftSteps = draft ? instanceService.parseSteps(draft) : [];
   if (!draft || !canGenerateCopy(draftSteps)) throw new Error('Approve the transcript first — copy and thumbnails are written only from an approved transcript');
-  const transcript = String((((draftSteps.find((x) => x.key === 'transcript') || {}).artifacts) || {}).text || '');
+  const tArt = ((draftSteps.find((x) => x.key === 'transcript') || {}).artifacts) || {};
+  const transcript = String(tArt.text || '');
   const providers = await buildProviders(funnel.tenant_id || tenantId);
   const costs = [];
   const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
@@ -348,7 +389,7 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
     const imageModel = /^gpt-image/.test(String(providers.resolved.openai?.imageModel || '')) ? providers.resolved.openai.imageModel : 'gpt-image-1';
     let base = null;
     try {
-      base = await providers.llm.generateImage({ prompt: thumbImagePrompt(copy.thumbPrompt || copy.title), size: '1024x1024', model: imageModel });
+      base = await providers.llm.generateImage({ prompt: thumbImagePrompt(tArt.imagePrompt || copy.thumbPrompt || copy.title), size: '1024x1024', model: imageModel });
       costs.push({ step: 'images', ...costImages({ count: 1, size: '1024x1024', model: imageModel }) });
     } catch (err) {
       log.warn({ err: err.message }, 'thumbnail artwork failed (using a video frame)');
@@ -359,7 +400,8 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
         ? await ffmpeg.extractFrame({ videoBuffer: video, ext })
         : await ffmpeg.extractFrame({ url: publicDlUrl(driveId) }).catch(async () => ffmpeg.extractFrame({ videoBuffer: await getVideo(), ext }));
     }
-    ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text: copy.thumbText || copy.title }));
+    // The operator's headline + sub-head (typed at the transcript stage) go on the image.
+    ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text: tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '' }));
   } catch (err) {
     thumbError = err.message;
     log.warn({ err: err.message, driveId }, 'thumbnail generation failed (first frame will be used)');
@@ -376,7 +418,7 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
  * hook headline) and upload it to Post for Me. Returns { thumbs: platform ->
  * url, sizes: [{ size, label, url, platforms }] }.
  */
-async function renderThumbs({ providers, platforms, base, text }) {
+async function renderThumbs({ providers, platforms, base, text, sub = '' }) {
   const postformeKey = providers.resolved.postformeKey || '';
   if (!postformeKey) throw new Error('No Post for Me API key — set it under Settings → API Keys');
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
@@ -387,7 +429,7 @@ async function renderThumbs({ providers, platforms, base, text }) {
     if (!users.length) continue;
     const jpg = await sharp(base)
       .resize(spec.w, spec.h, { fit: 'cover', position: 'attention' })
-      .composite([{ input: Buffer.from(thumbSvg({ ...spec, accent: THUMB_ACCENT, text })) }])
+      .composite([{ input: Buffer.from(thumbSvg({ ...spec, accent: THUMB_ACCENT, text, sub })) }])
       .jpeg({ quality: 86 })
       .toBuffer();
     const url = await publish.uploadMedia(jpg, 'image/jpeg');
@@ -422,7 +464,7 @@ const cleanJobs = new Map();
  * corner watermark leaves the frame, cut the outro), then upload it to Post for
  * Me. The page polls cleanStatus.
  */
-export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, name = '', source = null }) {
+export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endText = '', endLink = '', endSec = 0, name = '', source = null }) {
   if (!driveId) throw new Error('driveId required');
   const id = String(driveId);
   const { funnel } = await loadFunnel(funnelId);
@@ -430,7 +472,7 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, name 
   if (!providers.resolved.postformeKey) throw new Error('No Post for Me API key — set it under Settings → API Keys');
   const job = cleanJobs.get(id);
   if (job && job.state === 'running') return job;
-  const opts = normalizeCleanOpts({ zoomPct, trimEndSec });
+  const opts = { ...normalizeCleanOpts({ zoomPct, trimEndSec }), ...normalizeEndCard({ endText, endLink, endSec }) };
   const running = { state: 'running', startedAt: Date.now(), phase: 'starting', pct: 0, ...opts };
   cleanJobs.set(id, running);
   const onPhase = (patch) => { const j = cleanJobs.get(id); if (j && j.state === 'running') Object.assign(j, patch); };
@@ -451,15 +493,27 @@ async function runClean({ funnel, providers, driveId, opts, name, source, onPhas
   try {
     const outPath = join(dir, 'clean.mp4');
     const t0 = Date.now();
-    const outSec = keepSec || total;
+    const ffmpeg = createFfmpegProvider({}, log);
+    const url0 = publicDlUrl(driveId);
+    // End card: black screen + the operator's text and link, after the video.
+    let args = null;
+    if (opts.endSec > 0) {
+      const info = await ffmpeg.probeVideo({ url: url0 });
+      const w = info.width || 1080;
+      const h = info.height || 1920;
+      const card = join(dir, 'card.png');
+      await writeFile(card, await sharp(Buffer.from(endCardSvg({ w, h, text: opts.endText, link: opts.endLink }))).png().toBuffer());
+      args = cleanWithCardArgs({ input: url0, card, output: outPath, zoomPct: opts.zoomPct, keepSec, cardSec: opts.endSec, w, h, fps: info.fps || 30, hasAudio: info.hasAudio });
+    }
+    const outSec = (keepSec || total) + (opts.endSec || 0);
     onPhase({ phase: 'encoding', pct: 0, totalSec: outSec });
-    await createFfmpegProvider({}, log).cleanVideo({
-      url: publicDlUrl(driveId), outPath, zoomPct: opts.zoomPct, keepSec,
+    await ffmpeg.cleanVideo({
+      url: url0, outPath, zoomPct: opts.zoomPct, keepSec, args,
       onProgress: (sec) => onPhase({ pct: progressPct(sec, outSec), doneSec: Math.round(sec) }),
     });
     onPhase({ phase: 'uploading', pct: 100 });
     const url = await createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log).uploadFile(outPath, 'video/mp4');
-    const clean = { url, ...opts, durationSec: Math.round(keepSec || total), at: new Date().toISOString() };
+    const clean = { url, ...opts, durationSec: Math.round((keepSec || total) + (opts.endSec || 0)), at: new Date().toISOString() };
     await saveClean(funnel, driveId, clean, { name, source });
     log.info({ driveId, ...opts, seconds: Math.round((Date.now() - t0) / 1000) }, 'video cleaned + uploaded');
     return clean;
@@ -562,7 +616,7 @@ function draftView(row) {
   const t = art('transcript');
   return {
     instanceId: row.id, stage: readyStage(row, steps), clean, copy: art('script').copy || null,
-    transcript: t.text || '', hasTranscript, srt: !!t.srt, approved: !!t.approvedAt, approvedIst: t.approvedAt ? formatIst(t.approvedAt) : '',
+    transcript: t.text || '', headline: t.headline || '', subhead: t.subhead || '', imagePrompt: t.imagePrompt || '', hasTranscript, srt: !!t.srt, approved: !!t.approvedAt, approvedIst: t.approvedAt ? formatIst(t.approvedAt) : '',
     thumbs: art('images').thumbs || {}, sizes: art('images').sizes || [], costUsd, atIst: formatIst(row.updated_at),
   };
 }

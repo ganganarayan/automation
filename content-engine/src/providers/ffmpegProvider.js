@@ -126,8 +126,8 @@ export function createFfmpegProvider(cfg = {}, log) {
      * URL, so download and encode run together; `onProgress(seconds)` gets the
      * output time written so far, from ffmpeg's own -progress report.
      */
-    cleanVideo({ url, outPath, zoomPct, keepSec, onProgress = null }) {
-      const args = ['-progress', 'pipe:1', '-nostats', ...cleanVideoArgs({ input: url, output: outPath, zoomPct, keepSec })];
+    cleanVideo({ url, outPath, zoomPct, keepSec, onProgress = null, args: custom = null }) {
+      const args = ['-progress', 'pipe:1', '-nostats', ...(custom || cleanVideoArgs({ input: url, output: outPath, zoomPct, keepSec }))];
       return new Promise((resolve, reject) => {
         const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
         let errTail = '';
@@ -150,6 +150,21 @@ export function createFfmpegProvider(cfg = {}, log) {
      * A video's length in seconds, read by ffprobe from a public URL (range
      * reads of the header only). 0 when it can't be read.
      */
+    /** Size, frame rate and whether there's sound (for the end card); zeros when unknown. */
+    async probeVideo({ url }) {
+      const probe = cfg.probeBin || process.env.FFPROBE_PATH || bin.replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1');
+      try {
+        const { stdout } = await run(probe, ['-v', 'error', '-show_entries', 'stream=codec_type,width,height,r_frame_rate', '-of', 'json', url], { timeout: 20000 });
+        const streams = (JSON.parse(String(stdout)) || {}).streams || [];
+        const v = streams.find((x) => x.codec_type === 'video') || {};
+        const [n, d] = String(v.r_frame_rate || '').split('/').map(Number);
+        return { width: Number(v.width) || 0, height: Number(v.height) || 0, fps: n > 0 && d > 0 ? n / d : 0, hasAudio: streams.some((x) => x.codec_type === 'audio') };
+      } catch (err) {
+        log?.warn?.({ err: err.message }, 'ffprobe video info failed');
+        return { width: 0, height: 0, fps: 0, hasAudio: true };
+      }
+    },
+
     async probeDuration({ url }) {
       const probe = cfg.probeBin || process.env.FFPROBE_PATH || bin.replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1');
       try {

@@ -11,7 +11,8 @@
  *               - THUMB_SIZES: size -> { w, h, label, layout }
  *               - PLATFORM_SIZE: platform -> size; THUMB_SPECS: platform -> its size spec
  *               - wrapText(text, maxChars, maxLines): lines
- *               - thumbSvg({ w, h, text, layout, accent }): SVG overlay string
+ *               - thumbSvg({ w, h, text, sub, layout, accent }): SVG overlay string
+ *                 (text = the headline, sub = an optional smaller sub-head)
  *               - thumbImagePrompt(prompt): the image-model prompt
  *               - thumbMedia(videoUrl, thumbUrl): Post for Me media item
  * Dependencies: none.
@@ -65,14 +66,20 @@ const xmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<':
  * The overlay drawn on the frame: a darkening gradient behind the text and the
  * hook as big bold white text with a black outline (no accent bar).
  */
-export function thumbSvg({ w, h, text, layout = 'center', accent = '#FFFFFF' }) {
+export function thumbSvg({ w, h, text, sub = '', layout = 'center', accent = '#FFFFFF' }) {
   const portrait = h > w;
   const lines = wrapText(text, portrait ? 12 : 16, 3);
   const longest = Math.max(1, ...lines.map((l) => l.length));
   // ~0.7em per glyph for heavy bold fonts keeps the longest line inside 84% of the width.
   const size = Math.round(Math.min(portrait ? w * 0.12 : h * 0.14, (w * 0.84) / (longest * 0.7)));
   const lh = Math.round(size * 1.15);
-  const block = lh * lines.length;
+  // Sub-head: smaller, under the headline, up to two lines.
+  const subLines = wrapText(sub, portrait ? 28 : 42, 2);
+  const subLongest = Math.max(1, ...subLines.map((l) => l.length));
+  const subSize = subLines.length ? Math.round(Math.min(size * 0.48, (w * 0.86) / (subLongest * 0.58))) : 0;
+  const subLh = Math.round(subSize * 1.2);
+  const subGap = subLines.length ? Math.round(size * 0.35) : 0;
+  const block = lh * lines.length + subGap + subLh * subLines.length;
   const anchor = layout === 'left' || layout === 'top' ? 'start' : 'middle';
   const x = anchor === 'start' ? Math.round(w * 0.06) : Math.round(w / 2);
   const top = {
@@ -90,8 +97,17 @@ export function thumbSvg({ w, h, text, layout = 'center', accent = '#FFFFFF' }) 
   const tspans = lines
     .map((l, i) => `<tspan x="${x}" y="${y0 + i * lh}">${xmlEsc(l)}</tspan>`)
     .join('');
+  const subY0 = y0 + (lines.length - 1) * lh + subGap + subSize;
+  const subSpans = subLines
+    .map((l, i) => `<tspan x="${x}" y="${subY0 + i * subLh}">${xmlEsc(l)}</tspan>`)
+    .join('');
+  const font = 'font-family="Noto Sans, Noto Sans Devanagari, DejaVu Sans, sans-serif"';
+  const subText = subSpans
+    ? `
+<text text-anchor="${anchor}" ${font} font-weight="700" font-size="${subSize}" fill="${accent}" stroke="#000000" stroke-width="${Math.max(2, Math.round(subSize * 0.07))}" paint-order="stroke">${subSpans}</text>`
+    : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs>${band.split('<rect')[0]}</defs><rect${band.split('<rect')[1]}
-<text text-anchor="${anchor}" font-family="Noto Sans, Noto Sans Devanagari, DejaVu Sans, sans-serif" font-weight="800" font-size="${size}" fill="#FFFFFF" stroke="#000000" stroke-width="${Math.max(2, Math.round(size * 0.06))}" paint-order="stroke">${tspans}</text></svg>`;
+<text text-anchor="${anchor}" ${font} font-weight="800" font-size="${size}" fill="#FFFFFF" stroke="#000000" stroke-width="${Math.max(2, Math.round(size * 0.06))}" paint-order="stroke">${tspans}</text>${subText}</svg>`;
 }
 
 /** Image-model prompt for the thumbnail artwork (text is drawn by the app, never by the model). */
