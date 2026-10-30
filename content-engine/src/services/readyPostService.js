@@ -267,26 +267,54 @@ function thumbPlatforms(resolved) {
  * transcript and thumbnails as JSON on the steps (all generations kept in
  * script.artifacts.generations), and every generation's real cost added.
  */
-async function saveDraft({ funnel, driveId, transcript, copy, thumbs, sizes, thumbError, costs }) {
+async function saveDraft({ funnel, driveId, transcript, copy, thumbs, sizes, thumbError, costs, edit = false }) {
   const existing = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [driveId]))[driveId];
   const inst = existing || await instanceService.createForFunnel({ tenantId: funnel.tenant_id, funnel, title: copy.title || 'Ready video', status: 'draft' });
   let steps = existing ? instanceService.parseSteps(existing) : buildInitialSteps();
   if (!existing) for (const k of ['animate', 'voiceover']) steps = patchStep(steps, k, { status: 'skipped' });
   const at = new Date().toISOString();
   const prev = ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).generations || [];
-  const generation = { at, copy, thumbs, sizes, thumbError };
+  // A manual save (edits) updates the current copy; only a real generation is
+  // added to the history.
+  const generations = edit ? prev : [...prev, { at, copy, thumbs, sizes, thumbError }].slice(-20);
   steps = patchStep(steps, 'transcript', { status: transcript ? 'done' : 'skipped', artifacts: { text: transcript } });
-  steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, generations: [...prev, generation].slice(-20) } });
-  steps = patchStep(steps, 'images', { status: sizes.length ? 'done' : 'skipped', artifacts: { thumbs, sizes } });
+  steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, generations } });
+  if (sizes.length || !edit) steps = patchStep(steps, 'images', { status: sizes.length ? 'done' : 'skipped', artifacts: { thumbs, sizes } });
   const durationSec = durationCache.get(driveId) || 0;
   steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: durationSec ? { driveId, durationSec } : { driveId } } });
-  for (const c of costs || []) {
+  // An edit save carries a generation's cost only the first time (no draft yet).
+  for (const c of edit && existing ? [] : costs || []) {
     const { step, ...entry } = c;
     steps = addCostToSteps(steps, ['transcript', 'images'].includes(step) ? step : 'script', { ...entry, costUsd: Number(entry.costUsd) || 0, at });
   }
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   await instanceRepo.setMeta(inst.id, { title: copy.title || undefined, durationSeconds: durationSec || undefined });
   return inst.id;
+}
+
+/**
+ * 💾 Save draft: keep what's on the page for one video (edited copy,
+ * transcript, thumbnails) without regenerating. Thumbnails sent only as
+ * platform -> url are grouped back into their sizes.
+ */
+export async function saveDraftEdit({ funnelId, driveId, transcript = '', copy, thumbs = {}, sizes = [], costs = [] }) {
+  if (!driveId) throw new Error('driveId required');
+  const { funnel } = await loadFunnel(funnelId);
+  const clean = normalizeCopy(copy);
+  if (!clean.title && !clean.description) throw new Error('nothing to save — generate or write the copy first');
+  const urls = Object.fromEntries(Object.entries(thumbs && typeof thumbs === 'object' ? thumbs : {})
+    .filter(([k, v]) => PLATFORM_SIZE[k] && /^https:\/\/\S+$/.test(String(v))));
+  let grouped = (Array.isArray(sizes) ? sizes : []).filter((z) => z && THUMB_SIZES[z.size] && /^https:\/\/\S+$/.test(String(z.url)));
+  if (!grouped.length) {
+    for (const [size, spec] of Object.entries(THUMB_SIZES)) {
+      const users = Object.keys(urls).filter((k) => PLATFORM_SIZE[k] === size);
+      if (users.length) grouped.push({ size, label: spec.label, url: urls[users[0]], platforms: users });
+    }
+  }
+  grouped = grouped.map((z) => ({ size: z.size, label: THUMB_SIZES[z.size].label, url: String(z.url), platforms: (z.platforms || []).filter((k) => PLATFORM_SIZE[k]) }));
+  const okCosts = (Array.isArray(costs) ? costs : []).filter((c) => c && Number.isFinite(Number(c.costUsd))).slice(0, 8);
+  const instanceId = await saveDraft({ funnel, driveId: String(driveId), transcript: String(transcript || ''), copy: clean, thumbs: urls, sizes: grouped, thumbError: '', costs: okCosts, edit: true });
+  return { instanceId };
 }
 
 /** The saved AI drafts for these videos, for the page to restore: { driveId: draft }. */
@@ -455,4 +483,4 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export default { listReadyVideos, videoDurations, generateCopy, postSelections };
+export default { listReadyVideos, videoDurations, generateCopy, saveDraftEdit, postSelections };

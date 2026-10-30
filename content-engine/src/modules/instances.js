@@ -107,6 +107,18 @@ export function register(ctx) {
     }
   });
 
+  // 💾 Save draft: keep the page's current copy / thumbnails for one video.
+  router.post('/admin/instances/ready-ai/save', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const { funnelId, driveId, transcript, copy, thumbs, sizes, costs } = req.body || {};
+      if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
+      res.json({ ok: true, ...(await readyPost.saveDraftEdit({ funnelId, driveId, transcript, copy, thumbs, sizes, costs })) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   // Video lengths for the listed Drive videos (ffprobe on the public link).
   router.post('/admin/instances/ready-ai/durations', async (req, res) => {
     try {
@@ -527,7 +539,7 @@ function readyAiPickerPage({ funnel, videos, prefills, drafts = {}, ...src }) {
       <div class="det ailay" id="det-${esc(v.id)}">
         <div class="aicol">
         <label class="fl">Transcript / text (optional — paste to skip transcription; blank = the app transcribes the video)<textarea id="tx-${esc(v.id)}" rows="6"></textarea></label>
-        <div class="nowrow"><button class="act" id="gb-${esc(v.id)}" onclick="gen('${esc(v.id)}')">✨ Generate transcript + Thumbnail</button> <span class="hint" id="gs-${esc(v.id)}"></span></div>
+        <div class="nowrow"><button class="act" id="gb-${esc(v.id)}" onclick="gen('${esc(v.id)}')">✨ Generate transcript + Thumbnail</button> <button class="act" id="sv-${esc(v.id)}" onclick="saveDraft('${esc(v.id)}')">💾 Save draft</button> <span class="hint" id="gs-${esc(v.id)}"></span></div>
         <div class="thumbs" id="th-${esc(v.id)}"></div>
         </div>
         <div class="aicol">
@@ -598,6 +610,20 @@ function readyAiPickerPage({ funnel, videos, prefills, drafts = {}, ...src }) {
     }
     const SAVED = ${JSON.stringify(drafts).replace(/</g, '\\u003c')};
     Object.keys(SAVED).forEach(id=>{ if(!$('cb',id)) return; applyGen(id, SAVED[id]); $('gs',id).textContent='💾 Saved draft from '+SAVED[id].atIst+' · $'+Number(SAVED[id].costUsd||0).toFixed(4); });
+    // Keep this video's current fields (your edits too) without regenerating.
+    async function saveDraft(id){
+      if(busy[id]) return;
+      if(!$('ti',id).value.trim() && !$('de',id).value.trim()){ $('gs',id).textContent='Nothing to save yet — generate or write the copy first.'; return; }
+      $('sv',id).disabled=true;
+      try{
+        const r=await fetch('/api/v1/admin/instances/ready-ai/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, driveId:id, transcript:$('tx',id).value,
+          copy:{ title:$('ti',id).value, description:$('de',id).value, igCaption:$('ig',id).value, short:$('sh',id).value }, thumbs:thumbs[id]||{}, costs:costs[id]||[] })});
+        const j=await r.json();
+        if(!j.ok) throw new Error(j.error||'failed');
+        done[id]=true; $('gs',id).textContent='💾 Saved to instances';
+      }catch(e){ $('gs',id).textContent='⚠ Save failed: '+e.message; }
+      $('sv',id).disabled=false;
+    }
     async function gen(id){
       if(busy[id]) return;
       const pasted=$('tx',id).value.trim();
