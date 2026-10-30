@@ -22,12 +22,24 @@ const CSS = `
  .ok{background:#123222;color:#a8f0c6;border-radius:8px;padding:.5rem .65rem;font-size:.85rem;margin:.4rem 0}
  .links{margin-top:.9rem;font-size:.8rem;text-align:center}
  .links a{color:#9d9dd8}
- .backdrop{position:fixed;inset:0;background:rgba(5,5,10,.82);display:grid;place-items:center;padding:16px}`;
+ .backdrop{position:fixed;inset:0;background:rgba(5,5,10,.82);display:grid;place-items:center;padding:16px}
+ .pw{position:relative}
+ .pw input{padding-right:2.8rem}
+ .pw .eye{position:absolute;right:.3rem;top:50%;transform:translateY(-50%);width:auto;margin:0;padding:.3rem .5rem;background:none;font-size:1rem;line-height:1}
+ .pw .eye:hover{background:#24243a}`;
+
+// Adds a show/hide eye to every password box on the page.
+const EYE_JS = `document.querySelectorAll('input[type=password]').forEach(function(i){
+  var w=document.createElement('div');w.className='pw';i.parentNode.insertBefore(w,i);w.appendChild(i);
+  var b=document.createElement('button');b.type='button';b.className='eye';b.textContent='👁';b.setAttribute('aria-label','Show password');
+  b.onclick=function(){var show=i.type==='password';i.type=show?'text':'password';b.textContent=show?'🙈':'👁';
+    b.setAttribute('aria-label',show?'Hide password':'Show password');i.focus();};
+  w.appendChild(b);});`;
 
 function shell(title, body) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title><style>${CSS}</style></head><body>${body}</body></html>`;
+<title>${esc(title)}</title><style>${CSS}</style></head><body>${body}<script>${EYE_JS}</script></body></html>`;
 }
 
 /**
