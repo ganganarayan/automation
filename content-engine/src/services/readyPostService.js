@@ -44,7 +44,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanWithCardArgs, progressPct } from '../utils/cleanSpec.js';
 import { writeFile } from 'node:fs/promises';
-import { TRANSCRIPT_REVIEW, postOutcome, mergeChannels, channelOutcome, channelText, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
+import { TRANSCRIPT_REVIEW, postOutcome, mergeChannels, channelOutcome, channelText, nextAutoRetry, requestFromPost, AUTO_RETRY_MINUTES, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
 import { formatIst } from '../utils/time.js';
 import { driveEmbedUrl } from '../utils/reviewSpec.js';
 import {
@@ -802,7 +802,11 @@ export async function refreshScheduled({ tenantId = 'default' } = {}) {
       const channels = mergeChannels(base, results);
       const outcome = channelOutcome(channels);
       if (outcome === 'pending') continue;
-      steps = patchStep(steps, 'publish', { artifacts: { channels } });
+      // A recoverable failure (e.g. a token Meta revoked) is retried on its own
+      // once you reconnect the account; you get one email, not one per try.
+      const retry = pub.retry || { attempts: 0 };
+      const nextAt = outcome === 'posted' ? null : nextAutoRetry(channels, retry.attempts);
+      steps = patchStep(steps, 'publish', { artifacts: { channels, retry: { ...retry, nextAt } } });
       await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
       const when = postedAt || new Date();
       const failedNote = channels.filter((c) => c.state === 'failed').map((c) => channelText(c)).join('; ');
@@ -812,7 +816,9 @@ export async function refreshScheduled({ tenantId = 'default' } = {}) {
         await instanceRepo.setStatus(row.id, 'failed', failedNote || 'Post for Me reported a failure');
         await instanceRepo.setPostStatus(row.id, 'failed');
       }
-      await sendOutcomeEmail({ providers, row, steps, channels, outcome, postedAt: when }).catch((err) => log.warn({ err: err.message }, 'post outcome email failed'));
+      if (outcome === 'posted' || !retry.attempts || !nextAt) {
+        await sendOutcomeEmail({ providers, row, steps, channels, outcome, postedAt: when, nextAt }).catch((err) => log.warn({ err: err.message }, 'post outcome email failed'));
+      }
       changed += 1;
     } catch (err) {
       log.warn({ err: err.message, instance: row.id }, 'scheduled post check failed (will retry)');
@@ -825,7 +831,10 @@ export async function refreshScheduled({ tenantId = 'default' } = {}) {
 export async function refreshAllTenants() {
   const list = await tenantRepo.list().catch(() => [{ id: 'default' }]);
   let n = 0;
-  for (const t of list) n += await refreshScheduled({ tenantId: t.id }).catch(() => 0);
+  for (const t of list) {
+    n += await refreshScheduled({ tenantId: t.id }).catch(() => 0);
+    n += await autoRetryDue({ tenantId: t.id }).catch(() => 0);
+  }
   return n;
 }
 
@@ -834,18 +843,21 @@ export async function refreshAllTenants() {
  * per-platform copy and thumbnails), sent again to just the ❌ accounts —
  * after you reconnect them in Post for Me. The ✅ ones are not posted twice.
  */
-export async function retryFailed({ instanceId }) {
+export async function retryFailed({ instanceId, auto = false }) {
   const row = await instanceRepo.get(instanceId);
   if (!row) throw new Error('instance not found');
   if (!['partial', 'failed'].includes(row.status)) throw new Error('nothing failed on this instance');
   let steps = instanceService.parseSteps(row);
   const pub = ((steps.find((x) => x.key === 'publish') || {}).artifacts) || {};
-  const req = pub.request;
-  if (!req || !req.mediaUrl) throw new Error('this post was made before retries existed — use ✏ Edit and post it again');
   const failed = (pub.channels || []).filter((c) => c.state === 'failed');
   if (!failed.length) throw new Error('no failed channels to retry');
   const providers = await buildProviders(row.tenant_id);
   const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+  const oldRefs = Array.isArray(row.post_refs) ? row.post_refs : JSON.parse(row.post_refs || '[]');
+  // Posts made before requests were saved: read the original back from Post for Me.
+  let req = pub.request && pub.request.mediaUrl ? pub.request : null;
+  if (!req && oldRefs[0]) req = requestFromPost(await publish.getPost(oldRefs[0]).catch(() => null));
+  if (!req) throw new Error('could not read the original post from Post for Me — use ✏ Edit and post it again');
   const platforms = new Set(failed.map((c) => platformKey(c.platform)).filter(Boolean));
   const configs = req.platformConfigurations
     ? Object.fromEntries(Object.entries(req.platformConfigurations).filter(([k]) => !platforms.size || platforms.has(k)))
@@ -853,17 +865,43 @@ export async function retryFailed({ instanceId }) {
   const result = await publish.createPost({ accountIds: failed.map((c) => c.id), caption: req.caption, mediaUrl: req.mediaUrl, platformConfigurations: configs });
   const ref = result && result.id ? result.id : null;
   if (!ref) throw new Error('Post for Me did not return a post id');
-  const refs = [...(Array.isArray(row.post_refs) ? row.post_refs : JSON.parse(row.post_refs || '[]')), ref];
+  const refs = [...oldRefs, ref];
   const channels = (pub.channels || []).map((c) => (c.state === 'failed' ? { ...c, state: 'waiting', error: '' } : c));
-  steps = patchStep(steps, 'publish', { artifacts: { channels, posts: refs } });
+  // A press of the button starts the automatic tries afresh; an automatic try counts one.
+  const attempts = auto ? ((pub.retry && pub.retry.attempts) || 0) + 1 : 0;
+  steps = patchStep(steps, 'publish', { artifacts: { channels, posts: refs, request: req, retry: { attempts, nextAt: null, lastAt: new Date().toISOString() } } });
   await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
   await instanceRepo.markScheduled(row.id, { postRefs: refs });
-  log.info({ instance: row.id, retried: failed.length, ref }, 'failed channels re-posted');
+  log.info({ instance: row.id, retried: failed.length, ref, auto, attempts }, 'failed channels re-posted');
   return { instanceId: row.id, retried: failed.length };
 }
 
+/**
+ * The automatic tries: every partly posted / failed instance whose next try is
+ * due is re-posted to its ❌ channels. A try that cannot even be sent (Post for
+ * Me down, say) still counts, so it never loops forever.
+ */
+export async function autoRetryDue({ tenantId = 'default' } = {}) {
+  const rows = await instanceRepo.retryDue(tenantId).catch(() => []);
+  let n = 0;
+  for (const row of rows) {
+    try {
+      await retryFailed({ instanceId: row.id, auto: true });
+      n += 1;
+    } catch (err) {
+      log.warn({ err: err.message, instance: row.id }, 'automatic retry failed');
+      let steps = instanceService.parseSteps(row);
+      const pub = ((steps.find((x) => x.key === 'publish') || {}).artifacts) || {};
+      const attempts = ((pub.retry && pub.retry.attempts) || 0) + 1;
+      steps = patchStep(steps, 'publish', { artifacts: { retry: { attempts, nextAt: nextAutoRetry(pub.channels, attempts), lastError: err.message } } });
+      await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps)).catch(() => {});
+    }
+  }
+  return n;
+}
+
 /** The go-live email: what went out and, per channel, ✅ or ❌ with the error. */
-async function sendOutcomeEmail({ providers, row, steps, channels, outcome, postedAt }) {
+async function sendOutcomeEmail({ providers, row, steps, channels, outcome, postedAt, nextAt = null }) {
   const funnel = row.funnel_id ? await funnels.get(row.funnel_id) : null;
   const resolved = funnel ? await funnels.resolve(funnel) : {};
   const to = resolved.approvalEmail || providers.resolved?.emails?.approvalGita || '';
@@ -879,7 +917,9 @@ async function sendOutcomeEmail({ providers, row, steps, channels, outcome, post
     <p><b>${esc(copy.title || row.title || '')}</b></p>
     <p>Scheduled: ${esc(row.scheduled_for ? formatIst(row.scheduled_for) : '— (posted now)')}<br>Posted: ${esc(formatIst(postedAt))}</p>
     <table border="1" cellpadding="6" style="border-collapse:collapse"><thead><tr><th></th><th>Platform</th><th>Account</th><th>Post / error</th></tr></thead><tbody>${rows}</tbody></table>
-    ${outcome !== 'posted' ? '<p>Reconnect the ❌ accounts in Post for Me, then open the instance and press <b>↻ Post to the failed channels only</b>.</p>' : ''}
+    ${outcome === 'posted' ? '' : nextAt
+    ? `<p><b>Reconnect the ❌ accounts in Post for Me. That is all.</b> The app re-posts to just those channels by itself (next try ${esc(formatIst(nextAt))} IST, up to ${AUTO_RETRY_MINUTES.length} tries over about 2 days). The ✅ ones are not posted again.</p>`
+    : '<p>Reconnect the ❌ accounts in Post for Me, then open the instance and press <b>↻ Post to the failed channels only</b>.</p>'}
     <p>${req.mediaUrl ? `<a href="${esc(req.mediaUrl)}">▶ The video</a> · ` : ''}<a href="${esc(link)}">Open the instance</a></p>
     <pre style="white-space:pre-wrap;font:inherit">${esc(copy.description || req.caption || '')}</pre>`;
   await providers.mail.send({ to, subject: `${head}: ${copy.title || row.title || 'video'}`, html });
@@ -940,5 +980,5 @@ function esc(s) {
 }
 
 export default {
-  refreshScheduled, refreshAllTenants, retryFailed, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, postSelections,
+  refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, postSelections,
 };

@@ -159,7 +159,7 @@ export function istToInputValue(text) {
 export default {
   postOutcome, istToInputValue, mergeChannels, channelOutcome, channelText,
   SOURCE_TYPES, READY_STAGES, TRANSCRIPT_REVIEW, laneOf, transcriptApproved, canGenerateCopy, readyStage, stageLabel,
-  isSrt, srtToText, prepareTranscript, glossaryTerms, whisperPrompt,
+  isSrt, srtToText, prepareTranscript, glossaryTerms, whisperPrompt, isRecoverableError, nextAutoRetry, requestFromPost,
 };
 
 /**
@@ -191,4 +191,37 @@ export function channelOutcome(channels = []) {
 export function channelText(c = {}) {
   const icon = c.state === 'ok' ? '✅' : c.state === 'failed' ? '❌' : '⏳';
   return `${icon} ${[c.platform, c.name].filter(Boolean).join(' ')}${c.state === 'failed' && c.error ? ` (${c.error})` : ''}`;
+}
+
+/** Minutes to wait before each automatic retry of the ❌ channels (5 tries, ~2 days). */
+export const AUTO_RETRY_MINUTES = [60, 180, 360, 720, 1440];
+
+/** True for a failure a reconnect or a later try can fix (not e.g. "video too long"). */
+export function isRecoverableError(message = '') {
+  return /reconnect|token|session|expired|authori[sz]|permission|log ?in|password|rate.?limit|too many requests|time(d)? ?out|temporar|unavailable|\b5\d\d\b/i
+    .test(String(message || ''));
+}
+
+/**
+ * When the next automatic retry is due (ISO), or null: nothing failed, the
+ * failures are not recoverable, or all tries are used up.
+ * @param {Array} channels
+ * @param {number} attempts - automatic retries already made.
+ */
+export function nextAutoRetry(channels = [], attempts = 0, now = new Date()) {
+  const failed = (Array.isArray(channels) ? channels : []).filter((c) => c.state === 'failed');
+  if (!failed.length || !failed.some((c) => isRecoverableError(c.error))) return null;
+  const mins = AUTO_RETRY_MINUTES[Number(attempts) || 0];
+  if (mins === undefined) return null;
+  return new Date(now.getTime() + mins * 60000).toISOString();
+}
+
+/** A retry request rebuilt from Post for Me's own copy of the post (for posts made before requests were saved). */
+export function requestFromPost(post) {
+  const media = Array.isArray(post && post.media) ? post.media : [];
+  const mediaUrl = media[0] && (media[0].url || media[0].media_url);
+  if (!mediaUrl) return null;
+  const raw = post.platform_configurations && typeof post.platform_configurations === 'object' ? post.platform_configurations : null;
+  const configs = raw ? Object.fromEntries(Object.entries(raw).filter(([, v]) => v && typeof v === 'object')) : null;
+  return { caption: post.caption || '', mediaUrl, platformConfigurations: configs && Object.keys(configs).length ? configs : undefined };
 }

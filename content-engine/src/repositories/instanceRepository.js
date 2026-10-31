@@ -188,6 +188,21 @@ export async function scheduledDue(tenantId = 'default', limit = 25) {
   return rows;
 }
 
+/** Partly posted / failed instances whose next automatic retry is due. */
+export async function retryDue(tenantId = 'default', limit = 10) {
+  const { rows } = await query(
+    `SELECT * FROM instances i
+      WHERE tenant_id = $1 AND status IN ('partial', 'failed') AND locked = false
+        AND EXISTS (SELECT 1 FROM jsonb_array_elements(i.steps) s
+                     WHERE s->>'key' = 'publish'
+                       AND (s->'artifacts'->'retry'->>'nextAt') IS NOT NULL
+                       AND (s->'artifacts'->'retry'->>'nextAt')::timestamptz <= now())
+      ORDER BY updated_at LIMIT $2`,
+    [tenantId, limit],
+  );
+  return rows;
+}
+
 export async function setPostStatus(id, postStatus) {
   await query('UPDATE instances SET post_status = $2, updated_at = now() WHERE id = $1', [id, postStatus]);
 }
@@ -271,6 +286,6 @@ export async function draftsByDriveIds(funnelId, tenantId = 'default', driveIds 
 }
 
 export default {
-  create, get, list, logRows, saveSteps, setStatus, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, moveFunnel, unschedule, scheduledDue, setPostStatus, remove,
+  create, get, list, logRows, saveSteps, setStatus, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, moveFunnel, unschedule, scheduledDue, retryDue, setPostStatus, remove,
   existsForFunnelOnDate, videoOnDate, postedDriveIds, draftsByDriveIds,
 };

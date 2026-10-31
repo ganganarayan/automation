@@ -757,15 +757,19 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
   const chans = single ? channelsOf(instances.parseSteps(single)) : [];
   const chanList = chans.length ? `<div class="chans">${chans.map((c) => esc(channelText(c))).join('<br>')}</div>` : '';
   const retryBtn = chans.some((c) => c.state === 'failed') ? '<button class="act primary" onclick="retryFailed()">↻ Post to the failed channels only</button>' : '';
+  const pubArt = single ? ((instances.parseSteps(single).find((x) => x.key === 'publish') || {}).artifacts || {}) : {};
+  const autoNote = pubArt.retry && pubArt.retry.nextAt
+    ? ` The app re-posts to them by itself at <b>${esc(formatIst(pubArt.retry.nextAt))} IST</b>, so just reconnect; or press the button once you have.`
+    : '';
   const banner = partial
-    ? `<div class="schedbar bad">🟡 Partly posted. Reconnect the ❌ accounts in Post for Me, then re-post to just those (the ✅ ones are not posted again). ${retryBtn} <span class="hint" id="edmsg"></span>${chanList}</div>`
+    ? `<div class="schedbar bad">🟡 Partly posted. Reconnect the ❌ accounts in Post for Me, then re-post to just those (the ✅ ones are not posted again).${autoNote} ${retryBtn} <span class="hint" id="edmsg"></span>${chanList}</div>`
     : scheduled && chans.some((c) => c.state === 'ok')
       ? `<div class="schedbar">⏳ Re-posting to the failed channels… ${chanList}</div>`
       : scheduled
     ? `<div class="schedbar">📅 Scheduled on Post for Me for <b>${esc(formatIst(single.scheduled_for))} IST</b>. To change anything, ✏ Edit first: the scheduled post is deleted, so nothing goes out while you correct it. It goes out again only when you press Schedule or Post now.
         <button class="act primary" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span>${chanList}</div>`
     : failed
-      ? `<div class="schedbar bad">🔴 Post for Me reported this post failed on every channel. Reconnect the accounts in Post for Me, then ${retryBtn || 'post again'} — or ✏ Edit it first. <button class="act" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span>${chanList}</div>`
+      ? `<div class="schedbar bad">🔴 Post for Me reported this post failed on every channel. Reconnect the accounts in Post for Me, then ${retryBtn || 'post again'} — or ✏ Edit it first.${autoNote} <button class="act" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span>${chanList}</div>`
       : '';
   const head = single
     ? `<div class="top">
