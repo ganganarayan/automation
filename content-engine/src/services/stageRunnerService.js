@@ -31,6 +31,7 @@ import { createFfmpegProvider } from '../providers/ffmpegProvider.js';
 import { createAnimationProvider } from '../providers/animationProvider.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import * as captureRules from './captureRules.js';
+import * as firstComment from './firstCommentService.js';
 import { dlUrl } from '../providers/storageProvider.js';
 import { costText, costImages, costAnimation, costTts, costTranscript } from '../utils/pricing.js';
 import { mapImageSize } from '../utils/imageGateSpec.js';
@@ -279,6 +280,8 @@ export async function postInstance({ instanceId, captionOverride = '' }) {
   const refs = result && result.id ? [result.id] : (Array.isArray(result) ? result.map((r) => r.id).filter(Boolean) : []);
   await instanceService.updateStep(instanceId, 'publish', { status: 'done', artifacts: { posts: refs }, finishedAt: new Date().toISOString() });
   log.info({ instance: instanceId, accounts: accountIds.length, refs: refs.length }, 'instance posted to Post-for-Me');
+  // The link goes in each channel's first comment once the post is live.
+  if (refs[0]) await firstComment.queue({ tenantId: resolved.tenantId, postformePostId: refs[0], link: resolved.ctaLink, scheduledAt });
 
   // Arm comment-to-DM for the pipeline path (funnel-level keyword/dm defaults).
   if (refs[0] && resolved.captureKeyword) {

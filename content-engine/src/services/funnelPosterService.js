@@ -28,6 +28,7 @@ import * as approvalService from './approvalService.js';
 import { setStatus } from '../repositories/approvalRepository.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import * as captureRules from './captureRules.js';
+import * as firstComment from './firstCommentService.js';
 import { extractRow, composePrompt, composeCaptions, buildPlatformConfigs } from '../utils/postCompose.js';
 import { publishAtIst } from '../utils/scheduling.js';
 import { targetPostAt, postDateKey } from '../utils/videoSchedule.js';
@@ -166,6 +167,8 @@ export async function publish(approval) {
 
   // Arm comment-to-DM: the sheet row's keyword/dm_text/dm_link, else funnel defaults.
   const ref = result && result.id ? result.id : null;
+  // The link goes in each channel's first comment once the post is live.
+  await firstComment.queue({ tenantId: f.tenantId, postformePostId: ref, link: f.ctaLink, scheduledAt });
   const keyword = (p.dmKeyword || f.captureKeyword || '').trim();
   if (ref && keyword) {
     await captureRules.createForPublish({

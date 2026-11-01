@@ -111,6 +111,13 @@ export function createPostForMeProvider(cfg, log) {
       return mediaUrl;
     },
 
+    /** One connected account, with its platform user_id and current access_token. */
+    async getAccount(id) {
+      const res = await request(`${BASE}/social-accounts/${encodeURIComponent(id)}`, { headers: requireKey(), label: 'postforme.getAccount', log, retries: 1 });
+      if (!res.ok) throw new ExternalAPIError(`Post for Me account lookup failed (${res.status})`, { details: res.text?.slice(0, 300) });
+      return res.data;
+    },
+
     async listAccounts() {
       const headers = requireKey();
       const res = await request(`${BASE}/social-accounts?limit=50`, {

@@ -34,6 +34,8 @@ import { createFfmpegProvider } from '../providers/ffmpegProvider.js';
 import { createGoogleDriveProvider } from '../providers/storageProvider.js';
 import { createPublicDriveProvider, publicDlUrl } from '../providers/publicDriveProvider.js';
 import * as captureRules from './captureRules.js';
+import * as firstComment from './firstCommentService.js';
+import * as firstCommentsRepo from '../repositories/firstCommentsRepository.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
 import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey } from '../utils/aiCopySpec.js';
@@ -861,6 +863,8 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
       const request = { caption, mediaUrl: videoUrl, platformConfigurations: ai ? ai.platformConfigurations : platformConfigurations };
       const result = await publish.createPost({ accountIds: accounts, scheduledAt: scheduledIso || undefined, ...request });
       const ref = result && result.id ? result.id : null;
+      // The link goes in each channel's first comment once the post is live.
+      await firstComment.queue({ tenantId: funnel.tenant_id, postformePostId: ref, link: sel.ctaLink || resolved.ctaLink, scheduledAt: scheduledIso });
       // Arm comment-to-DM for this post (funnel-level keyword/dm defaults).
       if (ref && resolved.captureKeyword) {
         await captureRules.createForPublish({
@@ -975,6 +979,7 @@ export async function refreshAllTenants() {
   for (const t of list) {
     n += await refreshScheduled({ tenantId: t.id }).catch(() => 0);
     n += await autoRetryDue({ tenantId: t.id }).catch(() => 0);
+    await firstComment.runDue({ tenantId: t.id }).catch((err) => log.warn({ err: err.message }, 'first comment run failed'));
   }
   return n;
 }
@@ -1006,6 +1011,9 @@ export async function retryFailed({ instanceId, auto = false }) {
   const result = await publish.createPost({ accountIds: failed.map((c) => c.id), caption: req.caption, mediaUrl: req.mediaUrl, platformConfigurations: configs });
   const ref = result && result.id ? result.id : null;
   if (!ref) throw new Error('Post for Me did not return a post id');
+  // The re-posted channels get the same first comment as the original post.
+  const original = oldRefs[0] ? await firstCommentsRepo.getByPost(oldRefs[0]).catch(() => null) : null;
+  if (original) await firstComment.queue({ tenantId: row.tenant_id, postformePostId: ref, link: original.text });
   const refs = [...oldRefs, ref];
   const channels = (pub.channels || []).map((c) => (c.state === 'failed' ? { ...c, state: 'waiting', error: '' } : c));
   // A press of the button starts the automatic tries afresh; an automatic try counts one.
