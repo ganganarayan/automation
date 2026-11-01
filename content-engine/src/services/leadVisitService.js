@@ -26,7 +26,7 @@ export const LEAD_LABEL = 'Lead · visited site';
 
 /** For captureService: the lead's personal link for url (and remember where it goes). */
 export async function trackLink(lead, url) {
-  const link = trackedUrl(settings.publicBaseUrl, lead && lead.visit_code);
+  const link = trackedUrl(settings.app.publicBaseUrl, lead && lead.visit_code);
   if (!link || !destinationUrl(url, lead.visit_code)) return url;
   await leads.setVisitTarget(lead.id, url);
   return link;

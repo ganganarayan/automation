@@ -42,7 +42,7 @@ export function register(ctx) {
   });
 
   router.get('/t/lead.js', (req, res) => {
-    res.set('Cache-Control', 'public, max-age=300').type('application/javascript').send(leadScript(settings.publicBaseUrl));
+    res.set('Cache-Control', 'public, max-age=300').type('application/javascript').send(leadScript(settings.app.publicBaseUrl));
   });
 
   const cors = (req, res, next) => {

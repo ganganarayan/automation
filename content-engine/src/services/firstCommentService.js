@@ -153,7 +153,7 @@ export async function runDue({ tenantId = 'default' } = {}) {
 }
 
 /** The URL Post for Me calls for this tenant ('' when the app has no public URL). */
-export function webhookUrl(tenantId = 'default', base = settings.publicBaseUrl) {
+export function webhookUrl(tenantId = 'default', base = settings.app.publicBaseUrl) {
   return base ? `${base}/api/v1/webhook/postforme/${encodeURIComponent(tenantId)}` : '';
 }
 
