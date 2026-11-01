@@ -11,7 +11,8 @@
  *               - THUMB_SIZES: size -> { w, h, label, layout }
  *               - PLATFORM_SIZE: platform -> size; THUMB_SPECS: platform -> its size spec
  *               - wrapText(text, maxChars, maxLines): lines
- *               - thumbSvg({ w, h, text, sub, layout, accent }): SVG overlay string
+ *               - thumbBox / thumbArt / pickTextSide: where the text and the artwork go
+ *               - thumbSvg({ w, h, text, sub, layout, side, accent }): SVG overlay string
  *                 (text = the headline, sub = an optional smaller sub-head)
  *               - thumbImagePrompt(prompt): the image-model prompt
  *               - thumbMedia(videoUrl, thumbUrl): Post for Me media item
@@ -22,9 +23,9 @@ export const THUMB_ACCENT = '#FFC400';
 
 /** The three sizes every video gets, all from the same artwork. */
 export const THUMB_SIZES = {
-  landscape: { w: 1280, h: 720, label: '16:9', layout: 'bottom' },
-  portrait: { w: 1080, h: 1920, label: '9:16', layout: 'upper' },
-  feed: { w: 1080, h: 1350, label: '4:5', layout: 'bottom' },
+  landscape: { w: 1280, h: 720, label: '16:9', layout: 'side' },
+  portrait: { w: 1080, h: 1920, label: '9:16', layout: 'stack' },
+  feed: { w: 1080, h: 1350, label: '4:5', layout: 'side' },
 };
 
 /** Which size each platform posts with. */
@@ -77,46 +78,93 @@ export function fitText(text, { boxW, boxH, maxSize, glyph = 0.62, lineH = 1.15 
     const lines = wrapText(text, chars, 99);
     const longest = Math.max(...lines.map((l) => l.length));
     const size = Math.floor(Math.min(maxSize, boxW / (longest * glyph), boxH / (lines.length * lineH)));
-    if (!best || size > best.size) best = { lines, size };
+    if (!best || size >= best.size) best = { lines, size }; // a tie keeps the wider wrap (fewer lines)
   }
   return best;
 }
 
 /**
- * The overlay drawn on the frame: a darkening gradient behind the text, the
- * hook as big bold white text with a black outline (the whole headline, sized
- * to fit, never cut), and the sub-head as dark text on a solid accent box so
- * it reads on any picture.
+ * Where the text goes. 'side': a column on the calm side of the picture (the
+ * subject keeps the other side, face uncovered). 'stack' (9:16): the artwork
+ * sits whole as a square panel and the text gets its own band above it, inside
+ * the centre 3:4 that Instagram's grid shows. Returns the text box in pixels.
  */
-export function thumbSvg({ w, h, text, sub = '', layout = 'center', accent = '#FFFFFF' }) {
-  const portrait = h > w;
-  const head = fitText(text, { boxW: w * 0.88, boxH: h * (portrait ? 0.3 : 0.42), maxSize: portrait ? w * 0.12 : h * 0.15, glyph: 0.64 });
+export function thumbBox({ w, h, layout = 'side', side = 'right' }) {
+  if (layout === 'stack') {
+    const art = thumbArt({ w, h, layout });
+    return { x0: Math.round(w * 0.07), x1: Math.round(w * 0.93), y0: Math.round(h * 0.14), y1: art.top - Math.round(h * 0.015), anchor: 'middle' };
+  }
+  const col = Math.round(w * (h > w * 1.1 ? 0.44 : 0.42));
+  const m = Math.round(w * 0.04);
+  const x0 = side === 'left' ? m : w - col;
+  return { x0, x1: side === 'left' ? col : w - m, y0: Math.round(h * 0.08), y1: Math.round(h * 0.92), anchor: 'start' };
+}
+
+/** The 'stack' layout's artwork panel: a full-width square under the text band (null for 'side'). */
+export function thumbArt({ w, h, layout = 'side' }) {
+  if (layout !== 'stack') return null;
+  return { top: Math.round(h * 0.34), size: w };
+}
+
+/**
+ * The calmer side takes the text: right unless the left is clearly emptier.
+ * `grey` is a row-major greyscale image (one byte a pixel); busy = the pixel
+ * spread (standard deviation) of its outer thirds.
+ */
+export function pickTextSide(grey, width, height) {
+  const third = Math.floor(width / 3);
+  const spread = (x0) => {
+    let n = 0; let sum = 0; let sq = 0;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = x0; x < x0 + third; x += 1) { const v = grey[y * width + x]; n += 1; sum += v; sq += v * v; }
+    }
+    return n ? Math.sqrt(Math.max(0, sq / n - (sum / n) ** 2)) : 0;
+  };
+  return spread(width - third) <= spread(0) * 1.15 + 1 ? 'right' : 'left';
+}
+
+/**
+ * The overlay drawn on the frame: a darkening gradient on the text side only,
+ * the hook as bold white text with a black outline at a moderate size (the
+ * whole headline, sized to fit, never cut), and the sub-head as dark text on a
+ * solid accent box so it reads on any picture. The subject's side stays clear.
+ */
+export function thumbSvg({ w, h, text, sub = '', layout = 'side', side = 'right', accent = '#FFFFFF' }) {
+  const box = thumbBox({ w, h, layout, side });
+  const boxW = box.x1 - box.x0;
+  const boxH = box.y1 - box.y0;
+  const stack = layout === 'stack';
+  const maxSize = stack ? w * 0.08 : Math.min(h * 0.085, w * 0.06);
+  const head = fitText(text, { boxW, boxH: boxH * (sub ? 0.68 : 1), maxSize, glyph: 0.68 });
   const lines = head.lines;
-  const size = head.size || Math.round(h * 0.1);
+  const size = head.size || Math.round(maxSize * 0.6);
   const lh = Math.round(size * 1.15);
   // Sub-head: smaller, under the headline, on its own solid box.
-  const subFit = fitText(sub, { boxW: w * 0.82, boxH: h * (portrait ? 0.12 : 0.18), maxSize: size * 0.5, glyph: 0.58, lineH: 1.25 });
+  const subFit = fitText(sub, { boxW: boxW * 0.9, boxH: boxH * 0.28, maxSize: size * 0.55, glyph: 0.58, lineH: 1.25 });
   const subLines = subFit.lines;
   const subSize = subFit.size;
   const subLh = Math.round(subSize * 1.25);
   const pad = Math.round(subSize * 0.45);
-  const subGap = subLines.length ? Math.round(size * 0.4) : 0;
+  const subGap = subLines.length ? Math.round(size * 0.45) : 0;
   const subBlock = subLines.length ? subLh * subLines.length + pad * 2 : 0;
   const block = lh * lines.length + subGap + subBlock;
-  const anchor = layout === 'left' || layout === 'top' ? 'start' : 'middle';
-  const x = anchor === 'start' ? Math.round(w * 0.06) : Math.round(w / 2);
-  const top = {
-    left: (h - block) / 2,
-    top: h * 0.06,
-    bottom: h * 0.94 - block,
-    upper: h * 0.2,
-    center: (h - block) / 2,
-  }[layout] ?? (h - block) / 2;
+  const anchor = box.anchor;
+  const x = anchor === 'start' ? box.x0 + pad : Math.round((box.x0 + box.x1) / 2);
+  const top = box.y0 + Math.max(0, (boxH - block) / 2);
   const y0 = Math.round(top + size * 0.9);
-  // Gradient band behind the text so it reads on any frame.
-  const band = layout === 'left'
-    ? `<linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".85"/><stop offset=".75" stop-color="#000" stop-opacity="0"/></linearGradient><rect width="${w}" height="${h}" fill="url(#g)"/>`
-    : `<linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset=".2" stop-color="#000" stop-opacity=".8"/><stop offset=".8" stop-color="#000" stop-opacity=".8"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient><rect y="${Math.round(top - lh * 0.5)}" width="${w}" height="${Math.round(block + lh)}" fill="url(#g)"/>`;
+  // Shade only where the text is, fading out before the subject's side.
+  let band;
+  if (stack) {
+    const bandTop = box.y0 - Math.round(h * 0.03);
+    band = `<linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset=".15" stop-color="#000" stop-opacity=".6"/><stop offset="1" stop-color="#000" stop-opacity=".75"/></linearGradient><rect y="${bandTop}" width="${w}" height="${box.y1 - bandTop}" fill="url(#g)"/>`;
+  } else {
+    const fade = Math.round(w * (h > w ? 0.07 : 0.12));
+    const [from, to] = side === 'left' ? [0, box.x1 + fade] : [box.x0 - fade, w];
+    const stops = side === 'left'
+      ? '<stop offset="0" stop-color="#000" stop-opacity=".88"/><stop offset=".8" stop-color="#000" stop-opacity=".78"/><stop offset="1" stop-color="#000" stop-opacity="0"/>'
+      : '<stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset=".2" stop-color="#000" stop-opacity=".78"/><stop offset="1" stop-color="#000" stop-opacity=".88"/>';
+    band = `<linearGradient id="g" x1="0" y1="0" x2="1" y2="0">${stops}</linearGradient><rect x="${from}" width="${to - from}" height="${h}" fill="url(#g)"/>`;
+  }
   const tspans = lines
     .map((l, i) => `<tspan x="${x}" y="${y0 + i * lh}">${xmlEsc(l)}</tspan>`)
     .join('');
@@ -125,14 +173,14 @@ export function thumbSvg({ w, h, text, sub = '', layout = 'center', accent = '#F
   if (subLines.length) {
     const boxTop = y0 + (lines.length - 1) * lh + Math.round(size * 0.3) + subGap;
     const longest = Math.max(...subLines.map((l) => l.length));
-    const boxW = Math.min(w * 0.92, Math.round(longest * subSize * 0.58 + pad * 3));
-    const boxX = anchor === 'start' ? x - pad : Math.round((w - boxW) / 2);
+    const subW = Math.min(boxW + pad, Math.round(longest * subSize * 0.58 + pad * 3));
+    const boxX = anchor === 'start' ? x - pad : Math.round(x - subW / 2);
     const subY0 = boxTop + pad + Math.round(subSize * 0.95);
     const subSpans = subLines
       .map((l, i) => `<tspan x="${x}" y="${subY0 + i * subLh}">${xmlEsc(l)}</tspan>`)
       .join('');
     subText = `
-<rect x="${boxX}" y="${boxTop}" width="${boxW}" height="${subBlock}" rx="${Math.round(subSize * 0.3)}" fill="${accent}"/>
+<rect x="${boxX}" y="${boxTop}" width="${subW}" height="${subBlock}" rx="${Math.round(subSize * 0.3)}" fill="${accent}"/>
 <text text-anchor="${anchor}" ${font} font-weight="700" font-size="${subSize}" fill="#111111">${subSpans}</text>`;
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs>${band.split('<rect')[0]}</defs><rect${band.split('<rect')[1]}
@@ -142,7 +190,7 @@ export function thumbSvg({ w, h, text, sub = '', layout = 'center', accent = '#F
 /** Image-model prompt for the thumbnail artwork (text is drawn by the app, never by the model). */
 export function thumbImagePrompt(prompt) {
   const subject = String(prompt || '').trim().slice(0, 1500) || 'A striking, emotive scene that matches the video topic';
-  return `${subject}\n\nThumbnail artwork, square composition with the focal subject centred so it can be cropped wide or tall. Bold cinematic lighting, high contrast, vivid colours, one clear focal subject, clean empty space for a headline. Absolutely no text, letters, words, captions, logos or watermarks.`;
+  return `${subject}\n\nThumbnail artwork, square composition. Place the subject on the LEFT side of the frame (the left 55%), face clearly visible and well lit, the whole head inside the frame with room above it, looking toward the right. Keep the RIGHT 45% of the frame calm and empty: a plain dark wall, a soft out-of-focus background or sky, nothing important there, so a headline can sit on it. Bold cinematic lighting, high contrast, one clear focal subject. Absolutely no text, letters, words, captions, logos or watermarks.`;
 }
 
 /** The Post for Me media item: a designed thumbnail, else the first frame. */
@@ -150,4 +198,4 @@ export function thumbMedia(videoUrl, thumbUrl) {
   return thumbUrl ? { url: videoUrl, thumbnail_url: thumbUrl } : { url: videoUrl, thumbnail_timestamp_ms: 0 };
 }
 
-export default { THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbSvg, thumbImagePrompt, thumbMedia };
+export default { THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, pickTextSide, thumbSvg, thumbImagePrompt, thumbMedia };

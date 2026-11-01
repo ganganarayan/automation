@@ -220,6 +220,27 @@ export async function setPostStatus(id, postStatus) {
   await query('UPDATE instances SET post_status = $2, updated_at = now() WHERE id = $1', [id, postStatus]);
 }
 
+/** 📅 / ⚡ pressed: the post is being handed to Post for Me in the background (scheduledFor null = now). */
+export async function markPosting(id, { scheduledFor = null } = {}) {
+  const { rowCount } = await query(
+    `UPDATE instances SET post_status = 'posting', scheduled_for = $2, updated_at = now(),
+            note = CASE WHEN post_status = 'post_failed' THEN NULL ELSE note END
+      WHERE id = $1 AND locked = false AND status IN ('draft', 'transcript_review', 'video_review')`,
+    [id, scheduledFor],
+  );
+  return rowCount > 0;
+}
+
+/** The background post failed before Post for Me took it: the draft stays editable, with the reason. */
+export async function markPostFailed(id, error) {
+  const { rowCount } = await query(
+    `UPDATE instances SET post_status = 'post_failed', note = $2, updated_at = now()
+      WHERE id = $1 AND locked = false AND post_status = 'posting'`,
+    [id, String(error || 'post failed').slice(0, 500)],
+  );
+  return rowCount > 0;
+}
+
 /** Delete an instance. A locked (posted) instance is never deleted. */
 export async function remove(id) {
   const { rowCount } = await query('DELETE FROM instances WHERE id = $1 AND locked = false', [id]);
@@ -379,7 +400,7 @@ export async function recentForFunnel(funnelId, tenantId = 'default', limit = 40
 }
 
 export default {
-  create, get, list, logRows, saveSteps, setStatus, transition, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, moveFunnel, unschedule, scheduledDue, retryDue, setPostStatus, remove,
+  create, get, list, logRows, saveSteps, setStatus, transition, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, moveFunnel, unschedule, scheduledDue, retryDue, setPostStatus, markPosting, markPostFailed, remove,
   existsForFunnelOnDate, videoOnDate, postedDriveIds, draftsByDriveIds, liveOnDate, openSheetRefs, recentForFunnel,
   routerHeldDriveIds, releaseSlot, supersede,
 };

@@ -40,7 +40,7 @@ import * as firstCommentsRepo from '../repositories/firstCommentsRepository.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
 import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey } from '../utils/aiCopySpec.js';
-import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, thumbSvg, thumbImagePrompt } from '../utils/thumbSpec.js';
+import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, thumbSvg, thumbArt, pickTextSide, thumbImagePrompt } from '../utils/thumbSpec.js';
 import sharp from 'sharp';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -56,7 +56,7 @@ import {
   filterReadyVideos,
   defaultCaption,
   defaultSlotsIso,
-  parseIstDateTime,
+  postTimeIso,
   normalizeSelections,
   normalizePickedAccounts,
 } from '../utils/readyPostSpec.js';
@@ -494,20 +494,50 @@ async function renderThumbs({ providers, platforms, base, text, sub = '' }) {
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
   const thumbs = {};
   const sizes = [];
+  const side = await textSide(base);
   for (const [size, spec] of Object.entries(THUMB_SIZES)) {
     const users = platforms.filter((k) => PLATFORM_SIZE[k] === size);
     if (!users.length) continue;
-    const jpg = await sharp(base)
-      .resize(spec.w, spec.h, { fit: 'cover', position: 'attention' })
-      .composite([{ input: Buffer.from(thumbSvg({ ...spec, accent: THUMB_ACCENT, text, sub })) }])
-      .jpeg({ quality: 86 })
-      .toBuffer();
+    const jpg = await composeThumb(base, spec, { text, sub, side });
     const url = await publish.uploadMedia(jpg, 'image/jpeg');
     for (const k of users) thumbs[k] = url;
     sizes.push({ size, label: spec.label, url, platforms: users });
   }
   log.info({ sizes: sizes.map((x) => x.label) }, 'thumbnails rendered + uploaded');
   return { thumbs, sizes };
+}
+
+/** Which side of the artwork is calmer (less detail), so the text goes there and the face stays clear. */
+async function textSide(base) {
+  try {
+    const { data, info } = await sharp(base).greyscale().resize(240, 240, { fit: 'fill' }).raw().toBuffer({ resolveWithObject: true });
+    return pickTextSide(data, info.width, info.height);
+  } catch {
+    return 'right';
+  }
+}
+
+/**
+ * One size: 'side' crops the artwork to fill the frame (keeping the subject's
+ * side when it has to cut), 'stack' lays the whole square artwork under the text
+ * band on a blurred, darkened copy of itself. Then the text overlay on top.
+ */
+async function composeThumb(base, spec, { text, sub = '', side = 'right' }) {
+  const overlay = { input: Buffer.from(thumbSvg({ ...spec, side, accent: THUMB_ACCENT, text, sub })) };
+  const art = thumbArt(spec);
+  if (!art) {
+    // A tall frame cuts the sides: keep the subject's side whole.
+    const position = spec.h > spec.w ? (side === 'right' ? 'left' : 'right') : 'attention';
+    return sharp(base).resize(spec.w, spec.h, { fit: 'cover', position }).composite([overlay]).jpeg({ quality: 86 }).toBuffer();
+  }
+  const panel = await sharp(base).resize(art.size, art.size, { fit: 'cover', position: 'attention' }).toBuffer();
+  return sharp(base)
+    .resize(spec.w, spec.h, { fit: 'cover' })
+    .blur(40)
+    .modulate({ brightness: 0.45 })
+    .composite([{ input: panel, top: art.top, left: Math.round((spec.w - art.size) / 2) }, overlay])
+    .jpeg({ quality: 86 })
+    .toBuffer();
 }
 
 /** The platforms this funnel posts to that have a thumbnail spec (all, if unknown). */
@@ -1001,7 +1031,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
   for (let i = 0; i < clean.length; i += 1) {
     const sel = clean[i];
     // "Post now" => no scheduled_at, so Post-for-Me publishes immediately.
-    const scheduledIso = sel.now ? null : ((sel.scheduledAt && parseIstDateTime(sel.scheduledAt)) || slots[i] || null);
+    const scheduledIso = postTimeIso(sel, slots[i]);
     // AI-copy lane: each platform gets its own copy for this video.
     const cleaned = (saved[sel.driveId] || {}).clean || null;
     const videoUrl = cleaned ? cleaned.url : publicDlUrl(sel.driveId);
@@ -1049,6 +1079,62 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
 
   await sendPostedEmail({ providers, funnel, resolved, results });
   return { funnel: funnel.name, posted: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
+}
+
+// 📅 Schedule / ⚡ Post now jobs by Drive id: { state: running | done | failed, instanceId, error? }.
+// The outcome is saved on the instance too (scheduled, or post_failed with the reason), so a
+// restart only loses this map; the Library reads a post that went quiet as not finished.
+const postJobs = new Map();
+
+/**
+ * 📅 / ⚡ pressed: check what can fail at once (key, accounts), mark each video's
+ * instance as posting (with its IST time), then hand the posts to Post for Me in
+ * the background so the page can leave straight away. Returns one item a video.
+ */
+export async function startPost({ tenantId = 'default', funnelId, selections, accessToken = '', accounts: pickedAccounts = null }) {
+  const { funnel, resolved } = await loadFunnel(funnelId, pickedAccounts);
+  const providers = await buildProviders(funnel.tenant_id || tenantId);
+  const clean = normalizeSelections(selections);
+  if (!clean.length) throw new Error('no videos selected');
+  if (!providers.resolved.postformeKey) throw new Error('No Post for Me API key, set it once under Setup → Keys and credit');
+  if (!(Array.isArray(resolved.accounts) && resolved.accounts.length)) throw new Error('No accounts ticked: tick the accounts to post to (top of this page)');
+  const busy = clean.filter((s) => (postJobs.get(s.driveId) || {}).state === 'running');
+  if (busy.length) throw new Error(`Already posting ${busy.map((s) => s.name || s.driveId).join(', ')}, wait for it to finish`);
+
+  const slots = defaultSlotsIso(resolved.publishTime, clean.length);
+  const items = [];
+  for (let i = 0; i < clean.length; i += 1) {
+    const sel = clean[i];
+    const scheduledIso = postTimeIso(sel, slots[i]);
+    const { inst } = await ensureInstance({ funnel, driveId: sel.driveId, name: sel.name });
+    await instanceRepo.markPosting(inst.id, { scheduledFor: scheduledIso ? new Date(scheduledIso) : null });
+    postJobs.set(sel.driveId, { state: 'running', instanceId: inst.id, scheduledIso, startedAt: Date.now() });
+    items.push({ driveId: sel.driveId, name: sel.name, instanceId: inst.id, scheduledIso, whenIst: scheduledIso ? formatIst(scheduledIso) : '' });
+  }
+
+  const fail = async (item, why) => {
+    postJobs.set(item.driveId, { state: 'failed', instanceId: item.instanceId, error: why });
+    await instanceRepo.markPostFailed(item.instanceId, why).catch((err) => log.warn({ err: err.message, instance: item.instanceId }, 'could not save the post failure'));
+  };
+  heartbeat.during('post', () => postSelections({ tenantId, funnelId, selections: clean, accessToken, accounts: pickedAccounts }))
+    .then(async (out) => {
+      for (const item of items) {
+        const r = (out.results || []).find((x) => x.driveId === item.driveId);
+        if (r && r.ok) postJobs.set(item.driveId, { state: 'done', instanceId: r.instanceId || item.instanceId, scheduledIso: r.scheduledIso });
+        else await fail(item, (r && r.error) || 'not posted');
+      }
+    })
+    .catch(async (err) => {
+      const why = (err && err.message) || String(err) || 'unknown error';
+      log.error({ err: why, funnel: funnel.name }, 'background post failed');
+      for (const item of items) await fail(item, why);
+    });
+  return { funnel: funnel.name, items };
+}
+
+/** Where a Schedule / Post now job stands ('none' when there is none in memory). */
+export function postStatus({ driveId }) {
+  return postJobs.get(String(driveId)) || { state: 'none' };
 }
 
 /**
@@ -1349,5 +1435,5 @@ export async function approveTranscriptAuto({ funnelId, driveId }) {
 }
 
 export default {
-  onPosted, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, startTranscribe, transcribeStatus, saveTranscript, generateCopy, generateThumbnail, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, postSelections, folderFiles, approveTranscriptAuto,
+  onPosted, startPost, postStatus, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, startTranscribe, transcribeStatus, saveTranscript, generateCopy, generateThumbnail, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, postSelections, folderFiles, approveTranscriptAuto,
 };

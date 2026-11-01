@@ -62,6 +62,29 @@ export function libraryStatus(status) {
   return { key, label: base.label, dot: base.dot, note: '', hidden: false };
 }
 
+// A background post that has said nothing for this long was lost (a restart, say).
+export const POSTING_STALE_MS = 15 * 60 * 1000;
+
+/**
+ * One instance row → how the Library shows it: a post being handed to Post for
+ * Me in the background (post_status 'posting') reads as Scheduled / posting
+ * now, one that failed there ('post_failed') as Failed with the reason in
+ * `note`; anything else by its raw status.
+ */
+export function rowStatus(row, now = Date.now()) {
+  const r = row || {};
+  if (r.post_status === 'posting') {
+    const age = now - new Date(r.updated_at || 0).getTime();
+    if (age > POSTING_STALE_MS) return { key: 'failed', label: 'Failed', dot: '🟡', note: 'posting did not finish, open it and post again', hidden: false, posting: false };
+    return { key: 'scheduled', label: r.scheduled_for ? 'Scheduling' : 'Posting now', dot: '🔵', note: '', hidden: false, posting: true };
+  }
+  if (r.post_status === 'post_failed') {
+    const why = String(r.note || 'post failed');
+    return { key: 'failed', label: 'Failed', dot: '🔴', note: why.length > 140 ? `${why.slice(0, 139)}…` : why, hidden: false, posting: false };
+  }
+  return { ...libraryStatus(r.status), posting: false };
+}
+
 /** The raw statuses that fall under a label key (for filtering). */
 export function statusesFor(labelKey) {
   return Object.keys(STATUS_TO_LABEL).filter((s) => STATUS_TO_LABEL[s] === labelKey);
@@ -73,4 +96,4 @@ export function statusText(status) {
   return `${st.dot} ${st.label}${st.note ? ` (${st.note})` : ''}`;
 }
 
-export default { LIBRARY_LABELS, NEEDS_YOU_STATUSES, libraryStatus, statusesFor, statusText };
+export default { LIBRARY_LABELS, NEEDS_YOU_STATUSES, POSTING_STALE_MS, libraryStatus, rowStatus, statusesFor, statusText };

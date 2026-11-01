@@ -4,6 +4,7 @@ import {
   filterReadyVideos,
   defaultSlotsIso,
   parseIstDateTime,
+  postTimeIso,
   defaultCaption,
   normalizeSelections,
   parseDriveFolderId,
@@ -156,5 +157,14 @@ describe('normalizePickedAccounts', () => {
     expect(normalizePickedAccounts([{ id: 'spc_abc', platform: 'instagram', name: 'gita' }, { id: 'spc_abc' }, { id: 'x' }, null]))
       .toEqual([{ id: 'spc_abc', platform: 'instagram', name: 'gita' }]);
     expect(normalizePickedAccounts('junk')).toEqual([]);
+  });
+});
+
+describe('postTimeIso', () => {
+  it('posts now, at the picked IST time, or at the next slot', () => {
+    expect(postTimeIso({ now: true, scheduledAt: '14-07-2026 08:02' }, '2026-07-15T02:30:00.000Z')).toBeNull();
+    expect(postTimeIso({ scheduledAt: '14-07-2026 08:02' }, 'slot')).toBe(parseIstDateTime('14-07-2026 08:02'));
+    expect(postTimeIso({ scheduledAt: '' }, 'slot')).toBe('slot');
+    expect(postTimeIso({ scheduledAt: 'garbage' })).toBeNull();
   });
 });

@@ -116,6 +116,12 @@ export function parseIstDateTime(str) {
   return dt.isValid ? dt.toISO() : null;
 }
 
+/** When one selection posts: null for ⚡ now, else its own IST time, else the next daily slot. */
+export function postTimeIso(sel, slot = null) {
+  if (!sel || sel.now) return null;
+  return (sel.scheduledAt && parseIstDateTime(sel.scheduledAt)) || slot || null;
+}
+
 /**
  * The default caption: the funnel's configured direct-upload caption if set,
  * else its audience prefix; the CTA link is appended when not already present.
@@ -160,4 +166,4 @@ export function normalizeSelections(selections) {
 }
 
 export { ZONE };
-export default { normalizePickedAccounts, parseEmbeddedFolder, parseDriveFolderId, parsePickedFiles, filterReadyVideos, defaultSlotsIso, parseIstDateTime, defaultCaption, normalizeSelections, ZONE };
+export default { normalizePickedAccounts, parseEmbeddedFolder, parseDriveFolderId, parsePickedFiles, filterReadyVideos, defaultSlotsIso, parseIstDateTime, postTimeIso, defaultCaption, normalizeSelections, ZONE };

@@ -37,7 +37,7 @@ import cron from 'node-cron';
 import { settings } from '../settings/index.js';
 import { MANUAL_STAGES, STAGE_LABEL, inputKind, canExecute } from '../utils/manualStepSpec.js';
 import { navSlot, fillNav, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
-import { LIBRARY_LABELS, libraryStatus, statusesFor } from '../utils/libraryStatus.js';
+import { LIBRARY_LABELS, libraryStatus, rowStatus } from '../utils/libraryStatus.js';
 import { formatIst } from '../utils/time.js';
 import { defaultSlotsIso, parseDriveFolderId, parsePickedFiles } from '../utils/readyPostSpec.js';
 import { driveThumbUrl } from '../utils/reviewSpec.js';
@@ -102,8 +102,9 @@ export function register(ctx) {
       const selections = Array.isArray(req.body?.selections) ? req.body.selections : [];
       if (!funnelId) return res.status(400).json({ ok: false, error: 'funnelId required' });
       const accessToken = String(req.body?.accessToken || '');
-      const out = await readyPost.postSelections({ tenantId: req.tenantId, funnelId, selections, accessToken, accounts: req.body?.accounts });
-      res.json({ ok: true, ...out });
+      // Handed to Post for Me in the background; each instance shows Scheduling / Posting now, then the outcome.
+      const out = await readyPost.startPost({ tenantId: req.tenantId, funnelId, selections, accessToken, accounts: req.body?.accounts });
+      res.json({ ok: true, started: true, ...out });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -447,8 +448,8 @@ function channelsOf(steps) {
 
 // One of the seven Library labels with its colour dot (utils/libraryStatus);
 // the precise stage name stays in the tooltip.
-function statusPill(status) {
-  const st = libraryStatus(status);
+function statusPill(status, row = null) {
+  const st = row ? rowStatus(row) : libraryStatus(status);
   const cls = { '🟢': 'ok', '🟡': 'warn', '🔴': 'bad', '🔵': 'info' }[st.dot] || 'mut';
   return `<span class="pill ${cls}" title="${esc(STATUS_LABEL[status] || status)}">${st.dot} ${esc(st.label)}${st.note ? ` (${esc(st.note)})` : ''}</span>`;
 }
@@ -473,12 +474,16 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
   // Replaced (superseded) runs are hidden unless asked for by an old ?status= link.
   const visible = (all || []).filter((r) => status === 'superseded' || !libraryStatus(r.status).hidden);
   const inFunnel = visible.filter((r) => !funnel || String(r.funnel_id) === funnel);
-  const rows = label ? inFunnel.filter((r) => statusesFor(label).includes(r.status)) : inFunnel;
+  const filtered = label ? inFunnel.filter((r) => rowStatus(r).key === label) : inFunnel;
+  // Posts on their way to Post for Me, and ones that failed there, come first.
+  const first = (r) => (['posting', 'post_failed'].includes(r.post_status) ? 0 : 1);
+  const rows = [...filtered].sort((a, b) => first(a) - first(b));
+  const posting = rows.some((r) => rowStatus(r).posting);
   const link = (q) => {
     const p = new URLSearchParams(Object.entries({ label, funnel, ...q }).filter(([, v]) => v));
     return `/api/v1/admin/instances${p.toString() ? `?${p}` : ''}`;
   };
-  const count = (k) => inFunnel.filter((r) => libraryStatus(r.status).key === k).length;
+  const count = (k) => inFunnel.filter((r) => rowStatus(r).key === k).length;
   const labelChips = [`<a class="chip${!label && !status ? ' on' : ''}" href="${link({ label: '' })}">All</a>`,
     ...LIBRARY_LABELS.map((l) => `<a class="chip${label === l.key ? ' on' : ''}" href="${link({ label: l.key })}">${l.dot} ${esc(l.label)} ${count(l.key)}</a>`)].join('');
   const funnelChips = (funnelList || []).length > 1
@@ -500,7 +505,7 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
         <td>${esc(r.funnel_name || '-')}</td>
         <td>${r.duration_seconds != null ? esc(formatDuration(r.duration_seconds)) : '-'}</td>
         <td>${esc(usd(r.cost_usd))}</td>
-        <td>${statusPill(r.status)}${['draft', 'transcript_review'].includes(r.status) && laneOf(r) === 'ready' ? `<div class="hint">next: ${esc(stageLabel(readyStage(r, steps)))}</div>` : ''}</td>
+        <td>${statusPill(r.status, r)}${['draft', 'transcript_review'].includes(r.status) && !String(r.post_status || '').startsWith('post') && laneOf(r) === 'ready' ? `<div class="hint">next: ${esc(stageLabel(readyStage(r, steps)))}</div>` : ''}</td>
         <td class="when"><div title="Scheduled">📅 ${r.scheduled_for ? esc(formatIst(r.scheduled_for)) : '-'}</div><div title="Posted">✅ ${r.posted_at && ['posted', 'partial'].includes(r.status) ? esc(formatIst(r.posted_at)) : '-'}</div></td>
         <td class="actions">${preview} <a class="act" href="/api/v1/admin/instances/${esc(r.id)}">Open</a> ${del}</td>
         <td class="chans">${esc(channelsOf(steps).map(channelText).join(', ')) || '<span class="hint">-</span>'}</td>
@@ -528,6 +533,7 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
   `, `
     async function sample(){ const r=await fetch('/api/v1/admin/instances/sample',{method:'POST'}); const j=await r.json(); if(j.ok) location.reload(); else alert(j.error||'failed'); }
     async function del(id){ if(!confirm('Delete this instance?')) return; const r=await fetch('/api/v1/admin/instances/'+id+'/delete',{method:'POST'}); const j=await r.json(); if(j.ok) location.reload(); else alert(j.error||'failed'); }
+    ${posting ? 'setTimeout(()=>location.reload(), 8000); // a post is on its way to Post for Me' : ''}
   `, 'instances');
 }
 
@@ -825,6 +831,10 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
   const scheduled = !!(single && single.status === 'scheduled');
   const failed = !!(single && single.status === 'failed');
   const partial = !!(single && single.status === 'partial');
+  // 📅 / ⚡ pressed: on its way to Post for Me in the background, or it failed there.
+  const st = single ? rowStatus(single) : null;
+  const posting = !!(st && st.posting);
+  const postFailed = !!(single && ['posting', 'post_failed'].includes(single.post_status) && !posting);
   const chans = single ? channelsOf(instances.parseSteps(single)) : [];
   const chanList = chans.length ? `<div class="chans">${chans.map((c) => esc(channelText(c))).join('<br>')}</div>` : '';
   const retryBtn = chans.some((c) => c.state === 'failed') ? '<button class="act primary" onclick="retryFailed()">↻ Post to the failed channels only</button>' : '';
@@ -832,7 +842,11 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
   const autoNote = pubArt.retry && pubArt.retry.nextAt
     ? ` The app re-posts to them by itself at <b>${esc(formatIst(pubArt.retry.nextAt))} IST</b>, so just reconnect; or press the button once you have.`
     : '';
-  const banner = partial
+  const banner = posting
+    ? `<div class="schedbar">⏳ ${single.scheduled_for ? `Scheduling on Post for Me for <b>${esc(formatIst(single.scheduled_for))} IST</b>` : 'Posting now'}, on the server in the background. This page refreshes by itself; you can leave it.</div>`
+    : postFailed
+    ? `<div class="schedbar bad">🔴 ${single.post_status === 'posting' ? 'Posting did not finish (the server restarted?).' : `The post did not go out: ${esc(single.note || 'unknown error')}`} Nothing was scheduled. Fix it, then press Schedule or Post now again.</div>`
+    : partial
     ? `<div class="schedbar bad">🟡 Partly posted. Reconnect the ❌ accounts in Post for Me, then re-post to just those (the ✅ ones are not posted again).${autoNote} ${retryBtn} <span class="hint" id="edmsg"></span>${chanList}</div>`
     : scheduled && chans.some((c) => c.state === 'ok')
       ? `<div class="schedbar">⏳ Re-posting to the failed channels… ${chanList}</div>`
@@ -848,7 +862,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         <h1>${esc(single.title || 'Ready video')}</h1>
         <div class="sub">${esc(funnel.name)} · instance ${esc(shortId(single.id))} · ${esc(SOURCE_TYPES[source.type] || 'Ready video')} · ready-video lane</div>
       </div>
-      <div class="toprow">${statusPill(single.status)}
+      <div class="toprow">${statusPill(single.status, single)}
         ${['draft', 'transcript_review', 'failed'].includes(single.status) && funnelList.length > 1 ? `<label class="nowrow">Funnel <select id="mvf">${funnelList.map((f) => `<option value="${esc(String(f.id))}"${String(f.id) === String(funnel.id) ? ' selected' : ''}>${esc(f.name)}</option>`).join('')}</select></label>
         <button class="act" onclick="moveFunnel()">⇄ Move</button>` : ''}
         <a class="act" href="${PREPARE.base}?funnel=${encodeURIComponent(funnel.id)}">← Ready videos</a>
@@ -873,8 +887,8 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     ${head}
     ${banner}
     ${acctBar(src.resolved)}
-    <fieldset class="ro-set"${scheduled || failed || partial ? ' disabled' : ''}><div class="grid">${cards}</div></fieldset>
-    <div class="bar"${scheduled || failed || partial ? ' style="display:none"' : ''}>
+    <fieldset class="ro-set"${scheduled || failed || partial || posting ? ' disabled' : ''}><div class="grid">${cards}</div></fieldset>
+    <div class="bar"${scheduled || failed || partial || posting ? ' style="display:none"' : ''}>
       <button class="approve" onclick="postSel(false)">📅 Schedule ${single ? 'this video' : 'selected'}</button>
       <button class="approve" onclick="postSel(true)">⚡ Post ${single ? 'it' : 'selected'} now</button>
       <span id="rmsg" class="hint"></span>
@@ -885,6 +899,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     const FUNNEL_ID = ${JSON.stringify(String(funnel.id))};
     const SOURCE = ${JSON.stringify({ type: source.type || 'drive_folder', id: source.id || null })};
     const SINGLE = ${single ? 'true' : 'false'};
+    ${posting ? 'setTimeout(()=>location.reload(), 8000);' : ''}
     const CTA = ${JSON.stringify(cta).replace(/</g, '\\u003c')};
     // The CTA link is not part of the description text: it is added when posting (this post's link, else the funnel's).
     const noLink = t=>{ const nl=String.fromCharCode(10), ls=String(t||'').trimEnd().split(nl); while(ls.length){ const l=ls[ls.length-1].trim(); if(l.indexOf('http')===0 && l.indexOf(' ')<0) ls.pop(); else break; } return ls.join(nl).trimEnd(); };
@@ -1142,18 +1157,19 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       const nowCount=selections.filter(s=>s.now).length;
       if(nowCount && !confirm(nowCount+' video(s) will go live on every channel right now. Continue?')) return;
       msg((nowCount===selections.length?'Posting now ':'Scheduling ')+selections.length+'…');
+      document.querySelectorAll('.bar .approve').forEach(b=>{ b.disabled=true; });
       try{
+        // The server hands the posts to Post for Me in the background; the Library shows how each one goes.
         const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections, accounts: pickedAccounts(), accessToken: await driveToken() })});
         const j=await r.json();
-        if(j.ok){
-          const bad=(j.results||[]).filter(x=>!x.ok);
-          const okd=(j.results||[]).filter(x=>x.ok);
-          const when=okd.map(x=>x.scheduledIso?('📅 '+x.whenIst):'⚡ now').join(', ');
-          msg((okd.length?'🟢 '+(nowCount===selections.length?'Sent to Post for Me to post now':'Scheduled')+' ('+when+'). You get an email when it goes live.':'')+(bad.length?(' 🔴 '+bad.length+' failed: '+bad.map(x=>x.name+': '+x.error).join('; ')):' Opening Library…'));
-          if(!bad.length) setTimeout(()=>location.href='/api/v1/admin/instances?status=scheduled',2500);
-        }
-        else msg('Failed: '+(j.error||''));
-      }catch(e){ msg('Failed: '+e.message); }
+        if(!j.ok) throw new Error(j.error||'failed');
+        const when=(j.items||[]).map(x=>x.scheduledIso?('📅 '+x.whenIst+' IST'):'⚡ now').join(', ');
+        msg('🟢 '+(nowCount===selections.length?'Posting now':'Scheduling')+' ('+when+') on the server. Opening Library…');
+        location.href='/api/v1/admin/instances';
+      }catch(e){
+        msg('🔴 Failed: '+e.message);
+        document.querySelectorAll('.bar .approve').forEach(b=>{ b.disabled=false; });
+      }
     }
     async function dropSource(sid){
       if(!confirm('Forget this source? Its videos and instances stay.')) return;
