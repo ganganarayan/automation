@@ -73,14 +73,22 @@ export async function currentSession(req) {
   let session = null;
   const tokenHash = tokenHashOf(req);
   if (tokenHash) {
-    try {
-      const row = await auth.findSession(tokenHash);
-      if (row) {
-        session = { email: row.email, role: row.role, mustChange: row.must_change, tokenHash };
-        auth.touchSession(tokenHash).catch(() => {});
+    // A database hiccup (e.g. the first query after the app wakes) is not a
+    // sign-out: retry, and flag it so a save can say "try again" instead.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const row = await auth.findSession(tokenHash);
+        if (row) {
+          session = { email: row.email, role: row.role, mustChange: row.must_change, tokenHash };
+          auth.touchSession(tokenHash).catch(() => {});
+        }
+        req._sessionError = false;
+        break;
+      } catch {
+        session = null;
+        req._sessionError = true;
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
       }
-    } catch {
-      session = null;
     }
   }
   req._session = session;

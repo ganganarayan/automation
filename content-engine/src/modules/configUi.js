@@ -81,7 +81,11 @@ export function register(ctx) {
   router.post('/admin/settings/save', async (req, res, next) => {
     try {
       if (!(await keyOk(req))) {
-        // A browser form (signed out in another tab, or the sign-in ended): send
+        // The sign-in lookup could not reach the database: not a sign-out.
+        if (req._sessionError) return res.status(503).json({ error: 'database unavailable, nothing saved; try again' });
+        // The page's own save (fetch) keeps the typed entries and shows a note.
+        if (req.get('X-Save-Fetch')) return res.status(401).json({ error: 'unauthorized' });
+        // A plain browser form (signed out in another tab, or the sign-in ended): send
         // them to sign in and back to Settings instead of a bare JSON error.
         if (!req.is('application/json')) {
           const back = encodeURIComponent(`/api/v1/admin/settings?error=${encodeURIComponent('You were signed out, so nothing was saved. Sign in and save again.')}`);
@@ -539,6 +543,31 @@ ${NAV_CSS}
 </div>
 <script>
   const KEY = ${JSON.stringify(key || '')};
+  // Save without leaving the page: if the sign-in is not accepted, what you
+  // typed stays here; sign in in a new tab and press Save again.
+  document.addEventListener('submit', async (ev) => {
+    const f = ev.target;
+    if (!f || !(f.getAttribute('action') || '').endsWith('settings/save')) return;
+    ev.preventDefault();
+    const btn = f.querySelector('button[type=submit]');
+    const note = f.querySelector('.savenote') || f.appendChild(Object.assign(document.createElement('p'), { className: 'savenote hint' }));
+    if (btn) btn.disabled = true;
+    note.textContent = 'Saving…';
+    try {
+      const r = await fetch(f.action, { method: 'POST', headers: { 'X-Save-Fetch': '1' }, body: new URLSearchParams(new FormData(f)) });
+      if (r.status === 401) {
+        note.innerHTML = '🟡 Your sign-in was not accepted, so nothing was saved, but your entries are still here. <a href="/api/v1/admin/login?next=%2Fapi%2Fv1%2Fadmin%2Ftoday" target="_blank" rel="noopener">Sign in in a new tab</a>, come back to this tab and press Save again.';
+        return;
+      }
+      if (r.status === 503) { note.textContent = '🟡 The app could not reach its database just now. Nothing was saved, your entries are still here: press Save again.'; return; }
+      if (!r.ok) { note.textContent = '🟡 Save failed (' + r.status + '). Your entries are still here: press Save again.'; return; }
+      location.href = r.url;
+    } catch (err) {
+      note.textContent = '🟡 Could not reach the app (' + err.message + '). Your entries are still here: press Save again.';
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
   function show(id){
     document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id==='panel-'+id));
     document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('active',n.dataset.target===id));
