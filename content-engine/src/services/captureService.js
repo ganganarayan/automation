@@ -11,7 +11,7 @@
  * Dependencies: captureSpec (pure). Repos/senders are passed in by the caller.
  *
  * Idempotency: the lead row is inserted (ON CONFLICT (comment_id) DO NOTHING)
- * BEFORE any send. A duplicate webhook gets null back and stops — so a comment
+ * BEFORE any send. A duplicate webhook gets null back and stops, so a comment
  * can never produce a second DM, even under concurrent deliveries.
  */
 import { firstMatchingRule, detectAbuse, isOlderThan7Days, pickVariant } from '../utils/captureSpec.js';
@@ -53,7 +53,7 @@ export async function processCommentEvent({ tenantId = 'default', event, now = n
     if (rule) await rules.bindNativePost({ ruleId: rule.id, platformPostId: e.postId, accountId: e.accountId });
   }
   // No rule for this post: still record the comment so it is visible and can be
-  // answered by hand. No DM, no public reply, no keyword — it is not a lead.
+  // answered by hand. No DM, no public reply, no keyword, it is not a lead.
   if (!rule) {
     const unmatchedAbuse = detectAbuse(e.text, abuseWords);
     const seen = await leads.insertIfNew({
@@ -97,7 +97,7 @@ export async function processCommentEvent({ tenantId = 'default', event, now = n
     return { outcome: 'duplicate' };
   }
 
-  // Abuse screen — log the lead, never DM.
+  // Abuse screen: log the lead, never DM.
   const abuse = detectAbuse(e.text, abuseWords);
   if (abuse.abusive) {
     await leads.updateStatus(lead.id, { dmStatus: 'blocked_abuse', publicReplyStatus: 'skipped', error: `abuse: ${abuse.word}` });
@@ -163,7 +163,7 @@ export async function processCommentEvent({ tenantId = 'default', event, now = n
 }
 
 /**
- * Process an inbound REPLY to one of our DMs — the follow gate.
+ * Process an inbound REPLY to one of our DMs, the follow gate.
  *
  * Meta only grants profile consent once the person messages us, so this is the
  * first (and only) moment we can read follower status. It is also when the 24h
@@ -213,7 +213,7 @@ export async function processMessageEvent({ tenantId = 'default', event, selfIds
   const deliver = !gate || follows !== false;
   const text = deliver
     ? (rule?.followup_text || rule?.dm_text || '')
-    : (rule?.not_following_text || 'Follow the account and reply here — I will send it straight over.');
+    : (rule?.not_following_text || 'Follow the account and reply here. I will send it straight over.');
   const link = deliver ? await personalLink(trackLink, lead, rule?.dm_link || null, log) : null;
 
   try {

@@ -17,7 +17,7 @@
  *                 reason for passing is kept on router_days.reason. A day
  *                 nothing could be lined up for is recorded as 'none' with
  *                 the reason, and the operator gets one email.
- *               - rerun: the super-admin "Re-run tomorrow's check" — drop the
+ *               - rerun: the super-admin "Re-run tomorrow's check", drop the
  *                 funnel's day, replace (or unlink) what was not approved yet,
  *                 decide again.
  * Dependencies: funnelsRepository, instanceRepository, routerDaysRepository,

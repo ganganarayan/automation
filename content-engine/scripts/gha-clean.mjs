@@ -1,9 +1,9 @@
 /**
  * ✂ Clean, run by GitHub Actions (.github/workflows/clean-video.yml).
  *
- * Purpose:      Do on a GitHub runner what ✂ Clean does on Railway — zoom in
+ * Purpose:      Do on a GitHub runner what ✂ Clean does on Railway, zoom in
  *               from the top so the corner watermark leaves the frame, cut the
- *               outro, add the end card — then put the file in the user's
+ *               outro, add the end card, then put the file in the user's
  *               Google Drive app folder and tell the app.
  * Responsibility:
  *               1. GET  hooks/clean/job       → options, Drive download URL, Drive token
@@ -19,7 +19,7 @@
  * them with the SAME args as Railway (src/utils/stageSpec.js ffmpegConcatArgs,
  * captions burned when the job has them), upload, tell the app.
  *
- * Env: HOOK (the app's https address), TICKET (signed job ticket — the only
+ * Env: HOOK (the app's https address), TICKET (signed job ticket: the only
  * credential this run holds; it expires in a few hours).
  */
 import { spawn } from 'node:child_process';
@@ -120,7 +120,7 @@ async function main() {
 
   await run('curl', ['-fsSL', '--retry', '3', '-o', 'in.mp4', job.downloadUrl]);
   const head = (await readFile('in.mp4')).subarray(0, 200).toString('latin1');
-  if (/<html|<!doctype/i.test(head)) throw new Error('Drive sent a web page, not the video — is its folder shared "Anyone with the link"?');
+  if (/<html|<!doctype/i.test(head)) throw new Error('Drive sent a web page, not the video, is its folder shared "Anyone with the link"?');
   const info = await probe('in.mp4');
   const keepSec = keepSecFor(info.durationSec, job.trimEndSec);
   const outSec = (keepSec || info.durationSec) + (job.endSec || 0);
@@ -129,7 +129,7 @@ async function main() {
   let subPath = '';
   if (job.srt) {
     const srt = clipSrt(job.srt, keepSec);
-    if (!srt) throw new Error('the transcript has no subtitles before the cut — nothing to burn');
+    if (!srt) throw new Error('the transcript has no subtitles before the cut, nothing to burn');
     subPath = 'subs.srt';
     await writeFile(subPath, srt, 'utf8');
     console.log(`Burning subtitles: ${srt.split('-->').length - 1} cues`);

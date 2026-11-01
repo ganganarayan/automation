@@ -1,9 +1,9 @@
 /**
- * Funnel poster (generalized — replicates the n8n daily posters).
+ * Funnel poster (generalized: replicates the n8n daily posters).
  *
  * Purpose:      Produce, approve, and publish a daily image post for ANY funnel,
  *               driven entirely by that funnel's own configuration. One template
- *               covers Gita, VidaPulse, Corporate and Divine Leads — you just
+ *               covers Gita, VidaPulse, Corporate and Divine Leads, you just
  *               create a funnel per brand.
  * Responsibility:
  *               - runFunnel(funnel): next Ready row → compose prompt/captions →
@@ -45,7 +45,7 @@ const DEFAULT_TAB = 'Sheet1';
 
 /**
  * Resolve the sheet tab for a funnel: its configured tab name, else the first
- * (leftmost) tab of the spreadsheet. Returned ready for A1 notation — names with
+ * (leftmost) tab of the spreadsheet. Returned ready for A1 notation, names with
  * spaces/special chars are single-quoted so `${tab}!A1` and bare-title ranges work.
  */
 export async function tabFor(sheets, f) {
@@ -140,7 +140,7 @@ export async function runFunnel(funnelRow) {
   log.info({ match: row.matchKey }, 'approval email sent');
 }
 
-/** Publish after approval — one Post-for-Me call. */
+/** Publish after approval: one Post-for-Me call. */
 export async function publish(approval) {
   const p = approval.payload || {};
   const funnelRow = await funnels.get(p.funnelId);
@@ -206,7 +206,7 @@ export async function armPostExtras({ f, p, ref, accounts, log }) {
   }
 }
 
-/** Rework — regenerate with the reviewer note. */
+/** Rework: regenerate with the reviewer note. */
 export async function rework(approval, note) {
   const p = approval.payload || {};
   const funnelRow = await funnels.get(p.funnelId);

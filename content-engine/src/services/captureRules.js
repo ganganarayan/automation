@@ -2,7 +2,7 @@
  * Publish-time keyword-rule creation.
  *
  * Purpose:      After a successful publish, turn the content's keyword / dm_text
- *               / dm_link into keyword_rule(s) — one per DM-capable platform
+ *               / dm_link into keyword_rule(s): one per DM-capable platform
  *               (Instagram, Facebook) among the post's accounts. Threads, X,
  *               YouTube and LinkedIn have no DM API, so they get no rule.
  * Responsibility: Thin orchestration over the repository; safe to call on every

@@ -4,11 +4,11 @@
  * Purpose:      Post for Me calls this the moment a channel of a post goes
  *               live; that channel then gets the post's link as its first
  *               comment, before anyone else comments.
- * Responsibility: HTTP only — verify the secret header, answer 200 at once,
+ * Responsibility: HTTP only: verify the secret header, answer 200 at once,
  *               hand the event to firstCommentService.
  * Dependencies: firstCommentService.
  *
- * Routes (no sign-in — the Post-For-Me-Webhook-Secret header is checked):
+ * Routes (no sign-in: the Post-For-Me-Webhook-Secret header is checked):
  *         POST /api/v1/webhook/postforme/:tenant  (also runs the post check)
  *         POST /api/v1/jobs/check-posts  (admin key; the GitHub wake-up backup)
  */

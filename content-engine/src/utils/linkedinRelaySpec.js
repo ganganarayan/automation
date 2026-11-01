@@ -2,8 +2,8 @@
  * LinkedIn notification parsing (pure).
  *
  * Purpose:      Turn a LinkedIn notification email into the three things we relay
- *               to WhatsApp — who acted, the first line of what they said, and a
- *               direct link to the post — plus the WhatsApp message text.
+ *               to WhatsApp: who acted, the first line of what they said, and a
+ *               direct link to the post, plus the WhatsApp message text.
  * Responsibility: Pure functions only (no IMAP, no network). Best-effort and
  *               defensive: LinkedIn's templates change, so every field degrades
  *               gracefully rather than throwing.
@@ -35,13 +35,13 @@ export function classify(subject = '') {
   return 'notification';
 }
 
-/** The person who acted — from the subject ("Name commented on…"), else the
+/** The person who acted, from the subject ("Name commented on…"), else the
  *  sender display name ("Name via LinkedIn"). */
 export function extractName({ from = '', subject = '' } = {}) {
   const s = String(subject).trim();
   const m = s.match(ACTION_RE);
   if (m && m.index > 0) {
-    const name = s.slice(0, m.index).trim().replace(/[:\-–—]+$/, '').trim();
+    const name = s.slice(0, m.index).trim().replace(/[:\-\u2013\u2014]+$/, '').trim();
     if (name && name.length <= 80) return name;
   }
   // Sender display name: "Pat Rao via LinkedIn <...>" or "Pat Rao <...>".
@@ -69,7 +69,7 @@ export function extractFirstLine({ text = '', html = '', subject = '' } = {}) {
 const POST_URL_RE = /https?:\/\/[^\s"'<>]*linkedin\.com\/(?:comm\/)?(?:feed\/update|posts|feed\/update\/urn)[^\s"'<>]*/i;
 const ANY_LI_URL_RE = /https?:\/\/[^\s"'<>]*(?:linkedin\.com|lnkd\.in)\/[^\s"'<>]*/i;
 
-/** A direct link to the post/thread — a feed/update or posts permalink if we can
+/** A direct link to the post/thread, a feed/update or posts permalink if we can
  *  find one, else the first LinkedIn link in the email. '' if none. */
 export function extractPostUrl({ html = '', text = '' } = {}) {
   const hay = `${html}\n${text}`;
@@ -93,9 +93,9 @@ export function parseLinkedinNotification(email = {}) {
 export function buildWhatsappMessage(parsed = {}) {
   const kind = parsed.kind || 'notification';
   const name = parsed.name || 'Someone';
-  const head = `🔔 LinkedIn ${kind} — ${name}`;
+  const head = `🔔 LinkedIn ${kind}, ${name}`;
   const quote = parsed.firstLine ? `\n“${parsed.firstLine}”` : (parsed.subject ? `\n${parsed.subject}` : '');
-  const link = parsed.postUrl ? `\n${parsed.postUrl}` : '\n(no post link found — open LinkedIn)';
+  const link = parsed.postUrl ? `\n${parsed.postUrl}` : '\n(no post link found, open LinkedIn)';
   return `${head}${quote}${link}\n\nReply on LinkedIn yourself.`;
 }
 

@@ -8,13 +8,13 @@
  * Dependencies: core/db.
  *
  * A funnel is fully self-contained: it owns its content source, publishing
- * accounts, style, and schedule. There is no env fallback at funnel level —
+ * accounts, style, and schedule. There is no env fallback at funnel level:
  * everything is set in the app.
  */
 import { query } from '../core/db.js';
 
 /**
- * The config fields a funnel form edits — the ONE template every funnel shares.
+ * The config fields a funnel form edits, the ONE template every funnel shares.
  * No image compositing/overlay: the generated image is used as-is (layout is
  * handled in the image prompt).
  */
@@ -60,8 +60,8 @@ export const FUNNEL_FIELDS = [
     type: 'select',
     default: 'off',
     options: [
-      { value: 'off', label: 'Off — scheduler runs the pipeline automatically' },
-      { value: 'on', label: 'On — step each stage by hand in the app' },
+      { value: 'off', label: 'Off: scheduler runs the pipeline automatically' },
+      { value: 'on', label: 'On: step each stage by hand in the app' },
     ],
   },
 ];
@@ -148,7 +148,7 @@ export async function resolve(funnel) {
     sheetId: c.sheet_id || '',
     sheetTab: c.sheet_tab || '', // blank = auto-detect the first tab
     driveFolder: c.drive_folder_id || '',
-    // NOTE: no postformeKey here — the Post for Me key is central (API Keys page,
+    // NOTE: no postformeKey here: the Post for Me key is central (API Keys page,
     // tenant settings). A funnel only chooses WHICH connected accounts it posts to.
     accounts: json(c.postforme_accounts, []),
     accountMap: json(c.account_map, {}),

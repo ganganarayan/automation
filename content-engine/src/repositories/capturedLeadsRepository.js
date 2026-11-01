@@ -12,7 +12,7 @@ import { query } from '../core/db.js';
 /**
  * Insert a lead only if its comment_id is new. Returns the created row, or null
  * when the comment was already captured (ON CONFLICT DO NOTHING). Callers treat
- * null as "already handled — stop here".
+ * null as "already handled: stop here".
  */
 export async function insertIfNew({
   tenantId = 'default',

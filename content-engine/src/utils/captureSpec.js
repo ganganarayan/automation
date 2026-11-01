@@ -1,5 +1,5 @@
 /**
- * Comment-capture pure logic (no DB, no settings — only node:crypto).
+ * Comment-capture pure logic (no DB, no settings, only node:crypto).
  *
  * Purpose:      The decision core of the comment-to-DM layer, kept side-effect
  *               free so it unit-tests without a database: text normalization,
@@ -14,7 +14,7 @@ const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60;
 
 /**
  * Lowercase, drop emoji and punctuation, collapse whitespace. Keeps letters,
- * combining marks (\p{M} — Devanagari matras), and digits across Unicode, so
+ * combining marks (\p{M}. Devanagari matras), and digits across Unicode, so
  * Hindi text survives intact (मुझे stays मुझे, not म झ).
  */
 export function normalize(text) {
@@ -202,7 +202,7 @@ export function parseCommentEvents(body) {
 
 /**
  * Flatten a Meta webhook body into INBOUND message events (someone replying to
- * our DM). Echoes — messages we sent — are dropped, as are delivery/read
+ * our DM). Echoes: messages we sent, are dropped, as are delivery/read
  * receipts. A reply is what grants profile consent and opens the 24h window.
  */
 export function parseMessageEvents(body) {

@@ -11,7 +11,7 @@
  *               - download(fileId): Buffer
  *
  *               Two identities: the workspace service account (cfg.serviceAccount),
- *               or — for files the operator picked with "Sign in with Google" —
+ *               or: for files the operator picked with "Sign in with Google":
  *               the operator's own short-lived access token (cfg.accessToken,
  *               drive.file scope: only the picked files are reachable).
  * Dependencies: googleapis, logger.
@@ -22,7 +22,7 @@ import { google } from 'googleapis';
 const thumbUrl = (id) => `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
 const dlUrl = (id) => `https://drive.google.com/uc?export=download&id=${id}`;
 
-const NOT_CONNECTED = 'Google Drive is not connected — use 📂 Pick from Drive (Sign in with Google), or paste the service-account JSON under Setup → Settings → Google (Sheets & Drive access)';
+const NOT_CONNECTED = 'Google Drive is not connected, use 📂 Pick from Drive (Sign in with Google), or paste the service-account JSON under Setup → Settings → Google (Sheets & Drive access)';
 
 export function createGoogleDriveProvider(cfg, log) {
   if (!cfg.serviceAccount && !cfg.accessToken) {
@@ -39,7 +39,7 @@ export function createGoogleDriveProvider(cfg, log) {
         return { id: null, thumbnailUrl: null, downloadUrl: null };
       },
       shareAnyone: noop,
-      // Reads can't be skipped quietly — an empty list / empty file looks like
+      // Reads can't be skipped quietly, an empty list / empty file looks like
       // "no videos" and hides the real problem, so say what to set.
       async listFiles() {
         throw new Error(NOT_CONNECTED);

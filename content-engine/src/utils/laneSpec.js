@@ -1,7 +1,7 @@
 /**
  * Lanes + stages: pure helpers.
  *
- * Purpose:      The settings-free pieces of the lane model — which lane an
+ * Purpose:      The settings-free pieces of the lane model, which lane an
  *               instance belongs to, which stage a ready-video instance is at,
  *               the transcript gate (approved transcript before any paid copy),
  *               SRT → plain text, and the Whisper glossary prompt.

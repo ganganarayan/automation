@@ -3,7 +3,7 @@
  *
  * Purpose:      Describe a service's pipeline as an ordered set of phases and
  *               step-boxes for the flowchart config view. Each box references
- *               existing manifest field keys and a module key — no field or
+ *               existing manifest field keys and a module key, no field or
  *               value duplication; the flowchart is purely a layout over the
  *               same config the flat form edits.
  * Responsibility: Pure data.

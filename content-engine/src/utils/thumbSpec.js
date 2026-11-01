@@ -1,5 +1,5 @@
 /**
- * Thumbnail sizes + the overlay design (pure — no I/O).
+ * Thumbnail sizes + the overlay design (pure: no I/O).
  *
  * Purpose:      One AI artwork per video (generated from an image prompt written
  *               from the transcript; a video frame if that fails), rendered in

@@ -1,5 +1,5 @@
 /**
- * Ready-video clean-up (pure — no I/O).
+ * Ready-video clean-up (pure: no I/O).
  *
  * Purpose:      Remove a corner watermark and a branded outro (e.g. NotebookLM)
  *               from a finished video: zoom in keeping the TOP of the frame
@@ -10,7 +10,7 @@
  *               - cleanVideoArgs({ input, output, zoomPct, keepSec, subPath }): ffmpeg args
  *               - transcriptSrt / clipSrt: the transcript's timed subtitles,
  *                 cut to the kept part, for burning in (subPath)
- * Dependencies: stageSpec (buildSrt — pure).
+ * Dependencies: stageSpec (buildSrt: pure).
  */
 import { buildSrt } from './stageSpec.js';
 
@@ -63,7 +63,7 @@ const evenDim = (n, d) => Math.max(2, Math.round((Number(n) > 0 ? Number(n) : d)
 /**
  * The end card as an SVG (rendered to PNG by sharp, the same text renderer the
  * thumbnails use): the operator's lines wrapped to fit, centred, the link
- * below in a smaller size — sized so it reads clearly on a phone.
+ * below in a smaller size, sized so it reads clearly on a phone.
  */
 export function endCardSvg({ w = 1080, h = 1920, text = '', link = '' }) {
   const W = evenDim(w, 1080);
@@ -172,7 +172,7 @@ export function parseSrt(raw) {
 
 /**
  * Long cues (Whisper segments run to a few sentences) split into short ones
- * of at most `maxChars`, their time shared out by length — easier to read on
+ * of at most `maxChars`, their time shared out by length, easier to read on
  * a phone.
  */
 export function splitLongCues(cues, maxChars = 64) {
@@ -206,8 +206,8 @@ export function transcriptSrt(art = {}) {
 
 /**
  * The subtitles for the cleaned video: only the first `keepSec` seconds (the
- * outro is cut; 0 = keep all) — cues past the cut dropped, one across it
- * ends at it — long cues split. The end card comes after and gets none.
+ * outro is cut; 0 = keep all), cues past the cut dropped, one across it
+ * ends at it: long cues split. The end card comes after and gets none.
  */
 export function clipSrt(raw, keepSec = 0) {
   const k = Number(keepSec) > 0 ? Number(keepSec) : Infinity;
@@ -220,7 +220,7 @@ export function clipSrt(raw, keepSec = 0) {
 /**
  * Where to look for subtitles already in the picture: 3 frames taken while
  * someone is speaking (the middle of a transcript cue, so any subtitles are on
- * screen), spread over the kept part — the first, middle and last cues of at
+ * screen), spread over the kept part, the first, middle and last cues of at
  * least 1 s. Without cues: a quarter, half and three quarters of the way in.
  */
 export function captionSampleTimes(totalSec, keepSec = 0, cues = []) {

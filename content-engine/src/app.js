@@ -71,7 +71,7 @@ export function createApp() {
   app.get('/terms', async (_req, res) => res.type('html').send(publicPages.termsPage({ email: await contactEmail() })));
   app.get('/health', (_req, res) => res.json({ status: 'ok', service: settings.service }));
   app.get('/live', (_req, res) => res.json({ status: 'alive' }));
-  // Running build identity — lets a deploy be verified against the pushed commit.
+  // Running build identity: lets a deploy be verified against the pushed commit.
   // Railway injects RAILWAY_GIT_COMMIT_SHA; fall back to a generic dev marker.
   const version = (_req, res) => res.json({
     service: settings.service,

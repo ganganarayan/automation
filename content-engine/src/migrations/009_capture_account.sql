@@ -1,5 +1,5 @@
--- The private reply (DM) is sent as the account that owns the post — POST
--- /{account-id}/messages — and the access token is stored per account id, so we
+-- The private reply (DM) is sent as the account that owns the post. POST
+-- /{account-id}/messages: and the access token is stored per account id, so we
 -- record which account each lead/rule belongs to. account_id = the IG user id
 -- (Instagram) or Page id (Facebook) from the webhook entry. Additive only.
 

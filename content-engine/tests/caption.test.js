@@ -3,8 +3,8 @@ import { humanizeCaption, withChannelLink } from '../src/utils/caption.js';
 
 describe('humanizeCaption', () => {
   it('replaces em/en dashes and arrows', () => {
-    const out = humanizeCaption('Focus — then act → win');
-    expect(out).not.toMatch(/[—–→]/);
+    const out = humanizeCaption('Focus \u2014 then act → win');
+    expect(out).not.toMatch(/[\u2014\u2013→]/);
     expect(out).toContain('-');
   });
   it('collapses excess blank lines and trims', () => {

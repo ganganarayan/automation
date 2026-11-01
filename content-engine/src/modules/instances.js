@@ -259,7 +259,7 @@ export function register(ctx) {
       const funnel = await funnelsRepo.get(Number(req.body?.funnelId));
       if (!funnel) return res.status(404).json({ ok: false, error: 'funnel not found' });
       const inst = await instances.createForFunnel({
-        tenantId: req.tenantId, funnel, title: `${funnel.name} — manual ${formatIst(new Date(), { withTime: false })}`, status: 'manual', sourceType: 'generated',
+        tenantId: req.tenantId, funnel, title: `${funnel.name}, manual ${formatIst(new Date(), { withTime: false })}`, status: 'manual', sourceType: 'generated',
       });
       res.json({ ok: true, id: inst.id });
     } catch (err) {
@@ -355,7 +355,7 @@ export function register(ctx) {
       const funnel = await funnelsRepo.get(Number(req.body?.funnelId));
       if (!row || !funnel || funnel.tenant_id !== row.tenant_id) return res.status(404).json({ ok: false, error: 'instance or funnel not found' });
       const ok = await instanceRepo.moveFunnel(row.id, { funnelId: funnel.id, funnelName: funnel.name });
-      res.json(ok ? { ok: true } : { ok: false, error: 'only an unscheduled, unposted instance can move — ✏ Edit a scheduled one first' });
+      res.json(ok ? { ok: true } : { ok: false, error: 'only an unscheduled, unposted instance can move. ✏ Edit a scheduled one first' });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -478,13 +478,13 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
       const vid = finalVideoId(steps);
       const preview = vid
         ? `<button class="act" onclick="openVideo('${esc(vid)}')">▶ Preview</button>`
-        : '<span class="hint">—</span>';
+        : '<span class="hint">-</span>';
       const del = r.locked || r.status === 'scheduled' ? '' : `<button class="act danger" onclick="del('${esc(r.id)}')">Delete</button>`;
       return `<tr>
         <td><a href="/api/v1/admin/instances/${esc(r.id)}">${esc(shortId(r.id))}</a></td>
-        <td>${esc(r.title || '—')}</td>
-        <td>${esc(r.funnel_name || '—')}</td>
-        <td>${r.duration_seconds != null ? esc(formatDuration(r.duration_seconds)) : '—'}</td>
+        <td>${esc(r.title || '-')}</td>
+        <td>${esc(r.funnel_name || '-')}</td>
+        <td>${r.duration_seconds != null ? esc(formatDuration(r.duration_seconds)) : '-'}</td>
         <td>${esc(usd(r.cost_usd))}</td>
         <td>${statusPill(r.status)}${['draft', 'transcript_review'].includes(r.status) && laneOf(r) === 'ready' ? `<div class="hint">next: ${esc(stageLabel(readyStage(r, steps)))}</div>` : ''}</td>
         <td class="when"><div title="Scheduled">📅 ${r.scheduled_for ? esc(formatIst(r.scheduled_for)) : '-'}</div><div title="Posted">✅ ${r.posted_at && ['posted', 'partial'].includes(r.status) ? esc(formatIst(r.posted_at)) : '-'}</div></td>
@@ -524,7 +524,7 @@ function detailPage(row, steps) {
   const stepRows = INSTANCE_STEPS.map((def) => {
     const s = steps.find((x) => x.key === def.key) || { status: 'pending', artifacts: {} };
     const a = s.artifacts || {};
-    let summary = '—';
+    let summary = '-';
     let preview = '';
     if (def.key === 'script' && a.text) { summary = `${a.text.length} chars`; preview = btn(`openText('Script', S.script)`); }
     else if (def.key === 'images' && Array.isArray(a.images)) { summary = `${a.images.length} stills`; preview = btn(`openGrid('Images', S.images, 'image')`); }
@@ -533,13 +533,13 @@ function detailPage(row, steps) {
     else if (def.key === 'transcript' && a.text) { summary = 'timestamps'; preview = btn(`openText('Transcript', S.transcript)`); }
     else if (def.key === 'stitch' && a.video) { summary = a.video.durationSec ? `${formatDuration(a.video.durationSec)} reel` : 'reel'; preview = btn(`openVideo(S.stitch)`, 'primary'); }
     else if (def.key === 'publish' && Array.isArray(a.posts) && a.posts.length) { summary = `${a.posts.length} posts`; }
-    const cost = bd[def.key] ? usd(bd[def.key]) : '—';
+    const cost = bd[def.key] ? usd(bd[def.key]) : '-';
     return `<tr>
       <td class="stepname"><span class="dot ${s.status}"></span>${esc(def.label)}</td>
       <td>${esc(statusWord(s.status))}</td>
       <td>${esc(summary)}</td>
       <td>${esc(cost)}</td>
-      <td>${preview || '<span class="hint">—</span>'}</td>
+      <td>${preview || '<span class="hint">-</span>'}</td>
     </tr>`;
   }).join('');
 
@@ -556,7 +556,7 @@ function detailPage(row, steps) {
     <div class="top">
       <div>
         <h1>${esc(row.title || 'Untitled')}</h1>
-        <div class="sub">${esc(row.funnel_name || '—')} · instance ${esc(shortId(row.id))} · round ${esc(String(row.round || 1))}</div>
+        <div class="sub">${esc(row.funnel_name || '-')} · instance ${esc(shortId(row.id))} · round ${esc(String(row.round || 1))}</div>
       </div>
       <div class="toprow">
         ${statusPill(row.status)}
@@ -586,7 +586,7 @@ function detailPage(row, steps) {
       try{
         const r=await fetch('/api/v1/admin/instances/${row.id}/send-review?checkpoint='+cp,{method:'POST'});
         const j=await r.json();
-        if(m) m.textContent = j.ok ? ('Sent'+(j.emailedTo?(' to '+j.emailedTo):' — no approval email set, link only')) : ('Failed: '+(j.error||''));
+        if(m) m.textContent = j.ok ? ('Sent'+(j.emailedTo?(' to '+j.emailedTo):', no approval email set, link only')) : ('Failed: '+(j.error||''));
       }catch(e){ if(m) m.textContent='Failed: '+e.message; }
     }
   `, 'instances');
@@ -638,10 +638,10 @@ function acctBar(resolved = {}) {
 }
 
 // Ready-video: where the videos come from.
-//  1. 📂 Pick from Drive — "Sign in with Google" + Google's own picker; the app
+//  1. 📂 Pick from Drive, "Sign in with Google" + Google's own picker; the app
 //     then acts only on the picked files with the operator's short-lived token
 //     (drive.file scope). Nothing to share, no service account, any account.
-//  2. Or paste a folder link — read with no key at all when the folder is shared
+//  2. Or paste a folder link, read with no key at all when the folder is shared
 //     "Anyone with the link" (or via the service account when one is set). The
 //     last folder per funnel is remembered in this browser.
 function folderBar(funnel, { folder = '', saEmail = '', listError = '', totalFiles = 0, videos = [], picked = false, picker = {} } = {}) {
@@ -678,12 +678,12 @@ function folderBar(funnel, { folder = '', saEmail = '', listError = '', totalFil
         const t = switchAccount ? '' : savedToken();
         if(t) return cb(t);
         if(!PK.clientId){ alert('Set the Google sign-in client ID, Picker API key and project number under Setup → Settings → Google first.'); return; }
-        if(!(window.google && google.accounts && google.accounts.oauth2)){ alert('Google sign-in is still loading — try again in a second.'); return; }
+        if(!(window.google && google.accounts && google.accounts.oauth2)){ alert('Google sign-in is still loading, try again in a second.'); return; }
         const tc = google.accounts.oauth2.initTokenClient({ client_id: PK.clientId, scope: 'https://www.googleapis.com/auth/drive.file',
           callback: (r)=>{ if(r.error){ alert('Google sign-in failed: '+r.error); return; } saveToken(r.access_token, r.expires_in); cb(r.access_token); } });
         tc.requestAccessToken(switchAccount ? { prompt: 'select_account' } : {});
       }
-      // The token for generate / post — only when the videos were picked with sign-in.
+      // The token for generate / post, only when the videos were picked with sign-in.
       function driveToken(){ if(!PICKED) return Promise.resolve(''); const t=savedToken(); return t ? Promise.resolve(t) : new Promise((res)=>withToken(false,res)); }
       function goPicked(files){
         const u=new URL(location.href); u.searchParams.set('funnel','${fid}'); u.searchParams.delete('folder');
@@ -693,7 +693,7 @@ function folderBar(funnel, { folder = '', saEmail = '', listError = '', totalFil
       function pickDrive(switchAccount){
         if(!(PK.clientId && PK.apiKey && PK.appId)){ alert('Set the Google sign-in client ID, Picker API key and project number under Setup → Settings → Google first.'); return; }
         withToken(switchAccount, (tok)=>{
-          if(!window.gapi){ alert('Google Picker is still loading — try again in a second.'); return; }
+          if(!window.gapi){ alert('Google Picker is still loading, try again in a second.'); return; }
           gapi.load('picker', ()=>{
             const view = new google.picker.DocsView(google.picker.ViewId.DOCS_VIDEOS).setIncludeFolders(true).setMode(google.picker.DocsViewMode.LIST);
             const p = new google.picker.PickerBuilder()
@@ -723,7 +723,7 @@ function folderBar(funnel, { folder = '', saEmail = '', listError = '', totalFil
 }
 
 // Ready-video stage panels, per video: 1 Prepare (✂ Clean) → 2 Transcript
-// (transcribe / edit / paste SRT, then approve — the gate) → 3 AI copy +
+// (transcribe / edit / paste SRT, then approve, the gate) → 3 AI copy +
 // thumbnails (only after approval) → 4 Review & schedule → posted. The Prepare
 // list shows them for every ticked video; an instance's own view shows them
 // for its one video (`single`).
@@ -753,17 +753,17 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       <div class="det ailay" id="det-${id}">
         <div class="chips" id="st-${id}">${stageChips(v.id, d.stage || 'prepare')}</div>
         <div class="aicol">
-          <div class="panel"><h4>1 · Prepare <span class="hint">optional — only videos with a watermark / outro</span></h4>
-            <div class="nowrow cleanrow"><span>Remove watermark + outro —</span>
+          <div class="panel"><h4>1 · Prepare <span class="hint">optional: only videos with a watermark / outro</span></h4>
+            <div class="nowrow cleanrow"><span>Remove watermark + outro:</span>
               <label class="nowrow">zoom % <input id="zm-${id}" class="cleanzm" type="number" min="0" max="30" step="0.5" style="width:4.5rem"></label>
               <label class="nowrow">cut last s <input id="tr-${id}" class="cleantr" type="number" min="0" max="60" step="0.5" style="width:4.5rem"></label>
               <label class="nowrow">on <select id="rn-${id}" class="cleanrn"><option value="">default (Settings)</option><option value="railway">Railway</option><option value="github">GitHub</option></select></label>
               <button class="act" id="cl-${id}" onclick="cleanVid('${id}')">✂ Clean video</button>
             </div>
-            <div class="nowrow"><label class="nowrow"><input type="checkbox" id="sb-${id}" class="cleansb" onchange="subsNote('${id}')"> Add subtitles from the transcript — timed to the audio; skipped when the video already shows subtitles; none on the end card</label></div>
+            <div class="nowrow"><label class="nowrow"><input type="checkbox" id="sb-${id}" class="cleansb" onchange="subsNote('${id}')"> Add subtitles from the transcript, timed to the audio; skipped when the video already shows subtitles; none on the end card</label></div>
             <div class="hint" id="sbn-${id}"></div>
             <div class="endcard">
-              <label class="fl">End card text — black screen, white text, centred (blank = no end card)<textarea id="ec-${id}" class="endtx" rows="2" placeholder="e.g. Take the free assessment"></textarea></label>
+              <label class="fl">End card text: black screen, white text, centred (blank = no end card)<textarea id="ec-${id}" class="endtx" rows="2" placeholder="e.g. Take the free assessment"></textarea></label>
               <div class="nowrow">
                 <label class="nowrow" style="flex:1">link <input id="el-${id}" class="endln" style="flex:1" placeholder="https://…"></label>
                 <label class="nowrow">seconds <input id="es-${id}" class="endsec" type="number" min="0" max="15" step="0.5" style="width:4.5rem"></label>
@@ -773,34 +773,34 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
             <div class="hint" id="cs-${id}">Zooms in keeping the top fixed so the bottom-right watermark leaves the frame, and cuts the outro. The end card plays after the video. Posting then uses the cleaned video.</div>
           </div>
           <div class="panel"><h4>2 · Transcript <span class="hint">check the names, then approve</span></h4>
-            <label class="fl">Edit the transcript, or paste an SRT — cue numbers and timestamps are removed before the AI reads it (the SRT itself is kept)<textarea id="tx-${id}" rows="7" oninput="txEdited('${id}')"></textarea></label>
-            <label class="fl">Thumbnail headline — big text on the image (you write it)<input id="hl-${id}" maxlength="80" placeholder="e.g. Why STHIRA works"></label>
-            <label class="fl">Thumbnail sub-head — smaller line under it (optional)<input id="su-${id}" maxlength="120"></label>
-            <label class="fl">Image prompt — drafted from the transcript; edit it to change the artwork<textarea id="ip-${id}" rows="4"></textarea></label>
+            <label class="fl">Edit the transcript, or paste an SRT, cue numbers and timestamps are removed before the AI reads it (the SRT itself is kept)<textarea id="tx-${id}" rows="7" oninput="txEdited('${id}')"></textarea></label>
+            <label class="fl">Thumbnail headline: big text on the image (you write it)<input id="hl-${id}" maxlength="80" placeholder="e.g. Why STHIRA works"></label>
+            <label class="fl">Thumbnail sub-head: smaller line under it (optional)<input id="su-${id}" maxlength="120"></label>
+            <label class="fl">Image prompt: drafted from the transcript; edit it to change the artwork<textarea id="ip-${id}" rows="4"></textarea></label>
             <div class="nowrow">
               <button class="act" id="tb-${id}" onclick="transcribe('${id}')">🎙 Transcribe</button>
               <button class="act" id="ts-${id}" onclick="saveTx('${id}', false)">💾 Save</button>
               <button class="act primary" id="gb-${id}" onclick="approveGen('${id}')">✅ Approve + generate copy &amp; thumbnails</button>
             </div>
-            <div class="hint" id="tg-${id}">Not transcribed yet — 🎙 Transcribe, or paste the text / SRT. Then type the headline, check the image prompt and approve.</div>
+            <div class="hint" id="tg-${id}">Not transcribed yet: 🎙 Transcribe, or paste the text / SRT. Then type the headline, check the image prompt and approve.</div>
           </div>
           <div class="panel"><h4>3 · AI copy + thumbnails <span class="hint">written from the approved transcript, with your headline</span></h4>
-            <div class="nowrow"><button class="act" id="sv-${id}" onclick="saveDraft('${id}')">💾 Save draft</button> <button class="act" id="gt-${id}" onclick="genThumb('${id}')" title="Uses the headline, sub-head and image prompt in step 2 — your copy is left exactly as it is">🖼 Generate thumbnail only</button> <span class="hint" id="gs-${id}"></span></div>
+            <div class="nowrow"><button class="act" id="sv-${id}" onclick="saveDraft('${id}')">💾 Save draft</button> <button class="act" id="gt-${id}" onclick="genThumb('${id}')" title="Uses the headline, sub-head and image prompt in step 2, your copy is left exactly as it is">🖼 Generate thumbnail only</button> <span class="hint" id="gs-${id}"></span></div>
             <div class="thumbs" id="th-${id}"></div>
           </div>
         </div>
         <div class="aicol">
           <div class="panel"><h4>4 · Review &amp; schedule</h4>
             <label class="fl">YouTube title<input id="ti-${id}" maxlength="100"></label>
-            <label class="fl">Description — YouTube · LinkedIn · Facebook (the CTA link below is added at the end when posting)<textarea id="de-${id}" rows="7"></textarea></label>
-            <label class="fl">CTA link for this post — blank = the funnel's ${cta ? `(${esc(cta)})` : `<span class="warnt">🟡 this funnel has no CTA link: set it in Funnels → setup, or type one here</span>`}<input id="ct-${id}" placeholder="${esc(cta || 'https://…')}"></label>
+            <label class="fl">Description: YouTube · LinkedIn · Facebook (the CTA link below is added at the end when posting)<textarea id="de-${id}" rows="7"></textarea></label>
+            <label class="fl">CTA link for this post, blank = the funnel's ${cta ? `(${esc(cta)})` : `<span class="warnt">🟡 this funnel has no CTA link: set it in Funnels → setup, or type one here</span>`}<input id="ct-${id}" placeholder="${esc(cta || 'https://…')}"></label>
             <label class="fl">Instagram caption<textarea id="ig-${id}" rows="6"></textarea></label>
-            <label class="fl">Short — Threads · X (link appended) <span class="hint" id="sc-${id}"></span><textarea id="sh-${id}" rows="2" oninput="cnt('${id}')"></textarea></label>
+            <label class="fl">Short: Threads · X (link appended) <span class="hint" id="sc-${id}"></span><textarea id="sh-${id}" rows="2" oninput="cnt('${id}')"></textarea></label>
             <div class="nowrow"><b>When:</b>
               <label class="nowrow"><input type="radio" name="when-${id}" checked onchange="toggleNow('${id}')"> 📅 Schedule</label>
               <label class="nowrow"><input type="radio" name="when-${id}" id="now-${id}" onchange="toggleNow('${id}')"> ⚡ Post now</label>
             </div>
-            <label class="fl">Schedule (IST) — pick the date and time<input id="sch-${id}" type="datetime-local" value="${esc(istToInputValue(prefills[i] || ''))}"></label>
+            <label class="fl">Schedule (IST): pick the date and time<input id="sch-${id}" type="datetime-local" value="${esc(istToInputValue(prefills[i] || ''))}"></label>
           </div>
         </div>
       </div>
@@ -826,7 +826,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     ? `<div class="schedbar">📅 Scheduled on Post for Me for <b>${esc(formatIst(single.scheduled_for))} IST</b>. To change anything, ✏ Edit first: the scheduled post is deleted, so nothing goes out while you correct it. It goes out again only when you press Schedule or Post now.
         <button class="act primary" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span>${chanList}</div>`
     : failed
-      ? `<div class="schedbar bad">🔴 Post for Me reported this post failed on every channel. Reconnect the accounts in Post for Me, then ${retryBtn || 'post again'} — or ✏ Edit it first.${autoNote} <button class="act" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span>${chanList}</div>`
+      ? `<div class="schedbar bad">🔴 Post for Me reported this post failed on every channel. Reconnect the accounts in Post for Me, then ${retryBtn || 'post again'}, or ✏ Edit it first.${autoNote} <button class="act" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span>${chanList}</div>`
       : '';
   const head = single
     ? `<div class="top">
@@ -844,7 +844,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     <script>const PICKED=false; function driveToken(){ return Promise.resolve(''); }</script>`
     : `<div class="top">
       <div>
-        <h1>Ready videos — ${esc(funnel.name)}</h1>
+        <h1>Ready videos: ${esc(funnel.name)}</h1>
         <div class="sub">Tick a video and take it through its stages: ✂ Clean (optional) → 🎙 Transcript (fix the names, or paste an SRT) → ✅ Approve → ✨ Generate copy + thumbnails → schedule. Nothing paid runs on a transcript you haven't approved. Each video is one instance. Posts go out in the order you ticked.</div>
       </div>
       <div class="toprow">
@@ -855,7 +855,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     ${sourcesBar(funnel, src.sources, src.folder)}
     ${folderBar(funnel, src)}`;
 
-  return shell(single ? `Instance ${shortId(single.id)}` : `Ready videos — ${funnel.name}`, `
+  return shell(single ? `Instance ${shortId(single.id)}` : `Ready videos: ${funnel.name}`, `
     ${head}
     ${banner}
     ${acctBar(src.resolved)}
@@ -935,7 +935,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     function txEdited(id){
       if(!approved[id]) return;
       approved[id]=false; gateUi(id); setStage(id, 'transcript');
-      $('tg',id).textContent='🟡 Edited — ✅ Approve again to use it.';
+      $('tg',id).textContent='🟡 Edited: ✅ Approve again to use it.';
     }
     async function transcribe(id){
       if(busy[id]) return;
@@ -948,7 +948,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         if(j.imagePrompt) $('ip',id).value=j.imagePrompt;
         costs[id]=(costs[id]||[]).concat(j.costs||[]);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
-        $('tg',id).textContent=(j.transcribed?'🟡 Transcribed':'🟡 No speech found — type a description, or approve empty to write from the file name')+' · $'+usd.toFixed(4)+' — check the names, type the headline, check the image prompt, then ✅ Approve + generate.'+(j.promptError?' (Image prompt draft failed: '+j.promptError+' — write one.)':'');
+        $('tg',id).textContent=(j.transcribed?'🟡 Transcribed':'🟡 No speech found, type a description, or approve empty to write from the file name')+' · $'+usd.toFixed(4)+', check the names, type the headline, check the image prompt, then ✅ Approve + generate.'+(j.promptError?' (Image prompt draft failed: '+j.promptError+', write one.)':'');
       }catch(e){ $('tg',id).textContent='⚠ '+e.message; }
       busy[id]=false; $('tb',id).disabled=false; gateUi(id);
     }
@@ -956,14 +956,14 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if(busy[id] && !approve) return false;
       const text=$('tx',id).value;
       if(approve && !$('hl',id).value.trim()){ $('tg',id).textContent='🟡 Type the thumbnail headline first.'; $('hl',id).focus(); return false; }
-      if(approve && !text.trim() && !confirm('The transcript is empty — the copy will be written from the file name and the brand brief. Approve anyway?')) return false;
+      if(approve && !text.trim() && !confirm('The transcript is empty, the copy will be written from the file name and the brand brief. Approve anyway?')) return false;
       $('ts',id).disabled=true;
       let ok=false;
       try{
         const j=await post('transcript', { driveId:id, name:$('nm',id).value, source:SOURCE, text, approve, headline:$('hl',id).value, subhead:$('su',id).value, imagePrompt:$('ip',id).value });
         if(!j.ok) throw new Error(j.error||'failed');
         $('tx',id).value=j.transcript||''; approved[id]=!!j.approved; timed[id]=!!j.timed; subsNote(id); setStage(id, j.stage); setInst(id, j.instanceId);
-        $('tg',id).textContent=(j.approved?'🟢 Approved '+j.approvedIst+'.':'💾 Saved — not approved yet.')+(j.srt?' SRT timestamps removed for the AI; the SRT is kept.':'');
+        $('tg',id).textContent=(j.approved?'🟢 Approved '+j.approvedIst+'.':'💾 Saved: not approved yet.')+(j.srt?' SRT timestamps removed for the AI; the SRT is kept.':'');
         ok=true;
       }catch(e){ $('tg',id).textContent='⚠ '+e.message; }
       $('ts',id).disabled=false;
@@ -987,19 +987,19 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     function showThumbs(id, j){
       thumbs[id]=j.thumbs||{};
       $('th',id).innerHTML=(j.sizes||[]).map(z=>'<a class="'+(z.size==='landscape'?'wide':'tall')+'" href="'+z.url+'" target="_blank" rel="noopener" title="Open full size"><img src="'+z.url+'"><span>'+z.label+' · '+z.platforms.join(', ')+'</span></a>').join('')
-        +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':' — the first frame will be used')+'</div>':'');
+        +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':', the first frame will be used')+'</div>':'');
     }
-    // 🖼 Thumbnail only — from step 2's headline / sub-head / image prompt; the copy on the page and on the instance is left alone.
+    // 🖼 Thumbnail only: from step 2's headline / sub-head / image prompt; the copy on the page and on the instance is left alone.
     async function genThumb(id){
       if(busy[id]) return;
       if(!$('hl',id).value.trim()){ $('gs',id).textContent='🟡 Type the thumbnail headline in step 2 first.'; $('hl',id).focus(); return; }
-      busy[id]=true; gateUi(id); $('gt',id).disabled=true; $('gs',id).textContent='🖼 Designing the thumbnail… (under a minute) — your copy is not touched';
+      busy[id]=true; gateUi(id); $('gt',id).disabled=true; $('gs',id).textContent='🖼 Designing the thumbnail… (under a minute): your copy is not touched';
       try{
         const j=await post('thumbnail', { driveId:id, name:$('nm',id).value, source:SOURCE, accounts: pickedAccounts(), accessToken: await driveToken(), headline:$('hl',id).value, subhead:$('su',id).value, imagePrompt:$('ip',id).value });
         if(!j.ok) throw new Error(j.error||'failed');
         showThumbs(id, j); setInst(id, j.instanceId);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
-        $('gs',id).textContent=(!(j.sizes||[]).length?'🟡 No thumbnail made':j.thumbError?'🟡 Saved, but on a frame of the video — the AI artwork failed (see below)':'🟢 Thumbnail saved to the instance')+' · $'+usd.toFixed(4)+' · copy unchanged';
+        $('gs',id).textContent=(!(j.sizes||[]).length?'🟡 No thumbnail made':j.thumbError?'🟡 Saved, but on a frame of the video, the AI artwork failed (see below)':'🟢 Thumbnail saved to the instance')+' · $'+usd.toFixed(4)+' · copy unchanged';
       }catch(e){ $('gs',id).textContent='⚠ '+e.message; }
       busy[id]=false; $('gt',id).disabled=false; gateUi(id);
     }
@@ -1019,12 +1019,12 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       $('cs',id).innerHTML='🟢 Cleaned (zoom '+c.zoomPct+'%, cut last '+c.trimEndSec+' s'+(c.subs?', subtitles added':'')+(c.endSec?', end card '+c.endSec+' s':'')+' → '+mmss(c.durationSec||0)+(c.runner==='github'?', on GitHub':'')+') · <a href="'+c.url+'" target="_blank" rel="noopener">▶ Preview cleaned video</a> · posting uses this copy'+(c.runner==='github'?(c.removedAt?' (removed from your Drive after posting)':' (kept in your Google Drive until it posts)'):'')+(c.subsNote?'<br>🟡 '+String(c.subsNote).replace(/</g,'&lt;'):'');
       if($('zm',id)) $('zm',id).value=c.zoomPct; if($('tr',id)) $('tr',id).value=c.trimEndSec;
     }
-    // Subtitles come from the transcript's timestamps (Whisper, or a pasted SRT) — say so when it has none.
+    // Subtitles come from the transcript's timestamps (Whisper, or a pasted SRT), say so when it has none.
     const timed = {};
     function subsNote(id){
       const on=$('sb',id) && $('sb',id).checked;
-      $('sbn',id).textContent = !on ? '' : timed[id] ? '🟢 Added from the transcript timings, cut at the outro — unless an AI check of 3 frames (about $0.01) finds the video already shows subtitles.'
-        : '🟡 No timed transcript yet, so this clean would add no subtitles — 🎙 Transcribe it or paste an SRT in step 2 first (editing the transcribed text drops the timings).';
+      $('sbn',id).textContent = !on ? '' : timed[id] ? '🟢 Added from the transcript timings, cut at the outro, unless an AI check of 3 frames (about $0.01) finds the video already shows subtitles.'
+        : '🟡 No timed transcript yet, so this clean would add no subtitles. 🎙 Transcribe it or paste an SRT in step 2 first (editing the transcribed text drops the timings).';
     }
     async function pollClean(id){
       try{
@@ -1038,7 +1038,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
             : j.phase==='queued' ? '⏳ Waiting for a GitHub runner to pick it up…'
             : '✂ Starting… reading the video length';
           bar(id, j.phase==='uploading'?100:(j.pct||0), true);
-          $('cs',id).textContent=what+' · '+secs+' s — you can work on other videos meanwhile';
+          $('cs',id).textContent=what+' · '+secs+' s: you can work on other videos meanwhile';
           return setTimeout(()=>pollClean(id), 3000);
         }
         cleaning[id]=false; $('cl',id).disabled=false; bar(id, 0, false);
@@ -1067,14 +1067,14 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if(d.hasTranscript || d.transcript) $('tx',id).value=d.transcript||'';
       $('hl',id).value=d.headline||''; $('su',id).value=d.subhead||''; $('ip',id).value=d.imagePrompt||'';
       approved[id]=!!d.approved; gateUi(id);
-      if(d.hasTranscript) $('tg',id).textContent=d.approved?('🟢 Approved '+d.approvedIst+(d.srt?' · SRT kept':'')):'🟡 Waiting for you — check the names, type the headline, check the image prompt, then ✅ Approve + generate.';
+      if(d.hasTranscript) $('tg',id).textContent=d.approved?('🟢 Approved '+d.approvedIst+(d.srt?' · SRT kept':'')):'🟡 Waiting for you, check the names, type the headline, check the image prompt, then ✅ Approve + generate.';
       if(d.copy){ applyGen(id, d); $('gs',id).textContent='💾 Saved draft from '+d.atIst+' · $'+Number(d.costUsd||0).toFixed(4); }
     });
     document.querySelectorAll('.cleansb').forEach(e=>subsNote(e.id.slice(3)));
     // Keep this video's current copy (your edits too) without regenerating.
     async function saveDraft(id){
       if(busy[id]) return;
-      if(!$('ti',id).value.trim() && !$('de',id).value.trim()){ $('gs',id).textContent='Nothing to save yet — generate or write the copy first.'; return; }
+      if(!$('ti',id).value.trim() && !$('de',id).value.trim()){ $('gs',id).textContent='Nothing to save yet, generate or write the copy first.'; return; }
       $('sv',id).disabled=true;
       try{
         const j=await post('save', { driveId:id,
@@ -1187,7 +1187,7 @@ function manualCard(key, steps) {
   let inputHtml = '';
   if (kind === 'script') inputHtml = `<textarea id="in-script" rows="6" placeholder="Click Generate to draft with AI, or paste/edit your own script, then Save.">${esc(a.text || '')}</textarea>`;
   else if (kind === 'prompts') inputHtml = `<textarea id="in-images" rows="5" placeholder="One image prompt per line. Leave blank to auto-build from the script.">${esc((a.images || []).map((i) => i.prompt || '').join('\n'))}</textarea>`;
-  else if (kind === 'prompt') inputHtml = `<input id="in-animate" placeholder="Animation prompt (optional) — applied to every clip">`;
+  else if (kind === 'prompt') inputHtml = `<input id="in-animate" placeholder="Animation prompt (optional): applied to every clip">`;
   else if (kind === 'caption') inputHtml = `<textarea id="in-publish" rows="3" placeholder="Caption (blank = the funnel's caption + link). Executing this posts the reel."></textarea>`;
 
   let actions;
@@ -1219,9 +1219,9 @@ function manualPage(row, steps) {
   const running = (steps || []).some((s) => s.status === 'running');
   const cards = MANUAL_STAGES.map((key) => manualCard(key, steps)).join('');
 
-  return shell(`Manual — ${shortId(row.id)}`, `
+  return shell(`Manual: ${shortId(row.id)}`, `
     <div class="top">
-      <div><h1>${esc(row.title || 'Generated run')}</h1><div class="sub">${esc(row.funnel_name || '—')} · ${esc(shortId(row.id))} · 🎛 generated lane, stepped by hand</div></div>
+      <div><h1>${esc(row.title || 'Generated run')}</h1><div class="sub">${esc(row.funnel_name || '-')} · ${esc(shortId(row.id))} · 🎛 generated lane, stepped by hand</div></div>
       <div class="toprow">${statusPill(row.status)}<a class="act" href="/api/v1/admin/instances">← Library</a></div>
     </div>
     <p class="ro">Run each stage in order: edit the input where shown, <b>Execute</b>, <b>Preview</b>, then do the next. The final stage posts.${running ? ' <b>Running…</b> this page refreshes itself.' : ''}</p>
@@ -1295,7 +1295,7 @@ function previewModal() {
 
 function shell(title, inner, script, current) {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} — automation</title>
+<title>${esc(title)}, automation</title>
 <style>
  :root{color-scheme:dark}*{box-sizing:border-box}
  body{font-family:system-ui;margin:0;background:#0b0b12;color:#e8e8ef}

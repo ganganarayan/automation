@@ -4,7 +4,7 @@
  * Purpose:      The review/approval machinery around a pipeline instance: email a
  *               review (script, then final) with an in-email Google-Drive player,
  *               host the review page, and on the operator's decision move the
- *               instance through its lifecycle — approve script => stages run
+ *               instance through its lifecycle, approve script => stages run
  *               (slice 5) => final review; approve final => post + lock; reject
  *               (with a required correction note) => rework the SAME instance_id
  *               on a new round.
@@ -17,7 +17,7 @@
  * Dependencies: approvalService, instanceService, instanceRepository,
  *               funnelsRepository, providerFactory, utils/reviewSpec, utils/time.
  *
- * SEAMS for slice 5 are marked below — the stage workers (script/image/animate/
+ * SEAMS for slice 5 are marked below, the stage workers (script/image/animate/
  * voiceover/transcript/stitch generation) and the real Post-for-Me dispatch
  * attach there. Slice 4 wires the checkpoints + rework loop only.
  */
@@ -118,12 +118,12 @@ export async function requestReview({ tenantId = 'default', instanceId, checkpoi
       });
       log.info({ instance: instance.id, checkpoint, round: payload.round, to: approvalEmail }, 'review email sent');
     } catch (err) {
-      // Don't fail the request if SMTP is unset/misconfigured — the hosted review
+      // Don't fail the request if SMTP is unset/misconfigured, the hosted review
       // link still works; surface the reason in logs.
       log.warn({ err: err.message, instance: instance.id, checkpoint }, 'review email failed');
     }
   } else {
-    log.warn({ instance: instance.id, checkpoint }, 'no approval email configured — review link not emailed');
+    log.warn({ instance: instance.id, checkpoint }, 'no approval email configured, review link not emailed');
   }
 
   return { id, reviewUrl, approvalEmail };
@@ -147,7 +147,7 @@ export async function onApprove(approval) {
   if (p.checkpoint === 'script') {
     await instanceService.updateStep(instanceId, 'script', { status: 'done' });
     await instanceRepo.setStatus(instanceId, 'running');
-    log.info({ instance: instanceId, round: p.round }, 'script approved — instance running');
+    log.info({ instance: instanceId, round: p.round }, 'script approved: instance running');
     // Slice 5 hook: run image -> animate -> voiceover -> transcript -> stitch
     // (writing artifacts + real cost), then requestReview('final'). Absent =>
     // the instance simply waits at 'running'.
@@ -165,15 +165,15 @@ export async function onApprove(approval) {
       const refs = pipeline.beforeFinalLock ? ((await pipeline.beforeFinalLock({ instanceId })) || []) : [];
       if (!refs.length) {
         const ok = await instanceRepo.lockAsPosted(instanceId, { postRefs: refs, postedAt });
-        log.info({ instance: instanceId, locked: ok, postedAt }, 'final approved — no post refs, locked');
+        log.info({ instance: instanceId, locked: ok, postedAt }, 'final approved: no post refs, locked');
         return;
       }
       const postNow = !p.scheduledFor || new Date(p.scheduledFor) <= new Date();
       const ok = await instanceRepo.markScheduled(instanceId, { postRefs: refs, postNow });
-      log.info({ instance: instanceId, scheduled: ok, refs: refs.length, postNow }, 'final approved — handed to Post for Me');
+      log.info({ instance: instanceId, scheduled: ok, refs: refs.length, postNow }, 'final approved: handed to Post for Me');
     } catch (err) {
       await instanceRepo.setStatus(instanceId, 'failed', `post failed: ${err.message}`);
-      log.error({ err: err.message, instance: instanceId }, 'final post failed — not locked');
+      log.error({ err: err.message, instance: instanceId }, 'final post failed: not locked');
     }
   }
 }
@@ -193,8 +193,8 @@ export async function onRework(approval, note) {
   const round = await instanceRepo.bumpRound(instanceId);
   log.info({ instance: instanceId, checkpoint: p.checkpoint, round, correction }, 'rework requested');
 
-  // Slice 5 hook: regenerate using `correction` — the script (script reject) or
-  // the downstream stages (final reject) — and re-send. Absent => just re-send the
+  // Slice 5 hook: regenerate using `correction`, the script (script reject) or
+  // the downstream stages (final reject): and re-send. Absent => just re-send the
   // same checkpoint so the loop (same instance_id, new round) still works.
   if (pipeline.regenerate) {
     Promise.resolve(pipeline.regenerate({ instanceId, checkpoint: p.checkpoint, correction })).catch((err) =>
@@ -217,7 +217,7 @@ export function registerKind() {
 function subjectFor(p) {
   const who = p.funnelName || 'funnel';
   const round = p.round > 1 ? ` (round ${p.round})` : '';
-  return p.checkpoint === 'final' ? `Final review — ${who}${round}` : `Review script — ${who}${round}`;
+  return p.checkpoint === 'final' ? `Final review: ${who}${round}` : `Review script: ${who}${round}`;
 }
 
 /**
@@ -274,7 +274,7 @@ export function renderReview(approval, token) {
     : `<pre class="script">${esc(p.scriptText || '(empty)')}</pre>`;
 
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} — ${who}</title>
+<title>${esc(title)}, ${who}</title>
 <style>
  body{font-family:system-ui;max-width:720px;margin:2rem auto;padding:0 1rem;color:#111}
  h1{font-size:1.4rem}.sub{color:#555;font-size:.9rem;margin:.1rem 0 1rem}
@@ -286,7 +286,7 @@ export function renderReview(approval, token) {
  .approve{background:#0a7d32;color:#fff}.rework{background:#b45309;color:#fff}
  #msg{font-size:.9rem}
 </style>
-<h1>${esc(title)} — ${who}</h1>
+<h1>${esc(title)}, ${who}</h1>
 <p class="sub">${esc(p.title || '')}${p.round > 1 ? ` · rework round ${esc(String(p.round))}` : ''}</p>
 ${media}
 <div class="row"><button class="approve" onclick="send('approve')">${approveLabel}</button></div>

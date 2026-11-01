@@ -1,7 +1,7 @@
 /**
  * funnel_sources data access.
  *
- * Purpose:      A funnel's content sources — several per funnel (Drive folders
+ * Purpose:      A funnel's content sources: several per funnel (Drive folders
  *               of ready videos, sheets, the generated lane). Each instance
  *               records the one source it came from.
  * Responsibility: The only place funnel_sources SQL runs.

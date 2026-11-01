@@ -86,7 +86,7 @@ ${link}` : (text || '');
 
     /**
      * Does this person follow the business? Instagram only, and ONLY readable
-     * once they have messaged us (Meta requires profile consent — a comment
+     * once they have messaged us (Meta requires profile consent, a comment
      * alone returns an error). Returns { follows: true|false|null, username }.
      */
     async getUserProfile({ pageToken, userId }) {

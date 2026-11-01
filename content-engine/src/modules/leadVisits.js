@@ -7,7 +7,7 @@
  * Responsibility: HTTP only; logic in leadVisitService.
  * Dependencies: leadVisitService, settings.
  *
- * Routes (no sign-in — the code is random and only marks that one lead):
+ * Routes (no sign-in: the code is random and only marks that one lead):
  *         GET  /api/v1/go/:code     count the click, 302 to the landing page
  *         GET  /api/v1/t/lead.js    the script every landing page includes
  *         POST /api/v1/t/event      { lc, type: view|form, fields } from the script

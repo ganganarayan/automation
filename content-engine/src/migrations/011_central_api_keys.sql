@@ -1,4 +1,4 @@
--- Provider keys moved OUT of funnels into one central store (tenant_config —
+-- Provider keys moved OUT of funnels into one central store (tenant_config:
 -- the "API Keys" page). A funnel now only chooses which provider/model to use.
 --
 -- Carry over anything a funnel already held so existing setups keep working with

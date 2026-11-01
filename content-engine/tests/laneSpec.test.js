@@ -93,10 +93,10 @@ describe('scheduled → posted', () => {
 
 describe('no em dashes in copy', () => {
   it('replaces em / en dashes with a comma', () => {
-    expect(noDashes('Manifestation stops working — the Gita fixes it')).toBe('Manifestation stops working, the Gita fixes it');
+    expect(noDashes('Manifestation stops working \u2014 the Gita fixes it')).toBe('Manifestation stops working, the Gita fixes it');
     expect(noDashes('Three days – one shift.')).toBe('Three days, one shift.');
     expect(noDashes('a-b stays')).toBe('a-b stays');
-    expect(normalizeCopy({ title: 'Why it fails — and what works', description: 'x', igCaption: 'y', short: 'z' }).title).toBe('Why it fails, and what works');
+    expect(normalizeCopy({ title: 'Why it fails \u2014 and what works', description: 'x', igCaption: 'y', short: 'z' }).title).toBe('Why it fails, and what works');
   });
 });
 

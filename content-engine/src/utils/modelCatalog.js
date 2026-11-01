@@ -3,7 +3,7 @@
  *
  * Purpose:      Turn a provider's raw model listing into the short, relevant
  *               lists the settings dropdowns offer, so a model is always PICKED
- *               from what the key can actually call — never typed by hand (a
+ *               from what the key can actually call, never typed by hand (a
  *               typo there fails at generation time, long after saving).
  * Responsibility: Pure classification only; the network call lives in
  *               providers/modelsProvider.

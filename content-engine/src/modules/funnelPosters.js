@@ -36,7 +36,7 @@ import { ZONE } from '../utils/time.js';
  * [now - backMin, now + forwardMin]. The internal minute-cron uses (0, 2) for
  * an exact-minute match; the external /run-due trigger uses a small symmetric
  * window (~15) so a ~10-min-early ping still catches it and a late run doesn't
- * miss it — without running funnels scheduled far away.
+ * miss it: without running funnels scheduled far away.
  */
 async function runDue(forwardMin, backMin, log) {
   const now = DateTime.now().setZone(ZONE);
@@ -52,7 +52,7 @@ async function runDue(forwardMin, backMin, log) {
     if (days.length && !days.includes(dow)) continue;
     // The daily router owns the day: claim the funnel's post date in
     // router_days first. If the router (or an earlier tick) already decided it,
-    // skip — so the router and this legacy trigger never both post.
+    // skip: so the router and this legacy trigger never both post.
     const postDate = postDateKey(targetPostAt({ publishTime: cfg.publishTime, now }));
     const claimed = await routerDays.claim({
       tenantId: funnel.tenant_id, funnelId: funnel.id, postDate, lane: 'image', reason: 'legacy image poster (generate_time)',
@@ -91,7 +91,7 @@ export function register(ctx) {
     });
     log.info('funnel scheduler running (internal minute-cron)');
   } else {
-    log.info("funnel scheduler in 'external' mode — trigger via POST /jobs/run-due");
+    log.info("funnel scheduler in 'external' mode: trigger via POST /jobs/run-due");
   }
 
   // External trigger: run funnels due within the next `window` minutes (default 15).

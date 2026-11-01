@@ -1,6 +1,6 @@
 # content-engine
 
-All content generation and publishing for two brands — **Gita** (applygitawisdom.com) and **VidaPulse** (vidapulse.io): daily image posters with an email approval + rework loop, a VidaPulse content-refill watchdog, the video pipelines, a dual-provider AI image factory, the full Post-for-Me delivery feedback loop, the two daily reports, and an operations dashboard.
+All content generation and publishing for two brands, **Gita** (applygitawisdom.com) and **VidaPulse** (vidapulse.io): daily image posters with an email approval + rework loop, a VidaPulse content-refill watchdog, the video pipelines, a dual-provider AI image factory, the full Post-for-Me delivery feedback loop, the two daily reports, and an operations dashboard.
 
 Any WhatsApp need goes through **wa-gateway** (`POST /api/v1/send`); this service never calls Evolution directly.
 
@@ -8,17 +8,17 @@ Any WhatsApp need goes through **wa-gateway** (`POST /api/v1/send`); this servic
 
 Layered, following [`../docs/architecture.md`](../docs/architecture.md):
 
-- **settings/** — all env vars validated once and exposed as namespaced groups; tenant overrides via `core/tenantSettings.js`.
-- **core/** — logger, errors, external-API retry wrapper, db + migrations, generic job runner, module registry.
-- **providers/** — external integrations behind interfaces: mail (SMTP), Google Sheets, Google Drive (storage), LLM + AI image (OpenAI + Gemini), publish (Post for Me), video (JSON2Video), and the wa-gateway client.
-- **repositories/** — the only place SQL runs: approvals, delivery log, refill state (+ shared tenants/config, jobs/events).
-- **services/** — business logic incl. the approval core, posters, refill, delivery/reports, video pipeline, image factory, dashboard.
-- **modules/** — plugin-style features toggled by `MODULE_*_ENABLED`.
-- **utils/** — pure logic (caption humanizer, scheduling rules, hook word-wrap, report builders).
+- **settings/**, all env vars validated once and exposed as namespaced groups; tenant overrides via `core/tenantSettings.js`.
+- **core/**, logger, errors, external-API retry wrapper, db + migrations, generic job runner, module registry.
+- **providers/**, external integrations behind interfaces: mail (SMTP), Google Sheets, Google Drive (storage), LLM + AI image (OpenAI + Gemini), publish (Post for Me), video (JSON2Video), and the wa-gateway client.
+- **repositories/**, the only place SQL runs: approvals, delivery log, refill state (+ shared tenants/config, jobs/events).
+- **services/**, business logic incl. the approval core, posters, refill, delivery/reports, video pipeline, image factory, dashboard.
+- **modules/**, plugin-style features toggled by `MODULE_*_ENABLED`.
+- **utils/**, pure logic (caption humanizer, scheduling rules, hook word-wrap, report builders).
 
 ## Approval + rework loop
 
-Content is emailed with a signed, single-use link to `GET /api/v1/review/{token}` — a hosted page with **Approve & Publish** and **Rework** (+ required note). State lives in the `approvals` table, so restarts are safe; a Rework re-runs generation and re-emails until approved.
+Content is emailed with a signed, single-use link to `GET /api/v1/review/{token}`, a hosted page with **Approve & Publish** and **Rework** (+ required note). State lives in the `approvals` table, so restarts are safe; a Rework re-runs generation and re-emails until approved.
 
 ## Endpoints (under `/api/v1`)
 
@@ -36,13 +36,13 @@ Content is emailed with a signed, single-use link to `GET /api/v1/review/{token}
 
 ## Scheduled jobs (IST)
 
-- 22:00 — Gita & VidaPulse image generation (→ approval email)
-- 08:30 — Gita delivery report; 09:00 — VidaPulse report (26h staleness) + VidaPulse refill watchdog
+- 22:00: Gita & VidaPulse image generation (→ approval email)
+- 08:30: Gita delivery report; 09:00: VidaPulse report (26h staleness) + VidaPulse refill watchdog
 - Video pipeline is **off by default** (`MODULE_VIDEO_PIPELINE_ENABLED=false`).
 
 ## Data (owned tables)
 
-`pfm_delivery_log`, `approvals`, `refill_state` — plus shared `tenants`/`tenant_config` and this service's own `jobs`/`event_log`. Migrations are additive only.
+`pfm_delivery_log`, `approvals`, `refill_state`, plus shared `tenants`/`tenant_config` and this service's own `jobs`/`event_log`. Migrations are additive only.
 
 ## Environment variables
 

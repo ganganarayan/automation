@@ -15,7 +15,7 @@
 export function humanizeCaption(caption, audience) {
   let text = String(caption || '');
   text = text
-    .replace(/[—–]/g, '-') // em/en dash -> hyphen
+    .replace(/[\u2014\u2013]/g, '-') // em/en dash -> hyphen
     .replace(/[→←↔⇒]/g, '->') // arrows
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')

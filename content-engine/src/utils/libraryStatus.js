@@ -57,7 +57,7 @@ export function libraryStatus(status) {
   if (s === 'superseded') return { key: 'superseded', label: 'Replaced', dot: '⚫', note: '', hidden: true };
   const key = STATUS_TO_LABEL[s] || 'preparing';
   const base = LIBRARY_LABELS.find((l) => l.key === key);
-  // Partly posted: some channels went out, some did not — attention, not OK.
+  // Partly posted: some channels went out, some did not, attention, not OK.
   if (s === 'partial') return { key, label: base.label, dot: '🟡', note: 'partly', hidden: false };
   return { key, label: base.label, dot: base.dot, note: '', hidden: false };
 }

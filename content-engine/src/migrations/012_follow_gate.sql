@@ -1,5 +1,5 @@
 -- Follow gate. Meta only grants profile consent once a person MESSAGES the
--- business, so follower status cannot be read at comment time — only when they
+-- business, so follower status cannot be read at comment time, only when they
 -- reply to our first DM (which is also when the 24h window opens). The reply
 -- then branches: followers get the delivery, non-followers get a nudge.
 -- Instagram only; Facebook removed the page-follow check in Graph API v2.2.

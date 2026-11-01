@@ -71,7 +71,7 @@ export function createGoogleSheetsProvider(cfg, log) {
   return {
     readTab,
 
-    /** Title of the first (leftmost) tab — used when a funnel sets no tab name. */
+    /** Title of the first (leftmost) tab: used when a funnel sets no tab name. */
     async firstTabTitle(sheetId) {
       const res = await api.spreadsheets.get({ spreadsheetId: sheetId, fields: 'sheets.properties.title' });
       return res.data.sheets?.[0]?.properties?.title || 'Sheet1';

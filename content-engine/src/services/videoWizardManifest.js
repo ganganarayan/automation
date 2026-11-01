@@ -17,7 +17,7 @@
  * rendered by the account-picker widgets, keyed by name.
  *
  * Values persist to funnel_config as flat keys; downstream pipeline steps read
- * them. Building the wizard shell (this step) does not wire the providers — a
+ * them. Building the wizard shell (this step) does not wire the providers, a
  * saved field is just stored config until its stage is built.
  */
 
@@ -39,8 +39,8 @@ export const WIZARD_STEPS = [
       {
         key: 'manual_stepper', label: 'Run mode', type: 'select', default: 'off',
         options: [
-          { value: 'off', label: 'Automatic — the scheduler runs the whole pipeline' },
-          { value: 'on', label: 'Manual — I run each stage by hand (Execute → Preview → Approve → next)' },
+          { value: 'off', label: 'Automatic: the scheduler runs the whole pipeline' },
+          { value: 'on', label: 'Manual: I run each stage by hand (Execute → Preview → Approve → next)' },
         ],
       },
       { key: 'generate_time', label: 'Generate/approval time (IST)', type: 'time', default: '22:00' },
@@ -65,18 +65,18 @@ export const WIZARD_STEPS = [
       {
         key: 'research_mode', label: 'Source of the daily idea', type: 'select', default: 'manual',
         options: [
-          { value: 'manual', label: 'Manual — I fill the sheet' },
-          { value: 'auto', label: 'Auto-research — the cloud picks the topic' },
-          { value: 'direct', label: 'Direct upload — post ready videos from Drive (no generation)' },
+          { value: 'manual', label: 'Manual: I fill the sheet' },
+          { value: 'auto', label: 'Auto-research: the cloud picks the topic' },
+          { value: 'direct', label: 'Direct upload: post ready videos from Drive (no generation)' },
         ],
       },
       { key: 'research_topics', label: 'Topic seeds (one per line)', type: 'textarea', placeholder: 'e.g. Gita leadership for founders\ncorporate dharma training' },
       { key: 'research_count', label: 'How many days to plan ahead', placeholder: 'e.g. 7' },
       // Direct-upload fields (shown only when the source is "Direct upload").
-      { key: 'direct_drive_folder', label: 'Direct upload — Drive folder of ready videos (blank = the funnel media folder)', group: 'direct', placeholder: 'Drive folder ID' },
-      { key: 'direct_caption', label: 'Direct upload — caption (used for the Instagram & LinkedIn caption, and the YouTube description; the funnel CTA link is appended)', type: 'textarea', group: 'direct', placeholder: 'default caption for these posts' },
-      { key: 'direct_yt_title', label: 'Direct upload — YouTube title', group: 'direct', placeholder: 'title shown on YouTube' },
-      { key: 'direct_copy_brief', label: 'AI copy — brand / voice brief (used by "Ready video + AI copy" to write each video\'s title, description, captions)', type: 'textarea', group: 'direct', placeholder: 'e.g. calm, practical tone; speak to founders; always use #gitawisdom' },
+      { key: 'direct_drive_folder', label: 'Direct upload: Drive folder of ready videos (blank = the funnel media folder)', group: 'direct', placeholder: 'Drive folder ID' },
+      { key: 'direct_caption', label: 'Direct upload: caption (used for the Instagram & LinkedIn caption, and the YouTube description; the funnel CTA link is appended)', type: 'textarea', group: 'direct', placeholder: 'default caption for these posts' },
+      { key: 'direct_yt_title', label: 'Direct upload: YouTube title', group: 'direct', placeholder: 'title shown on YouTube' },
+      { key: 'direct_copy_brief', label: 'AI copy: brand / voice brief (used by "Ready video + AI copy" to write each video\'s title, description, captions)', type: 'textarea', group: 'direct', placeholder: 'e.g. calm, practical tone; speak to founders; always use #gitawisdom' },
     ],
   },
   {
@@ -106,14 +106,14 @@ export const WIZARD_STEPS = [
       {
         key: 'image_size', label: 'Image size', type: 'select', default: 'portrait',
         options: [
-          { value: 'portrait', label: 'Portrait (2:3) — reels' },
+          { value: 'portrait', label: 'Portrait (2:3): reels' },
           { value: 'square', label: 'Square (1:1)' },
         ],
       },
       {
         key: 'image_provider', label: 'Image model', type: 'select', default: 'auto',
         options: [
-          { value: 'auto', label: 'Auto — OpenAI if its key is set, else Gemini' },
+          { value: 'auto', label: 'Auto: OpenAI if its key is set, else Gemini' },
           { value: 'openai', label: 'OpenAI' },
           { value: 'gemini', label: 'Gemini' },
         ],
@@ -133,13 +133,13 @@ export const WIZARD_STEPS = [
     id: 'animate',
     title: 'Image → video',
     icon: 'ti-movie',
-    desc: 'Animate each kept still into a short clip. Clips are saved to Drive, then stitched later. Pick the provider — its key comes from the Keys and credit page.',
+    desc: 'Animate each kept still into a short clip. Clips are saved to Drive, then stitched later. Pick the provider: its key comes from the Keys and credit page.',
     requiredFn: animateRequired,
     fields: [
       {
         key: 'animation_provider', label: 'Animation provider', type: 'select', default: 'kling',
         options: [
-          { value: 'kling', label: 'Kling — standard (cheapest)' },
+          { value: 'kling', label: 'Kling: standard (cheapest)' },
           { value: 'runway', label: 'Runway Gen-4' },
           { value: 'hailuo', label: 'Hailuo / MiniMax' },
         ],
@@ -261,7 +261,7 @@ export const WIZARD_STEPS = [
     id: 'publish',
     title: 'Publish',
     icon: 'ti-send',
-    desc: 'Once approved, the reel is posted to this funnel’s channels through Post for Me. The API key lives on the Keys and credit page — here you only pick which connected accounts this funnel posts to.',
+    desc: 'Once approved, the reel is posted to this funnel’s channels through Post for Me. The API key lives on the Keys and credit page, here you only pick which connected accounts this funnel posts to.',
     required: ['postforme_accounts'],
     fields: [
       { key: 'postforme_accounts', label: 'Post for Me accounts', type: 'json' },
@@ -274,8 +274,8 @@ export const WIZARD_STEPS = [
       {
         key: 'capture_require_follow', label: 'Require them to follow before sending the link', type: 'select', default: 'off',
         options: [
-          { value: 'off', label: 'Off — send the link to everyone who replies' },
-          { value: 'on', label: 'On — only followers get the link (Instagram only)' },
+          { value: 'off', label: 'Off: send the link to everyone who replies' },
+          { value: 'on', label: 'On: only followers get the link (Instagram only)' },
         ],
       },
       { key: 'capture_followup_text', label: 'Follow-up sent when they reply (and qualify)', type: 'textarea' },
@@ -285,8 +285,8 @@ export const WIZARD_STEPS = [
 ];
 
 /**
- * The image→video step no longer holds any credentials — the provider's keys
- * live on the central API Keys page — so the funnel only has to pick a provider.
+ * The image→video step no longer holds any credentials, the provider's keys
+ * live on the central API Keys page, so the funnel only has to pick a provider.
  * Kept as a function so per-provider funnel requirements can return here later.
  */
 export function animateRequired() {

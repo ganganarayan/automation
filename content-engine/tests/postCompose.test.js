@@ -7,7 +7,7 @@ const corpRow = ['12', 'Focus', 'a calm exec', 'specs here', 'Lead with clarity'
 
 // Gita-style sheet (single caption, day match key)
 const gitaHeader = ['day', 'image_prompt', 'caption', 'audience', 'status'];
-const gitaRow = ['7', 'a still river at dawn', 'Focus — then act', 'Founders', 'Ready'];
+const gitaRow = ['7', 'a still river at dawn', 'Focus \u2014 then act', 'Founders', 'Ready'];
 
 describe('extractRow', () => {
   it('recognizes the Corporate schema', () => {
@@ -44,7 +44,7 @@ describe('extractRow', () => {
     expect(f.matchColName).toBe('day');
     expect(f.matchKey).toBe('7');
     expect(f.imagePrompt).toBe('a still river at dawn');
-    expect(f.caption).toBe('Focus — then act');
+    expect(f.caption).toBe('Focus \u2014 then act');
     expect(f.captionFull).toBe('');
     expect(f.audience).toBe('Founders');
   });
@@ -79,7 +79,7 @@ describe('composeCaptions', () => {
     const { full, short } = composeCaptions(extractRow(gitaHeader, gitaRow), {});
     expect(full).toBe(short);
     expect(full.startsWith('Founders:')).toBe(true);
-    expect(full).not.toMatch(/—/); // humanized (em-dash removed)
+    expect(full).not.toMatch(/\u2014/); // humanized (em-dash removed)
   });
   it('appends a CTA link once', () => {
     const { short } = composeCaptions(extractRow(gitaHeader, gitaRow), { ctaLink: 'https://x.com/a' });

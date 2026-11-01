@@ -2,7 +2,7 @@
 -- Owned by content-engine. Additive only.
 --
 -- role: 'super_admin' (spans all tenants) | 'admin' (scoped to tenant_id).
--- Password/login is intentionally not modelled yet — this stores identities and
+-- Password/login is intentionally not modelled yet, this stores identities and
 -- roles now; authentication is added later.
 
 CREATE TABLE IF NOT EXISTS admins (

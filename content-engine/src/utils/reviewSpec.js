@@ -1,5 +1,5 @@
 /**
- * Instance review (checkpoint) spec — pure helpers.
+ * Instance review (checkpoint) spec: pure helpers.
  *
  * Purpose:      The settings-free pieces of the two-checkpoint review flow: which
  *               checkpoints exist, the status transition on approve / reject,
@@ -10,7 +10,7 @@
  * Responsibility: Pure functions only.
  * Dependencies: none.
  *
- * Locked decisions: two checkpoints — (1) script review, then the stages auto-run
+ * Locked decisions: two checkpoints: (1) script review, then the stages auto-run
  * (slice 5), then (2) final review; approve final => post + lock. Every reject
  * carries a correction note => rework on the SAME instance_id, new round.
  */

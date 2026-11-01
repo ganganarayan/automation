@@ -67,7 +67,7 @@ export async function createRequest({ tenantId = 'default', kind, payload }) {
   return { id, reviewUrl };
 }
 
-/** The (relative) review page path for an existing approval id — for admin links. */
+/** The (relative) review page path for an existing approval id, for admin links. */
 export function reviewPath(id) {
   return `/api/v1/review/${encodeURIComponent(sign(String(id)))}`;
 }
@@ -159,7 +159,7 @@ function reviewPage(token, approval) {
  .approve{background:#0a7d32;color:#fff}.rework{background:#b45309;color:#fff}
  pre{white-space:pre-wrap;background:#f5f5f5;padding:1rem;border-radius:6px}
 </style>
-<h1>Review — ${esc(approval.kind)}</h1>
+<h1>Review: ${esc(approval.kind)}</h1>
 ${media ? `<img src="${esc(media)}" alt="preview">` : ''}
 ${videoUrl ? `<p><a href="${esc(videoUrl)}" target="_blank" rel="noopener">Open video</a></p>` : ''}
 <h3>Caption</h3>

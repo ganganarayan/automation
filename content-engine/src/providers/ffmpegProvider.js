@@ -3,7 +3,7 @@
  *
  * Purpose:      Combine the animated clips + the voiceover (+ optional burned-in
  *               captions) into one finished vertical reel, using the ffmpeg binary
- *               shipped in the image (see Dockerfile). No per-render AI cost — the
+ *               shipped in the image (see Dockerfile). No per-render AI cost, the
  *               stitch is local compute.
  * Responsibility:
  *               - createFfmpegProvider({ bin }, log)
@@ -92,7 +92,7 @@ export function createFfmpegProvider(cfg = {}, log) {
     },
 
     /**
-     * Grab one video frame as a JPEG — from video bytes, or straight from a
+     * Grab one video frame as a JPEG, from video bytes, or straight from a
      * public URL (ffmpeg range-reads only what it needs). Tries `atSec`, then
      * the very first frame for clips shorter than that.
      */
@@ -119,7 +119,7 @@ export function createFfmpegProvider(cfg = {}, log) {
 
     /**
      * Zoom from the top + trim the end (see utils/cleanSpec) into `outPath`.
-     * Reads the source straight from its URL — the video is never held in memory.
+     * Reads the source straight from its URL, the video is never held in memory.
      */
     /**
      * Re-encode a video (zoom from the top, cut the end). ffmpeg streams the

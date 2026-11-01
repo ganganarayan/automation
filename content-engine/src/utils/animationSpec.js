@@ -2,8 +2,8 @@
  * Image -> video animation: pure helpers.
  *
  * Purpose:      Deterministic, side-effect-free pieces of the animation provider
- *               — JWT signing, prompt/duration mapping, response normalization,
- *               provider selection, and funnel-config resolution — kept apart
+ *. JWT signing, prompt/duration mapping, response normalization,
+ *               provider selection, and funnel-config resolution, kept apart
  *               from the HTTP backends so they can be unit-tested without pulling
  *               in settings/logger (mirrors utils/videoSpec.js vs videoProvider).
  * Responsibility: Pure functions only.

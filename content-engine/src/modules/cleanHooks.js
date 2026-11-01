@@ -12,7 +12,7 @@
  *   GET  /api/v1/admin/drive/connect      → Google's consent screen
  *   GET  /api/v1/admin/drive/callback     Google sends the user back here
  *   POST /api/v1/admin/drive/disconnect
- * Routes (no sign-in — the X-Clean-Ticket header is a signed, expiring ticket
+ * Routes (no sign-in: the X-Clean-Ticket header is a signed, expiring ticket
  * the app gave the workflow; nothing else is accepted):
  *   GET  /api/v1/hooks/clean/job          job details + a short-lived Drive token
  *   GET  /api/v1/hooks/clean/token        a fresh Drive token (just before the upload)

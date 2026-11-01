@@ -37,7 +37,7 @@ export function hold(label = 'job') {
     if (!holds.size && timer) {
       clearInterval(timer);
       timer = null;
-      logger.info('heartbeat off — the app may sleep');
+      logger.info('heartbeat off: the app may sleep');
     }
   };
 }

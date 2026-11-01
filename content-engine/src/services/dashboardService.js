@@ -78,7 +78,7 @@ export async function render(tenantId = 'default', opts = {}) {
     ${table(['platform', 'account', 'status', 'error'],
         (d.content.gitaToday || []).map((r) => [r.platform, r.account_name, statusCell(r.success), r.error || '']))}
 
-    <h2>VidaPulse — latest</h2>
+    <h2>VidaPulse: latest</h2>
     ${table(['platform', 'account', 'status', 'when'],
         (d.content.vidaLatest || []).map((r) => [r.platform, r.account_name, statusCell(r.success), r.created_at]))}
 
@@ -104,7 +104,7 @@ export async function render(tenantId = 'default', opts = {}) {
             const p = r.payload || {};
             const ms = p.matchSignals || {};
             const signals = Object.entries(ms).filter(([, v]) => v).map(([k]) => k).join(', ');
-            return [p.paymentId || '', p.value ?? '', signals || '—', p.metaStatus ?? '—', r.created_at];
+            return [p.paymentId || '', p.value ?? '', signals || '\u2014', p.metaStatus ?? '\u2014', r.created_at];
           }))}
 
     <h2>Recent events</h2>
@@ -120,7 +120,7 @@ export async function render(tenantId = 'default', opts = {}) {
     .join('');
 
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>automation — dashboard</title>
+<title>automation: dashboard</title>
 <style>
  :root{color-scheme:dark}
  *{box-sizing:border-box}

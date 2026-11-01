@@ -65,7 +65,7 @@ export async function runDueVideo({ windowMin = 15, now = nowIst(), log } = {}) 
       const instance = await instanceService.createForFunnel({
         tenantId: funnel.tenant_id,
         funnel,
-        title: `${funnel.name} — ${formatIst(scheduledFor, { withTime: false })}`,
+        title: `${funnel.name}, ${formatIst(scheduledFor, { withTime: false })}`,
         scheduledFor: scheduledFor.toJSDate(),
         status: manual ? 'manual' : 'script_review',
         sourceType: 'generated',
@@ -73,7 +73,7 @@ export async function runDueVideo({ windowMin = 15, now = nowIst(), log } = {}) 
       created.push({ funnel: funnel.name, instanceId: instance.id, scheduledFor: scheduledFor.toISO(), manual });
       log?.info(
         { funnel: funnel.name, instance: instance.id, scheduledFor: scheduledFor.toISO(), manual },
-        `run-due-video: instance created (${manual ? 'manual — awaiting operator' : 'script_review'})`,
+        `run-due-video: instance created (${manual ? 'manual: awaiting operator' : 'script_review'})`,
       );
 
       // Auto funnels generate the script + open the script-review checkpoint now.

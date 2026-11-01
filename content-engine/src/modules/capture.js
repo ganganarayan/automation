@@ -1,7 +1,7 @@
 /**
  * Module: comment-to-DM capture (admin view).
  *
- * Purpose:      One operator page for the capture layer — the keyword rules
+ * Purpose:      One operator page for the capture layer, the keyword rules
  *               (one on/off switch each) and the captured-leads table with a
  *               per-row delete. The webhook receiver, senders, and publish-time
  *               rule creation land in later steps; this is the surface they fill.
@@ -197,7 +197,7 @@ const FOLLOWUP_LABEL = {
 
 /** Follow-up state + what we learned about following (only known after a reply). */
 function followupCell(l) {
-  const base = FOLLOWUP_LABEL[l.followup_status] || esc(l.followup_status || '—');
+  const base = FOLLOWUP_LABEL[l.followup_status] || esc(l.followup_status || '-');
   const f = l.follows === true ? ' · follows' : l.follows === false ? ' · not following' : '';
   return `${base}${f ? `<br><span class="muted">${esc(f.replace(' · ', ''))}</span>` : ''}`;
 }
@@ -213,13 +213,13 @@ function dmStatusDot(status) {
     no_rule: '⚪ no rule',
     self: '⚪ own comment',
   };
-  return map[status] || esc(status || '—');
+  return map[status] || esc(status || '-');
 }
 
 /**
  * The Comments screen: the rules that are armed, the leads they captured, and
- * every other comment that arrived. An unmatched comment is NOT a lead — nothing
- * is sent for it — but it is still shown so it can be answered by hand.
+ * every other comment that arrived. An unmatched comment is NOT a lead, nothing
+ * is sent for it, but it is still shown so it can be answered by hand.
  */
 function capturePage(ruleRows, leadRows, session = null) {
   const leadsOnly = leadRows.filter((l) => l.dm_status !== 'no_rule');
@@ -227,7 +227,7 @@ function capturePage(ruleRows, leadRows, session = null) {
 
   const rulesHtml = ruleRows.length
     ? ruleRows.map(ruleRow).join('')
-    : `<tr><td colspan="7" class="empty">No keyword rules yet — one is armed each time the app publishes a post.</td></tr>`;
+    : `<tr><td colspan="7" class="empty">No keyword rules yet, one is armed each time the app publishes a post.</td></tr>`;
   const leadsHtml = leadsOnly.length
     ? leadsOnly.map(leadRow).join('')
     : `<tr><td colspan="8" class="empty">No leads captured yet.</td></tr>`;
@@ -236,7 +236,7 @@ function capturePage(ruleRows, leadRows, session = null) {
     : `<tr><td colspan="6" class="empty">No other comments yet.</td></tr>`;
 
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Comments — automation</title>
+<title>Comments: automation</title>
 <style>
  :root{color-scheme:dark}*{box-sizing:border-box}
  body{font-family:system-ui;margin:0;background:#0b0b12;color:#e8e8ef}
@@ -282,7 +282,7 @@ function capturePage(ruleRows, leadRows, session = null) {
       <tbody>${leadsHtml}</tbody>
     </table></div>
 
-    <h2>Other comments — no rule matched</h2>
+    <h2>Other comments: no rule matched</h2>
     <div class="card"><table>
       <thead><tr><th>Platform</th><th>Username</th><th>Comment</th><th>Post</th><th>Comment time</th><th></th></tr></thead>
       <tbody>${othersHtml}</tbody>
@@ -295,9 +295,9 @@ function capturePage(ruleRows, leadRows, session = null) {
 function otherRow(l) {
   return `<tr>
     <td>${esc(PLATFORM_LABEL[l.platform] || l.platform)}</td>
-    <td class="kw">${esc(l.commenter_username || l.commenter_id || '—')}</td>
+    <td class="kw">${esc(l.commenter_username || l.commenter_id || '-')}</td>
     <td class="txt">${esc(truncate(l.comment_text, 200))}${l.abuse ? `<br><span class="pill bad">abusive</span>` : ''}</td>
-    <td class="muted">${esc(l.post_id || '—')}</td>
+    <td class="muted">${esc(l.post_id || '-')}</td>
     <td>${esc(formatIst(l.comment_created_at))}</td>
     <td><form class="inline" method="post" action="/api/v1/admin/capture/leads/${l.id}/delete"
           onsubmit="return confirm('Delete this comment on the platform and remove this row?')">
@@ -310,7 +310,7 @@ function ruleRow(r) {
   const variants = Array.isArray(r.public_reply_variants) ? r.public_reply_variants.length : 0;
   return `<tr>
     <td>${esc(PLATFORM_LABEL[r.platform] || r.platform)}</td>
-    <td>${esc(r.lane || '—')}</td>
+    <td>${esc(r.lane || '-')}</td>
     <td class="kw">${esc(r.keyword)}</td>
     <td><span class="pill">${esc(r.match_mode)}</span></td>
     <td class="txt">${esc(truncate(r.dm_text, 140))}${r.dm_link ? `<br><span class="muted">${esc(r.dm_link)}</span>` : ''}<br><span class="muted">${variants} reply variant${variants === 1 ? '' : 's'}${r.require_follow ? ' · 🔒 follow required' : ''}</span></td>
@@ -324,9 +324,9 @@ function ruleRow(r) {
 function leadRow(l) {
   return `<tr>
     <td>${esc(PLATFORM_LABEL[l.platform] || l.platform)}</td>
-    <td class="kw">${esc(l.keyword || '—')}</td>
-    <td>${esc(l.lane || '—')}</td>
-    <td>${esc(l.commenter_username || l.commenter_id || '—')}</td>
+    <td class="kw">${esc(l.keyword || '-')}</td>
+    <td>${esc(l.lane || '-')}</td>
+    <td>${esc(l.commenter_username || l.commenter_id || '-')}</td>
     <td>${esc(formatIst(l.comment_created_at))}</td>
     <td>${dmStatusDot(l.dm_status)}${l.error ? `<br><span class="muted">${esc(truncate(l.error, 80))}</span>` : ''}</td>
     <td>${followupCell(l)}</td>
@@ -340,7 +340,7 @@ function leadRow(l) {
 
 /** Did this DM'd lead open their link / the landing page / submit its form? */
 function visitCell(l) {
-  if (!l.clicked_at && !l.visited_at) return l.visit_target ? '<span class="muted">⚪ not opened yet</span>' : '<span class="muted">—</span>';
+  if (!l.clicked_at && !l.visited_at) return l.visit_target ? '<span class="muted">⚪ not opened yet</span>' : '<span class="muted">-</span>';
   const lines = [];
   if (l.clicked_at) lines.push(`🟢 opened ${esc(formatIst(l.clicked_at))}${l.click_count > 1 ? ` (×${l.click_count})` : ''}`);
   if (l.visited_at) lines.push(`🟢 on the page ${esc(formatIst(l.last_seen_at || l.visited_at))}`);

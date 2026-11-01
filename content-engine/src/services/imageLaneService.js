@@ -1,5 +1,5 @@
 /**
- * Daily router — Lane 3: the image post (fail-safe).
+ * Daily router: Lane 3: the image post (fail-safe).
  *
  * Purpose:      When no video lane delivers a funnel's post, line up an image
  *               post from the funnel's sheet as an INSTANCE, so it goes through

@@ -2,7 +2,7 @@
  * Video pipeline scheduling (pure, IST).
  *
  * Purpose:      Decide WHEN a funnel's daily video run happens and WHAT post
- *               datetime the resulting instance targets — without touching
+ *               datetime the resulting instance targets, without touching
  *               settings or the database, so it unit-tests like utils/
  *               instanceSpec and utils/scheduling (luxon only, no DATABASE_URL).
  * Responsibility: Pure date logic on Luxon; callers pass "now" (IST) for tests.
@@ -10,8 +10,8 @@
  *
  * Wake/sleep model: the external cron wakes the app ~just before a funnel's
  * generate_time, the app creates the instance (its work), then sleeps. A post
- * going out at publish_time is GENERATED THE RUN BEFORE — in the evening-generate
- * / morning-publish case, the day before — so an instance's scheduled_for is the
+ * going out at publish_time is GENERATED THE RUN BEFORE, in the evening-generate
+ * / morning-publish case, the day before, so an instance's scheduled_for is the
  * NEXT publish_time strictly ahead of "now", i.e. tomorrow's publish time when
  * generating the day before.
  */
@@ -47,7 +47,7 @@ function parseHm(timeStr, fallbackH, fallbackM) {
 /**
  * Whether this funnel's generate run is due at "now". Due when the funnel runs
  * today (generate_days) AND its generate_time falls within
- * [now - backMin, now + forwardMin] — the same symmetric window the funnel-poster
+ * [now - backMin, now + forwardMin], the same symmetric window the funnel-poster
  * cron uses, so a ping arriving ~10 min early still catches it and a late run
  * doesn't miss it, without touching funnels scheduled far away.
  */
@@ -76,7 +76,7 @@ export function targetPostAt({ publishTime, now = DateTime.now().setZone(ZONE) }
   return publishAtIst(publishTime || '08:02', now.setZone(ZONE));
 }
 
-/** IST date key (yyyy-MM-dd) of a target datetime — the idempotency key part. */
+/** IST date key (yyyy-MM-dd) of a target datetime, the idempotency key part. */
 export function postDateKey(dt) {
   return dt.setZone(ZONE).toFormat('yyyy-MM-dd');
 }

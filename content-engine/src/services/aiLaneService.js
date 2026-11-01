@@ -1,5 +1,5 @@
 /**
- * Daily router — Lane 2: the researched, narrated AI video.
+ * Daily router: Lane 2: the researched, narrated AI video.
  *
  * Purpose:      When no ready video is waiting, make one: check credit, research
  *               a new topic from the funnel's landing page + post history, write
@@ -128,7 +128,7 @@ export async function onStageFailed(instanceId, stepKey, err) {
       const strip = (s) => String(s).replace(/[&<>]/g, '');
       await providers.mail.send({
         to,
-        subject: `🟡 ${f.name} AI video failed — image post instead`,
+        subject: `🟡 ${f.name} AI video failed: image post instead`,
         html: `<p>The AI video for ${strip(f.name)} (${formatIst(scheduledFor)} IST) failed while rendering.</p>
           <p><b>Why:</b> ${strip(reason)}</p><p>${strip(outcome)}</p>`,
       });

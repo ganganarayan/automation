@@ -6,7 +6,7 @@
  *               the landing-page script then reports the page view and any form
  *               submit against the same code. On the first click we also try to
  *               put a "Lead · visited site" label on them in the Instagram /
- *               Facebook inbox (best effort — Meta documents inbox labels for
+ *               Facebook inbox (best effort: Meta documents inbox labels for
  *               Messenger; for Instagram the outcome is recorded on the lead).
  * Responsibility: Orchestration; pure link logic in utils/leadLinkSpec.
  * Dependencies: capturedLeadsRepository, tenantConfigRepository, captureConfig,

@@ -22,7 +22,7 @@ async function req(url, opts) {
 
 /** Model ids the OpenAI key can call. */
 export async function listOpenAiModels(apiKey, log) {
-  if (!apiKey) throw new Error('No OpenAI API key saved — add it above and Save first.');
+  if (!apiKey) throw new Error('No OpenAI API key saved, add it above and Save first.');
   const res = await req(OPENAI_URL, {
     method: 'GET',
     headers: { Authorization: `Bearer ${apiKey}` },
@@ -34,7 +34,7 @@ export async function listOpenAiModels(apiKey, log) {
 
 /** Model objects the Gemini key can call (name + supportedGenerationMethods). */
 export async function listGeminiModels(apiKey, log) {
-  if (!apiKey) throw new Error('No Gemini API key saved — add it above and Save first.');
+  if (!apiKey) throw new Error('No Gemini API key saved, add it above and Save first.');
   const res = await req(GEMINI_URL, {
     method: 'GET',
     headers: { 'x-goog-api-key': apiKey },

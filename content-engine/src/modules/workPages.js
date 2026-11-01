@@ -8,7 +8,7 @@
  *               delivery result. A super admin gets "Re-run tomorrow's check"
  *               per funnel on Today (POST /api/v1/admin/router/rerun).
  * Responsibility: HTTP + auth + HTML rendering. Reads come from
- *               workViewRepository (DB only — no Drive / Post for Me calls, so
+ *               workViewRepository (DB only: no Drive / Post for Me calls, so
  *               page load stays fast).
  * Dependencies: workViewRepository, funnelsRepository, instanceService,
  *               libraryStatus, laneSpec, adminNav, utils/time, accessService,
@@ -114,14 +114,14 @@ function todayPage({ now, tomorrow, session, waiting, images, live, readyLeft, f
 
   const tiles = `<div class="tiles">
     ${tile('Needs you', String(needCount), needCount ? '🟡 waiting on you' : '🟢 nothing waiting')}
-    ${tile('Live today', live ? `${live.posted} posted` : '—', live ? `${live.scheduled} still scheduled today` : 'could not read')}
-    ${tile('Ready videos left', readyLeft == null ? '—' : String(readyLeft), 'pulled in, not yet scheduled')}
+    ${tile('Live today', live ? `${live.posted} posted` : '-', live ? `${live.scheduled} still scheduled today` : 'could not read')}
+    ${tile('Ready videos left', readyLeft == null ? '-' : String(readyLeft), 'pulled in, not yet scheduled')}
   </div>`;
 
   const items = [
     ...(waiting || []).map((r) => `<tr>
       <td>${esc(statusText(r.status))}<div class="hint">${esc(rawLabel(r.status))}</div></td>
-      <td>${esc(r.title || 'Untitled')}<div class="hint">${esc(r.funnel_name || '—')}</div></td>
+      <td>${esc(r.title || 'Untitled')}<div class="hint">${esc(r.funnel_name || '-')}</div></td>
       <td class="hint">${esc(formatIst(r.updated_at))}</td>
       <td><a class="act primary" href="/api/v1/admin/instances/${esc(r.id)}">Review</a></td>
     </tr>`),
@@ -172,7 +172,7 @@ function todayPage({ now, tomorrow, session, waiting, images, live, readyLeft, f
           const r=await fetch('/api/v1/admin/router/rerun',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({funnelId:id})});
           const j=await r.json();
           if(!j.ok) throw new Error(j.error||('HTTP '+r.status));
-          btn.textContent='Running — reloading in 45 s';
+          btn.textContent='Running: reloading in 45 s';
           setTimeout(()=>location.reload(),45000);
         }catch(err){ btn.disabled=false; btn.textContent="Re-run tomorrow's check"; alert('Re-run failed: '+err.message); }
       }
@@ -203,12 +203,12 @@ function calendarPage({ today, from, to, session, rows, funnels, decisions }) {
       const d = lanes.get(`${r.funnel_id}|${key}`);
       const lane = d ? LANE_LABEL[d.lane] || d.lane : laneLabelOf(r);
       return `<div class="ent"><span class="tm">${esc(time)}</span> <a href="/api/v1/admin/instances/${esc(r.id)}">${esc(r.title || 'Untitled')}</a>
-        <span class="hint">${esc(r.funnel_name || names.get(String(r.funnel_id)) || '—')} · ${esc(lane)}</span> ${esc(statusText(r.status))}</div>`;
+        <span class="hint">${esc(r.funnel_name || names.get(String(r.funnel_id)) || '-')} · ${esc(lane)}</span> ${esc(statusText(r.status))}</div>`;
     });
     // Router decisions with no post on that day yet (e.g. "none", or not built).
     for (const d of decisions || []) {
       if (d.day !== key || covered.has(String(d.funnel_id))) continue;
-      lines.push(`<div class="ent"><span class="tm">—</span> ${esc(names.get(String(d.funnel_id)) || `Funnel ${d.funnel_id}`)}
+      lines.push(`<div class="ent"><span class="tm">-</span> ${esc(names.get(String(d.funnel_id)) || `Funnel ${d.funnel_id}`)}
         <span class="hint">· ${esc(LANE_LABEL[d.lane] || d.lane)}${d.reason ? ` · ${esc(d.reason)}` : ''}</span> ${d.lane === 'none' ? '🟡 nothing planned' : '⚪ decided, no post yet'}</div>`);
     }
     const label = `${formatIst(day, { withTime: false })} <span class="hint">${esc(day.setLocale('en-IN').toFormat('ccc'))}</span>`;
@@ -241,10 +241,10 @@ function logPage({ session, rows, month, monthStart }) {
       const st = libraryStatus(r.status);
       return `<tr class="${st.hidden ? 'mut' : ''}">
         <td class="hint">${esc(formatIst(r.created_at))}</td>
-        <td><a href="/api/v1/admin/instances/${esc(r.id)}">${esc(r.title || 'Untitled')}</a><div class="hint">${esc(r.funnel_name || '—')}</div></td>
+        <td><a href="/api/v1/admin/instances/${esc(r.id)}">${esc(r.title || 'Untitled')}</a><div class="hint">${esc(r.funnel_name || '-')}</div></td>
         <td>${esc(statusText(r.status))}</td>
         <td>${esc(usd(r.cost_usd))}</td>
-        <td class="chans">${esc(chans.map(channelText).join(', ')) || '<span class="hint">—</span>'}</td>
+        <td class="chans">${esc(chans.map(channelText).join(', ')) || '<span class="hint">-</span>'}</td>
       </tr>`;
     })
     .join('');
@@ -255,8 +255,8 @@ function logPage({ session, rows, month, monthStart }) {
       <div class="toprow"><a class="act" href="/api/v1/dashboard">Delivery dashboard (older feeds, tracking-bridge)</a></div>
     </div>
     <div class="tiles">
-      ${tile(`Cost since ${formatIst(monthStart, { withTime: false })}`, month ? usd(month.total) : '—', 'this month, all funnels')}
-      ${tile('Runs this month', month ? String(month.runs) : '—', 'instances created')}
+      ${tile(`Cost since ${formatIst(monthStart, { withTime: false })}`, month ? usd(month.total) : '-', 'this month, all funnels')}
+      ${tile('Runs this month', month ? String(month.runs) : '-', 'instances created')}
     </div>
     <table>
       <thead><tr><th>Created</th><th>Video</th><th>Status</th><th>Cost</th><th>Delivery</th></tr></thead>
@@ -272,7 +272,7 @@ const RAW_LABEL = {
   transcript_review: 'Transcript to check',
   final_review: 'Final video to check',
   review: 'To check',
-  manual: 'Manual run — next stage is yours',
+  manual: 'Manual run: next stage is yours',
   image_review: 'Image post to approve',
   video_review: 'Ready video to approve',
 };
@@ -302,7 +302,7 @@ function usd(n) {
 
 function shell(title, inner, { current = '', session = null } = {}) {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} — automation</title>
+<title>${esc(title)}, automation</title>
 <style>
  :root{color-scheme:dark}*{box-sizing:border-box}
  body{font-family:system-ui;margin:0;background:#0b0b12;color:#e8e8ef}

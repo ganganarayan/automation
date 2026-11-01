@@ -1,5 +1,5 @@
 /**
- * Daily router — Lane 2 credit check.
+ * Daily router: Lane 2 credit check.
  *
  * Purpose:      Before the router spends anything on an AI video, find out
  *               whether Lane 2 can deliver: a video provider with credit (in

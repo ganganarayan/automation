@@ -105,7 +105,7 @@ export async function runFull({ tenantId = 'default' }) {
   });
   await providers.mail.send({
     to: resolved.emails.approvalGita,
-    subject: `Approve Gita video — day ${row.day}`,
+    subject: `Approve Gita video: day ${row.day}`,
     html: `<p>Video ready: <a href="${videoUrl}">watch</a></p><pre>${escapeHtml(row.caption)}</pre>
       <p><a href="${reviewUrl}">Review &amp; Approve</a></p>`,
   });
@@ -166,7 +166,7 @@ export async function runSimple({ tenantId = 'default' }) {
   });
   await providers.mail.send({
     to: resolved.emails.approvalGita,
-    subject: `Approve Gita reel — ${oldest.name}`,
+    subject: `Approve Gita reel: ${oldest.name}`,
     html: `<p>Reel ready to post: ${escapeHtml(oldest.name)}</p><p><a href="${reviewUrl}">Review, edit caption &amp; Approve</a></p>`,
   });
   log.info({ file: oldest.name }, 'reel approval email sent');

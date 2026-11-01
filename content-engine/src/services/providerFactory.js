@@ -2,15 +2,15 @@
  * Per-tenant provider factory.
  *
  * Purpose:      Build the external-integration clients a flow needs, using the
- *               tenant's resolved configuration — so tenant-set credentials
+ *               tenant's resolved configuration: so tenant-set credentials
  *               (AI keys, Post for Me key, JSON2Video key) actually take effect.
  *               A tenant configures everything from the app UI; nothing
  *               user-scoped depends on an environment variable.
  * Responsibility: Construct providers from tenant_config (with env as a
  *               platform-provided default only). Platform-shared infrastructure
- *               that a tenant never sets — the Google service account (for Drive
+ *               that a tenant never sets, the Google service account (for Drive
  *               and Sheets access to sheets the tenant shares) and the SMTP
- *               sender — comes from platform settings.
+ *               sender: comes from platform settings.
  * Dependencies: tenantSettings, provider factories, settings, logger.
  */
 import * as tenantSettings from '../core/tenantSettings.js';
@@ -44,7 +44,7 @@ export async function buildProviders(tenantId = 'default') {
     // mailbox (SMTP configured in the app; env is only a fallback).
     mail: createSmtpMailProvider(r.smtp, log),
 
-    // Google Sheets/Drive identity — the service account configured in the app
+    // Google Sheets/Drive identity: the service account configured in the app
     // (tenant_config), falling back to the env default (see tenantSettings).
     storage: createGoogleDriveProvider({ serviceAccount: r.google.serviceAccount }, log),
     sheets: createGoogleSheetsProvider({ serviceAccount: r.google.serviceAccount }, log),

@@ -1,10 +1,10 @@
 /**
  * Post composition (pure).
  *
- * Purpose:      Encode the n8n poster logic — recognizing sheet columns,
+ * Purpose:      Encode the n8n poster logic, recognizing sheet columns,
  *               extracting a row, composing the image prompt, composing the
  *               full/short captions, and building Post-for-Me per-platform
- *               configurations — as pure, unit-testable functions.
+ *               configurations: as pure, unit-testable functions.
  * Responsibility: Pure logic only (no settings/DB/I/O).
  * Dependencies: caption util (humanizeCaption).
  */

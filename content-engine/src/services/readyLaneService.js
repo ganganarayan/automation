@@ -1,5 +1,5 @@
 /**
- * Daily router — Lane 1: the ready video (top priority).
+ * Daily router: Lane 1: the ready video (top priority).
  *
  * Purpose:      Post a video you already made: the OLDEST unposted video in the
  *               funnel's ready-video Drive folder (D3, deduped by Drive file id)

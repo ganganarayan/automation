@@ -20,10 +20,10 @@
  *               - HTTP: POST /api/v1/jobs/nudge (admin-guarded, 202): the 10:00
  *                 nudge for the tenants whose nudge time is due (?all=1 = all).
  *               - HTTP (signed in): POST /api/v1/admin/router/rerun {funnelId}
- *                 — super admin only: re-run tomorrow's check for one funnel.
- *                 GET /api/v1/admin/credit-status — a live Lane 2 credit check
+ *, super admin only: re-run tomorrow's check for one funnel.
+ *                 GET /api/v1/admin/credit-status: a live Lane 2 credit check
  *                 (the Keys and credit page reads it); POST
- *                 /api/v1/admin/credit/clear {key} — "I topped up".
+ *                 /api/v1/admin/credit/clear {key}, "I topped up".
  *               - Wire the lanes: approve / rework handlers for the image and
  *                 ready-video approval emails, the post check's "went live"
  *                 hook that marks the sheet row Posted, and the stage runner's

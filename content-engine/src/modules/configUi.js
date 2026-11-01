@@ -12,7 +12,7 @@
  *   - Accounts are created on sign-up. The super admin (ganganarayan.rns@gmail.com)
  *     is seeded and protected.
  *   - The super admin changes each user's role (user/admin/super_admin) and plan
- *     end date (a date, or "forever") with inline auto-save — no save button.
+ *     end date (a date, or "forever") with inline auto-save, no save button.
  *   - Each user has billing history and last login. Users manage their own
  *     password in their own login (not here).
  *   - Pages need an email + password sign-in (modules/auth.js, accessService).
@@ -219,7 +219,7 @@ export function register(ctx) {
         const t = await tenantSettings.forTenant(req.tenantId);
         apiKey = t.postformeKey || '';
       }
-      if (!apiKey) return res.json({ ok: false, error: 'No Post for Me API key — set it once under Keys and credit, then come back and Fetch.' });
+      if (!apiKey) return res.json({ ok: false, error: 'No Post for Me API key, set it once under Keys and credit, then come back and Fetch.' });
       const provider = createPostForMeProvider({ apiKey }, log);
       const data = await provider.listAccounts();
       return res.json({ ok: true, accounts: normalizeAccounts(data) });
@@ -301,7 +301,7 @@ export function register(ctx) {
       imageGateService
         .generateForFunnel({ tenantId: req.tenantId, funnelId: id, topic, count })
         .catch((e) => log.error({ err: e.message, funnel: id }, 'image gate test failed'));
-      res.json({ ok: true, message: 'Generating — you’ll get a review email shortly.' });
+      res.json({ ok: true, message: 'Generating: you’ll get a review email shortly.' });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -353,11 +353,11 @@ export function register(ctx) {
       const providers = await buildProviders(req.tenantId);
       const smtp = providers.resolved.smtp || {};
       const to = (req.body?.to || smtp.from || smtp.user || '').trim();
-      if (!smtp.host || !smtp.user) return res.json({ ok: false, error: 'SMTP not configured — set host/user and Save first' });
+      if (!smtp.host || !smtp.user) return res.json({ ok: false, error: 'SMTP not configured: set host/user and Save first' });
       if (!to) return res.json({ ok: false, error: 'no recipient (set a From/user address)' });
       const result = await providers.mail.send({
         to,
-        subject: 'Test email — automation content-engine',
+        subject: 'Test email: automation content-engine',
         text: 'This is a test from your content-engine SMTP settings. If you received this, approval and status emails will work.',
       });
       res.json({ ok: !!result.ok, to, error: result.ok ? null : 'send failed' });
@@ -440,7 +440,7 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, se
   const menu = navHtml({ key, tabs: true, superAdmin, session });
 
   // Said once, on the two panels with plain config fields (not under every panel).
-  const fallbackHint = '<p class="hint">Blank config fields fall back to a platform default where one exists. Secrets are never shown — leave blank to keep the current value. Changes apply within ~1 minute.</p>';
+  const fallbackHint = '<p class="hint">Blank config fields fall back to a platform default where one exists. Secrets are never shown, leave blank to keep the current value. Changes apply within ~1 minute.</p>';
   // tracking-bridge is no longer a menu entry; it is reached from Settings.
   const extras = {
     'api-keys': `${fallbackHint}${creditPanel()}`,
@@ -454,7 +454,7 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, se
     .join('');
 
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>automation — control panel</title>
+<title>automation: control panel</title>
 <style>
  :root{color-scheme:dark}*{box-sizing:border-box}
  body{font-family:system-ui;margin:0;background:#0b0b12;color:#e8e8ef}
@@ -614,7 +614,7 @@ ${NAV_CSS}
       const r=await fetch('users/billing?email='+encodeURIComponent(email),{headers:{'X-Admin-Key':KEY}});
       const j=await r.json();
       cell.innerHTML = (j.rows&&j.rows.length)
-        ? '<div class="billing">'+j.rows.map(x=>esc2(x.occurred_at)+' — '+esc2(x.description||'')+' — ₹'+esc2(x.amount_inr||'0')+' ('+esc2(x.status||'')+')').join('<br>')+'</div>'
+        ? '<div class="billing">'+j.rows.map(x=>esc2(x.occurred_at)+', '+esc2(x.description||'')+', ₹'+esc2(x.amount_inr||'0')+' ('+esc2(x.status||'')+')').join('<br>')+'</div>'
         : '<div class="billing hint">No billing history yet.</div>';
     }catch(e){ cell.textContent='Failed to load billing.'; }
   }
@@ -645,7 +645,7 @@ ${NAV_CSS}
     try{
       const r=await fetch('/api/v1/admin/test-email',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Key':KEY},body:JSON.stringify({to})});
       const j=await r.json();
-      el.textContent = j.ok ? ('✓ sent to '+(j.to||'')+' — check inbox/spam') : ('✗ '+(j.error||'failed'));
+      el.textContent = j.ok ? ('✓ sent to '+(j.to||'')+', check inbox/spam') : ('✗ '+(j.error||'failed'));
       el.style.color = j.ok ? '#5bd08a' : '#ff9a9a';
     }catch(e){ el.textContent='✗ '+e.message; el.style.color='#ff9a9a'; }
   }
@@ -667,7 +667,7 @@ ${NAV_CSS}
     if(!accounts.length){ box.innerHTML='<span class="hint">No connected accounts found for that key.</span>'; return; }
     box.innerHTML=accounts.map(function(x){
       const ck=selected.indexOf(x.id)>=0?'checked':'';
-      return '<label class="acct"><input type="checkbox" value="'+esc2(x.id)+'" data-pfm="'+fid+'" data-plat="'+esc2(x.platform)+'" data-name="'+esc2(x.name)+'" onchange="syncPfm('+fid+')" '+ck+'> <b>'+esc2(x.platform)+'</b> — '+esc2(x.name)+'</label>';
+      return '<label class="acct"><input type="checkbox" value="'+esc2(x.id)+'" data-pfm="'+fid+'" data-plat="'+esc2(x.platform)+'" data-name="'+esc2(x.name)+'" onchange="syncPfm('+fid+')" '+ck+'> <b>'+esc2(x.platform)+'</b>, '+esc2(x.name)+'</label>';
     }).join('');
     syncPfm(fid);
   }
@@ -680,7 +680,7 @@ ${NAV_CSS}
       const j=await post('funnels/fetch-accounts',{funnel_id:fid, api_key});
       if(!j.ok){ st.textContent='✗ '+(j.error||'failed'); st.style.color='#ff9a9a'; return; }
       renderPfm(fid, j.accounts||[]);
-      st.textContent='✓ '+(j.accounts||[]).length+' accounts — tick to include, then Save';
+      st.textContent='✓ '+(j.accounts||[]).length+' accounts: tick to include, then Save';
       st.style.color='#5bd08a';
     }catch(e){ st.textContent='✗ '+((e&&e.error)||(e&&e.message)||'failed'); st.style.color='#ff9a9a'; }
   }
@@ -699,8 +699,8 @@ function tenantsPanel({ tenantList }) {
       const expired = t.expires_at && new Date(t.expires_at) < new Date();
       return `<tr>
         <td>${esc(t.name)}${t.status !== 'active' ? ` <span class="pill">${esc(t.status)}</span>` : ''}</td>
-        <td>${esc(t.owner_email || '—')}</td>
-        <td>${esc(t.phone || '—')}</td>
+        <td>${esc(t.owner_email || '-')}</td>
+        <td>${esc(t.phone || '-')}</td>
         <td>${esc(formatIst(t.subscribed_at, { withTime: false }))}</td>
         <td><div class="planwrap">
           <input id="tx-${i}" type="date" value="${ex}" onchange="saveExpiry(${i}, '${escJs(t.id)}')" title="${expired ? 'expired' : ''}">
@@ -740,11 +740,11 @@ function usersPanel({ userList, me }) {
 
   return `<section class="panel active card" id="panel-users">
     <h2>Users</h2>
-    <p class="blurb">Accounts are created when people sign up from the landing page. Change a role and it saves instantly — no save button. Users manage their own password in their own login. Account expiry lives on Tenants.</p>
+    <p class="blurb">Accounts are created when people sign up from the landing page. Change a role and it saves instantly, no save button. Users manage their own password in their own login. Account expiry lives on Tenants.</p>
 
     <fieldset><legend>Users</legend>
       <table><thead><tr><th>Email</th><th>Role</th><th>Last login</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="3" class="hint">No users yet — they appear here after signing up.</td></tr>'}</tbody></table>
+        <tbody>${rows || '<tr><td colspan="3" class="hint">No users yet: they appear here after signing up.</td></tr>'}</tbody></table>
       <p class="hint">The super admin is protected: it cannot be demoted or removed.</p>
     </fieldset>
 
@@ -789,7 +789,7 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
 
   return `<section class="panel card" id="panel-funnels">
     <h2>Funnels</h2>
-    <p class="blurb">A funnel is a brand/campaign scope with its own content source, social accounts, and schedule. Add one, then open its step-by-step setup — one screen per stage, with Back / Save / Next always in view.</p>
+    <p class="blurb">A funnel is a brand/campaign scope with its own content source, social accounts, and schedule. Add one, then open its step-by-step setup, one screen per stage, with Back / Save / Next always in view.</p>
     <fieldset><legend>Add a funnel</legend>
       <form method="post" action="/api/v1/admin/funnels" class="row">
         <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
@@ -797,7 +797,7 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
         <button class="act" type="submit">+ Add funnel</button>
       </form>
     </fieldset>
-    <div class="funnellist">${cards || '<p class="hint">No funnels yet — add one above.</p>'}</div>
+    <div class="funnellist">${cards || '<p class="hint">No funnels yet: add one above.</p>'}</div>
   </section>`;
 }
 
@@ -840,7 +840,7 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
       if (field.key === 'postforme_accounts') return pfmAccountsRow(cfg, funnel.id);
       if (field.key === 'account_map') return '';
       const html = fieldRow(field, cfg);
-      // Fields tagged group:'direct' only apply to the Direct-upload source — show
+      // Fields tagged group:'direct' only apply to the Direct-upload source, show
       // them only when that source is chosen (toggled client-side on change).
       return field.group === 'direct' ? `<div class="direct-only"${directOn ? '' : ' style="display:none"'}>${html}</div>` : html;
     })
@@ -850,7 +850,7 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
   const isLast = stepIndex === total - 1;
 
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(funnel.name)} — video setup</title>
+<title>${esc(funnel.name)}, video setup</title>
 <style>
  :root{color-scheme:dark}*{box-sizing:border-box}
  body{font-family:system-ui;margin:0;background:#0b0b12;color:#e8e8ef}
@@ -909,7 +909,7 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
       <form id="wform" onsubmit="return false">${fieldsHtml}</form>
       ${cfg.manual_stepper === 'on' ? `<div class="igt">
         <div class="igt-title">🎛 Manual mode is on for this funnel</div>
-        <p class="hint">This screen is the setup. To actually build a video stage-by-stage — Generate/edit each prompt → Execute → Preview → Approve → next → post — start a manual run. Each run opens a page with one card per stage (Script, Images, Image→video, Voiceover, Transcript, Final reel, Post), each with its input, an Execute button, and a Preview.</p>
+        <p class="hint">This screen is the setup. To actually build a video stage-by-stage. Generate/edit each prompt → Execute → Preview → Approve → next → post, start a manual run. Each run opens a page with one card per stage (Script, Images, Image→video, Voiceover, Transcript, Final reel, Post), each with its input, an Execute button, and a Preview.</p>
         <div class="row">
           <button type="button" class="act" onclick="startManualRun()">▶ Start a manual run of this funnel</button>
           <a class="act" href="/api/v1/admin/instances">All instances</a>
@@ -976,8 +976,8 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
  })();
  function syncDays(gid){const boxes=document.querySelectorAll('[data-daygroup="'+gid+'"]');const vals=[];boxes.forEach(b=>{if(b.checked)vals.push(b.value);});const h=document.getElementById(gid);if(h)h.value=vals.join(',');}
  function syncPfm(fid){const boxes=document.querySelectorAll('[data-pfm="'+fid+'"]');const ids=[];const map={};boxes.forEach(b=>{if(b.checked){ids.push(b.value);map[b.value]={platform:b.dataset.plat||'',account_name:b.dataset.name||''};}});const a=document.getElementById('pfmaccts-'+fid);if(a)a.value=JSON.stringify(ids);const m=document.getElementById('pfmmap-'+fid);if(m)m.value=JSON.stringify(map);}
- function renderPfm(fid,accounts){const box=document.getElementById('pfmlist-'+fid);let selected=[];try{selected=JSON.parse(document.getElementById('pfmaccts-'+fid).value||'[]');}catch(_){}if(!accounts.length){box.innerHTML='<span class="hint">No connected accounts found for that key.</span>';return;}box.innerHTML=accounts.map(function(x){const ck=selected.indexOf(x.id)>=0?'checked':'';return '<label class="acct"><input type="checkbox" value="'+esc2(x.id)+'" data-pfm="'+fid+'" data-plat="'+esc2(x.platform)+'" data-name="'+esc2(x.name)+'" onchange="syncPfm('+fid+')" '+ck+'> <b>'+esc2(x.platform)+'</b> — '+esc2(x.name)+'</label>';}).join('');syncPfm(fid);}
- async function fetchPfm(fid){const st=document.getElementById('pfmstatus-'+fid);const keyEl=document.getElementById('pfmkey-'+fid);const api_key=keyEl?keyEl.value.trim():'';st.textContent='Fetching…';st.style.color='';try{const r=await fetch(ACCOUNTS_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({funnel_id:fid,api_key})});const j=await r.json();if(!j.ok){st.textContent='✗ '+(j.error||'failed');st.style.color='#ff9a9a';return;}renderPfm(fid,j.accounts||[]);st.textContent='✓ '+(j.accounts||[]).length+' accounts — tick to include, then Save';st.style.color='#5bd08a';}catch(e){st.textContent='✗ '+(e.message||'failed');st.style.color='#ff9a9a';}}
+ function renderPfm(fid,accounts){const box=document.getElementById('pfmlist-'+fid);let selected=[];try{selected=JSON.parse(document.getElementById('pfmaccts-'+fid).value||'[]');}catch(_){}if(!accounts.length){box.innerHTML='<span class="hint">No connected accounts found for that key.</span>';return;}box.innerHTML=accounts.map(function(x){const ck=selected.indexOf(x.id)>=0?'checked':'';return '<label class="acct"><input type="checkbox" value="'+esc2(x.id)+'" data-pfm="'+fid+'" data-plat="'+esc2(x.platform)+'" data-name="'+esc2(x.name)+'" onchange="syncPfm('+fid+')" '+ck+'> <b>'+esc2(x.platform)+'</b>, '+esc2(x.name)+'</label>';}).join('');syncPfm(fid);}
+ async function fetchPfm(fid){const st=document.getElementById('pfmstatus-'+fid);const keyEl=document.getElementById('pfmkey-'+fid);const api_key=keyEl?keyEl.value.trim():'';st.textContent='Fetching…';st.style.color='';try{const r=await fetch(ACCOUNTS_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({funnel_id:fid,api_key})});const j=await r.json();if(!j.ok){st.textContent='✗ '+(j.error||'failed');st.style.color='#ff9a9a';return;}renderPfm(fid,j.accounts||[]);st.textContent='✓ '+(j.accounts||[]).length+' accounts: tick to include, then Save';st.style.color='#5bd08a';}catch(e){st.textContent='✗ '+(e.message||'failed');st.style.color='#ff9a9a';}}
 </script>`;
 }
 
@@ -1085,7 +1085,7 @@ function fieldRow(field, configMap) {
       <p id="wake-times" class="hint"></p>
       <script>
         function wakeShow(j){
-          document.getElementById('wake-st').textContent=(j.text||'🟡 unknown')+(j.stale?' — times changed since, press Sync':'');
+          document.getElementById('wake-st').textContent=(j.text||'🟡 unknown')+(j.stale?', times changed since, press Sync':'');
           const c=j.current||j.schedule; if(!c) return;
           document.getElementById('wake-times').textContent='Daily check '+(c.router||[]).join(', ')+' · Nudge '+(c.nudge||[]).join(', ')+' · Post checks '+(c.posts||[]).join(', ')+' (IST, all tenants)';
         }
@@ -1123,11 +1123,11 @@ function fieldRow(field, configMap) {
       .map((v) => `<option value="${esc(v)}"${String(val) === String(v) ? ' selected' : ''}>${esc(v)}</option>`)
       .join('');
     const hint = list.length
-      ? `${list.length} model${list.length === 1 ? '' : 's'} available on your ${pname} key — pick one.`
+      ? `${list.length} model${list.length === 1 ? '' : 's'} available on your ${pname} key: pick one.`
       : `Save your ${pname} key above, then click Refresh to load the list.`;
     return `<div class="field"><label>${esc(field.label)}</label>
       <div class="row" style="gap:.4rem">
-        <select name="set[${esc(field.key)}]" class="pick" style="flex:1">${opts2 || '<option value="">— click Refresh —</option>'}</select>
+        <select name="set[${esc(field.key)}]" class="pick" style="flex:1">${opts2 || '<option value="">click Refresh:</option>'}</select>
         <button type="button" class="act" onclick="refreshModels('${provider}')">↻ Refresh</button>
         <span id="mdl-${esc(provider)}" class="hint"></span>
       </div>
@@ -1235,11 +1235,11 @@ function fieldRow(field, configMap) {
   if (field.type === 'secret') {
     return `<div class="field"><label>${esc(field.label)}</label>
       <input type="password" name="set[${esc(field.key)}]" autocomplete="new-password" data-lpignore="true" data-1p-ignore
-        placeholder="${has ? '•••• (set — blank keeps current)' : (field.placeholder ? esc(field.placeholder) : 'unset')}"></div>`;
+        placeholder="${has ? '•••• (set: blank keeps current)' : (field.placeholder ? esc(field.placeholder) : 'unset')}"></div>`;
   }
 /**
  * What a stored secret_json may reveal about itself: the Google service-account
- * identity when it holds one, otherwise the map’s own keys. Ids are not secret —
+ * identity when it holds one, otherwise the map’s own keys. Ids are not secret:
  * the tokens they point at are, and those are never rendered.
  */
 function secretJsonSummary(raw) {
@@ -1258,7 +1258,7 @@ function secretJsonSummary(raw) {
     return `<div class="field"><label>${esc(field.label)}</label>
       ${has ? `<p class="hint">🟢 ${secretJsonSummary(current)}</p>` : ''}
       <textarea name="set[${esc(field.key)}]" autocomplete="off"
-        placeholder="${has ? '•••• (set — paste new JSON to replace; blank keeps current)' : (field.placeholder ? esc(field.placeholder) : 'paste the JSON here')}"></textarea>
+        placeholder="${has ? '•••• (set: paste new JSON to replace; blank keeps current)' : (field.placeholder ? esc(field.placeholder) : 'paste the JSON here')}"></textarea>
       ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
   }
   if (field.type === 'json' || field.type === 'textarea') {
@@ -1286,7 +1286,7 @@ function funnelKeyRow(field, cfg, fid) {
   const has = !!(cfg && cfg[field.key]);
   return `<div class="field"><label>${esc(field.label)}</label>
     <input id="pfmkey-${fid}" type="password" name="set[${esc(field.key)}]" autocomplete="new-password" data-lpignore="true" data-1p-ignore
-      placeholder="${has ? '•••• (set — blank keeps current)' : 'paste your Post for Me API key'}"></div>`;
+      placeholder="${has ? '•••• (set: blank keeps current)' : 'paste your Post for Me API key'}"></div>`;
 }
 
 // Account picker: a Fetch button + checkbox list, backed by two hidden inputs
@@ -1303,7 +1303,7 @@ function pfmAccountsRow(cfg, fid) {
       const m = map[id] || {};
       const plat = m.platform || '';
       const name = m.account_name || id;
-      return `<label class="acct"><input type="checkbox" value="${esc(id)}" data-pfm="${fid}" data-plat="${esc(plat)}" data-name="${esc(name)}" onchange="syncPfm('${fid}')" checked> <b>${esc(plat)}</b> — ${esc(name)}</label>`;
+      return `<label class="acct"><input type="checkbox" value="${esc(id)}" data-pfm="${fid}" data-plat="${esc(plat)}" data-name="${esc(name)}" onchange="syncPfm('${fid}')" checked> <b>${esc(plat)}</b>, ${esc(name)}</label>`;
     })
     .join('');
   return `<div class="field"><label>Post for Me accounts</label>
@@ -1311,10 +1311,10 @@ function pfmAccountsRow(cfg, fid) {
       <button type="button" class="act" onclick="fetchPfm('${fid}')">↻ Fetch accounts from Post for Me</button>
       <span id="pfmstatus-${fid}" class="hint"></span>
     </div>
-    <div id="pfmlist-${fid}" class="acctlist">${pre || '<span class="hint">No accounts yet — click Fetch (uses the Post for Me key from Keys and credit) and tick the accounts.</span>'}</div>
+    <div id="pfmlist-${fid}" class="acctlist">${pre || '<span class="hint">No accounts yet: click Fetch (uses the Post for Me key from Keys and credit) and tick the accounts.</span>'}</div>
     <input type="hidden" id="pfmaccts-${fid}" name="set[postforme_accounts]" value="${esc(JSON.stringify(ids))}">
     <input type="hidden" id="pfmmap-${fid}" name="set[account_map]" value="${esc(JSON.stringify(map))}">
-    <p class="hint">One click — no JSON. Tick the accounts this funnel posts to.</p></div>`;
+    <p class="hint">One click: no JSON. Tick the accounts this funnel posts to.</p></div>`;
 }
 
 // Flatten Post for Me's list response into { id, platform, name } rows.

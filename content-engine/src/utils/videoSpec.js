@@ -4,7 +4,7 @@
  * Purpose:      Deterministic building blocks for the video pipeline: MP4
  *               duration probing, seeded persona derivation, image-prompt
  *               construction, and JSON2Video movie-spec assembly.
- * Responsibility: Pure logic only; no settings, no I/O — fully unit-testable.
+ * Responsibility: Pure logic only; no settings, no I/O, fully unit-testable.
  * Dependencies: none.
  */
 

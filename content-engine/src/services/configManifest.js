@@ -24,14 +24,14 @@ export const APPS = ['api-keys', 'content-engine', 'tracking-bridge'];
 
 export const CONFIG_MANIFEST = {
   // Every provider credential lives HERE, once, for the whole tenant. Funnels
-  // never store keys — a funnel only picks which provider/model to use for each
+  // never store keys: a funnel only picks which provider/model to use for each
   // action, and the key is taken from this page.
   'api-keys': {
     label: 'Keys and credit',
     blurb: 'All provider keys in one place. Funnels choose the provider/model; the key comes from here.',
     groups: [
       {
-        title: 'AI — text & image models',
+        title: 'AI: text & image models',
         fields: [
           { key: 'openai_api_key', label: 'OpenAI API key', type: 'secret' },
           { key: 'image_model', label: 'OpenAI image model', type: 'model_select', catalog: 'openai_image', placeholder: 'gpt-image-2' },
@@ -92,7 +92,7 @@ export const CONFIG_MANIFEST = {
             label: 'Page / IG access tokens (JSON: id → token)',
             type: 'secret_json',
             placeholder: '{ "<instagram business account id>": "<page token>", "<page id>": "<page token>" }',
-            help: 'Write-only — once saved the tokens are hidden and only the ids are shown; paste fresh JSON to replace them, blank keeps the current value. Map BOTH the Instagram business account id and the Page id to the same Page access token.',
+            help: 'Write-only: once saved the tokens are hidden and only the ids are shown; paste fresh JSON to replace them, blank keeps the current value. Map BOTH the Instagram business account id and the Page id to the same Page access token.',
           },
         ],
       },
@@ -107,11 +107,11 @@ export const CONFIG_MANIFEST = {
         // built-in default (shown pre-filled).
         title: 'System prompts (used by every LLM call)',
         fields: [
-          { key: 'system_prompt_global', label: 'Global system prompt — added before every LLM call', type: 'textarea', help: 'House rules for all AI text: voice, language, words to avoid. Leave blank for none.' },
+          { key: 'system_prompt_global', label: 'Global system prompt: added before every LLM call', type: 'textarea', help: 'House rules for all AI text: voice, language, words to avoid. Leave blank for none.' },
           { key: 'system_prompt_copy', label: 'Ready video copy writer (title, description, captions, thumbnail hook + image prompt)', type: 'textarea', default: DEFAULT_COPY_PROMPT, help: 'The app always adds the JSON output keys, the funnel comment keyword, brand brief and audience after this.' },
           { key: 'system_prompt_script', label: 'Video script writer (automated pipeline)', type: 'textarea', default: DEFAULT_SCRIPT_PROMPT, help: "The funnel's script tone is added after this." },
           { key: 'system_prompt_refill', label: 'VidaPulse post refill', type: 'textarea', default: VIDAPULSE_SYSTEM },
-          { key: 'transcript_glossary', label: 'Transcript glossary — names and terms to spell exactly (one per line)', type: 'textarea', help: 'Passed to Whisper as its prompt so names like STHIRA or PrATS come out right, and given to the copy writer as the correct spellings. Example: STHIRA, PrATS, Apply Gita Wisdom.' },
+          { key: 'transcript_glossary', label: 'Transcript glossary: names and terms to spell exactly (one per line)', type: 'textarea', help: 'Passed to Whisper as its prompt so names like STHIRA or PrATS come out right, and given to the copy writer as the correct spellings. Example: STHIRA, PrATS, Apply Gita Wisdom.' },
         ],
       },
     ],
@@ -139,7 +139,7 @@ export const CONFIG_MANIFEST = {
           // only on the picked files (drive.file scope). No client secret needed.
           {
             key: 'google_oauth_client_id',
-            label: 'Sign in with Google — OAuth client ID',
+            label: 'Sign in with Google. OAuth client ID',
             placeholder: '1234567890-abc….apps.googleusercontent.com',
             help: 'Web-application OAuth client. Its Authorized JavaScript origins must include this app\'s address. Used by "📂 Pick from Drive" on the ready-video pages. Also used by "Connect Google Drive" below.',
           },
@@ -152,13 +152,13 @@ export const CONFIG_MANIFEST = {
           { key: 'google_drive_connect', label: 'Google Drive (for cleaned videos)', type: 'drive_connect' },
           {
             key: 'google_picker_api_key',
-            label: 'Sign in with Google — Picker API key',
+            label: 'Sign in with Google. Picker API key',
             placeholder: 'AIza…',
             help: 'An API key restricted to the Google Picker API and to this app\'s address (it is visible in the browser, as Google intends).',
           },
           {
             key: 'google_project_number',
-            label: 'Sign in with Google — Cloud project number',
+            label: 'Sign in with Google. Cloud project number',
             placeholder: 'e.g. 123456789012',
             help: 'The numeric project number from the Google Cloud dashboard (not the project ID).',
           },
@@ -184,7 +184,7 @@ export const CONFIG_MANIFEST = {
         ],
       },
       {
-        title: 'Comment capture (Meta — Instagram & Facebook auto-DM)',
+        title: 'Comment capture (Meta: Instagram & Facebook auto-DM)',
         fields: [
           { key: 'meta_self_ids', label: 'Our own account IDs (JSON array)', type: 'json', help: 'IG user IDs / Page IDs we post as. Comments FROM these are ignored so we never reply to ourselves. (Meta app ID/secret, verify token and page tokens live under Keys and credit.)' },
           { key: 'capture_abuse_words', label: 'Extra abuse words to block (comma / new line)', type: 'textarea', help: 'Merged with the built-in Hindi + Hinglish + English blocklist. A comment that matches gets logged but no DM is sent.' },
@@ -201,7 +201,7 @@ export const CONFIG_MANIFEST = {
         ],
       },
       {
-        title: 'Email (SMTP — for approval & status notifications)',
+        title: 'Email (SMTP: for approval & status notifications)',
         fields: [
           { key: 'smtp_host', label: 'SMTP host', placeholder: 'smtp.zoho.com / smtp.gmail.com' },
           { key: 'smtp_port', label: 'SMTP port', placeholder: '587' },

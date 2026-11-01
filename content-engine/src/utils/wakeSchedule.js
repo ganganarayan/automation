@@ -112,7 +112,7 @@ export function anyDue(times, nowIst, windowMin = WAKE_WINDOW_MIN) {
 export function variableRequests({ repo, token, value, name = WAKE_VARIABLE }) {
   const r = normalizeRepo(repo);
   if (!r) throw new Error('GitHub repo must look like owner/name (Setup → Keys and credit → Video clean)');
-  if (!token) throw new Error('No GitHub token — set it under Setup → Keys and credit → Video clean');
+  if (!token) throw new Error('No GitHub token: set it under Setup → Keys and credit → Video clean');
   const headers = {
     Accept: 'application/vnd.github+json',
     Authorization: `Bearer ${token}`,

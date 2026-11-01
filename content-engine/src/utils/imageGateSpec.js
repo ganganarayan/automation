@@ -1,9 +1,9 @@
 /**
  * Images-selectable gate: pure helpers.
  *
- * Purpose:      Deterministic pieces of the image gate — image sizing, count
+ * Purpose:      Deterministic pieces of the image gate, image sizing, count
  *               clamping, default scene-prompt building, file naming, and the
- *               keep-selection math — split from the service so they unit-test
+ *               keep-selection math: split from the service so they unit-test
  *               without pulling in settings/logger (like utils/animationSpec).
  * Responsibility: Pure functions only.
  * Dependencies: none.

@@ -57,7 +57,7 @@ export function homePage() {
 
 /** The privacy policy. `email` is the contact address ('' = "the site owner"). */
 export function privacyPage({ email = '' } = {}) {
-  return shell('Privacy policy — Content Engine', `
+  return shell('Privacy policy: Content Engine', `
 <h1>Privacy policy</h1>
 <p class="sub">Last updated ${UPDATED}</p>
 <p>Content Engine is a private, invite-only tool used to create and schedule social media posts for our own brands. This page explains what it stores and why.</p>
@@ -81,7 +81,7 @@ export function privacyPage({ email = '' } = {}) {
 
 /** The terms of service. */
 export function termsPage({ email = '' } = {}) {
-  return shell('Terms of service — Content Engine', `
+  return shell('Terms of service: Content Engine', `
 <h1>Terms of service</h1>
 <p class="sub">Last updated ${UPDATED}</p>
 <p>Content Engine is a private tool, available only to people the owner invites. By signing in you agree to these terms.</p>

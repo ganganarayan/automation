@@ -8,7 +8,7 @@
  *               - Handler registry keyed by job type.
  *               - A loop that claims due jobs and runs them. It only polls
  *                 while there is work: when the queue is empty it sleeps until
- *                 the next job's time, or until enqueueJob wakes it — so an
+ *                 the next job's time, or until enqueueJob wakes it, so an
  *                 idle app sends no traffic and Railway can put it to sleep.
  *               - Retry with backoff up to a per-type max attempts.
  * Dependencies: jobRepository, logger.

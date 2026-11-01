@@ -2,11 +2,11 @@
  * Ready-video direct post service.
  *
  * Purpose:      The "pick already-made videos from the funnel's Drive folder and
- *               post them directly via Post-for-Me" path — bypassing the whole
+ *               post them directly via Post-for-Me" path: bypassing the whole
  *               generation pipeline (research/script/images/animate/voiceover/
  *               transcript/stitch). The operator tick-selects unposted videos,
  *               gives each a caption and a schedule, and they post in selection
- *               order. No review email (the video is finished) — a posted-summary
+ *               order. No review email (the video is finished), a posted-summary
  *               email is sent afterwards. Each post is recorded as a posted
  *               instance so it shows in the same log, with its stages marked
  *               skipped and zero AI cost.
@@ -117,7 +117,7 @@ function driveFor(providers, accessToken) {
 
 /**
  * The videos to show: the files picked with the Google Drive picker (`picked`),
- * else the unposted videos in a Drive folder, newest first — the folder the
+ * else the unposted videos in a Drive folder, newest first, the folder the
  * operator pasted on the page (`folder`), else the funnel's ready-videos folder.
  * Also returns the picker settings, the service-account email a folder must be
  * shared with, and the Drive error (if listing failed) so the page can say
@@ -142,7 +142,7 @@ export async function listReadyVideos({ tenantId = 'default', funnelId, folder: 
     log.warn({ err: err.message, folder }, 'ready folder list failed');
     return { ...base, videos: [], listError: err.message };
   }
-  // Posted files are hidden by the app's own record too — a public folder
+  // Posted files are hidden by the app's own record too, a public folder
   // can't be renamed "POSTED".
   const posted = new Set(await instanceRepo.postedDriveIds(funnel.id, funnel.tenant_id).catch(() => []));
   // A folder that lists is saved as one of the funnel's sources.
@@ -190,7 +190,7 @@ export async function removeSource({ funnelId, sourceId }) {
   return sourcesRepo.remove(Number(funnelId), Number(sourceId));
 }
 
-// Video lengths by Drive id — a file's length never changes, so probe once.
+// Video lengths by Drive id, a file's length never changes, so probe once.
 const durationCache = new Map();
 
 /**
@@ -256,7 +256,7 @@ async function ensureInstance({ funnel, driveId, name = '', title = 'Ready video
 }
 
 /**
- * Stage 2a — transcribe one ready video (Whisper, with the glossary as its
+ * Stage 2a: transcribe one ready video (Whisper, with the glossary as its
  * prompt) and stop: the instance waits in 'transcript_review' until the
  * operator approves the text. Nothing paid runs after this.
  */
@@ -320,10 +320,10 @@ export async function transcribeVideo({ tenantId = 'default', funnelId, driveId,
 }
 
 /**
- * Stage 2b — keep the operator's transcript: edited text, or a pasted SRT
+ * Stage 2b: keep the operator's transcript: edited text, or a pasted SRT
  * (cue numbers + timestamps stripped for the LLM, the raw SRT kept for
  * captions). `approve` passes the gate; a changed text without it needs
- * approving again. One video at a time — there is no bulk approve.
+ * approving again. One video at a time, there is no bulk approve.
  */
 export async function saveTranscript({ funnelId, driveId, name = '', text = '', headline = '', subhead = '', imagePrompt = '', approve = false, source = null }) {
   if (!driveId) throw new Error('driveId required');
@@ -357,9 +357,9 @@ export async function saveTranscript({ funnelId, driveId, name = '', text = '', 
 }
 
 /**
- * Stage 3 — write one video's copy and thumbnails from its APPROVED
+ * Stage 3: write one video's copy and thumbnails from its APPROVED
  * transcript (read from the instance, never from the page). Regenerating
- * never re-runs the transcription. Returns { copy, transcript, costs, ... } —
+ * never re-runs the transcription. Returns { copy, transcript, costs, ... }:
  * costs are the real token / image costs, recorded on the instance.
  */
 export async function generateCopy({ tenantId = 'default', funnelId, driveId, name = '', accessToken = '', accounts: pickedAccounts = null }) {
@@ -367,7 +367,7 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   const { funnel, resolved, cfg } = await loadFunnel(funnelId, pickedAccounts);
   const draft = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [String(driveId)]))[String(driveId)];
   const draftSteps = draft ? instanceService.parseSteps(draft) : [];
-  if (!draft || !canGenerateCopy(draftSteps)) throw new Error('Approve the transcript first — copy and thumbnails are written only from an approved transcript');
+  if (!draft || !canGenerateCopy(draftSteps)) throw new Error('Approve the transcript first, copy and thumbnails are written only from an approved transcript');
   const tArt = ((draftSteps.find((x) => x.key === 'transcript') || {}).artifacts) || {};
   const transcript = String(tArt.text || '');
   const providers = await buildProviders(funnel.tenant_id || tenantId);
@@ -381,10 +381,10 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   });
   costs.push({ step: 'script', ...costText({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, model }) });
   const copy = normalizeCopy(data);
-  if (!copy.title && !copy.description) throw new Error('the model returned empty copy — try again');
+  if (!copy.title && !copy.description) throw new Error('the model returned empty copy, try again');
   log.info({ funnel: funnel.name, driveId, words: transcript.split(/\s+/).filter(Boolean).length }, 'ready video copy generated');
 
-  // A thumbnail failure never loses the copy — the video's first frame is used instead.
+  // A thumbnail failure never loses the copy, the video's first frame is used instead.
   const { thumbs, sizes, thumbError } = await makeThumbs({
     providers, resolved, driveId, ext, accessToken, costs,
     imagePrompt: tArt.imagePrompt || copy.thumbPrompt || copy.title, text: tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '',
@@ -398,7 +398,7 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
 
 /**
  * Thumbnails: one AI artwork (else a frame of the video), rendered in each size
- * the funnel's platforms need with the operator's headline. Never throws — a
+ * the funnel's platforms need with the operator's headline. Never throws: a
  * failure comes back as thumbError. Image costs are pushed onto `costs`.
  */
 async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessToken = '', costs, imagePrompt, text, sub = '' }) {
@@ -435,7 +435,7 @@ async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessTok
 
 /**
  * 🖼 Thumbnail only: render the thumbnails from the operator's headline,
- * sub-head and image prompt WITHOUT writing or touching any copy — for a video
+ * sub-head and image prompt WITHOUT writing or touching any copy, for a video
  * whose copy was written by hand. Needs no approved transcript, only a
  * headline. The headline / sub-head / prompt used are kept on the transcript
  * step (its text and approval untouched); the thumbnails on the images step.
@@ -471,7 +471,7 @@ export async function generateThumbnail({ tenantId = 'default', funnelId, driveI
  */
 async function renderThumbs({ providers, platforms, base, text, sub = '' }) {
   const postformeKey = providers.resolved.postformeKey || '';
-  if (!postformeKey) throw new Error('No Post for Me API key — set it under Setup → Keys and credit');
+  if (!postformeKey) throw new Error('No Post for Me API key, set it under Setup → Keys and credit');
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
   const thumbs = {};
   const sizes = [];
@@ -505,8 +505,8 @@ function videoArt(steps, driveId, durationSec = 0) {
 }
 
 // ✂ Clean jobs by Drive id: { state: running | done | failed, phase, pct, clean?, error? }
-// — phase: starting → encoding (download + encode, with pct) → uploading.
-// In memory only — a restart loses a running job (just press Clean again);
+//, phase: starting → encoding (download + encode, with pct) → uploading.
+// In memory only: a restart loses a running job (just press Clean again);
 // a finished one is saved on the video's draft instance.
 const cleanJobs = new Map();
 // GitHub cleans hold the heartbeat until their done/fail callback (capped, in case it never comes).
@@ -537,12 +537,12 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endTe
   const job = cleanJobs.get(id);
   if (job && job.state === 'running') return job;
   const opts = { ...normalizeCleanOpts({ zoomPct, trimEndSec }), ...normalizeEndCard({ endText, endLink, endSec }) };
-  // Subtitles from the transcript — only when it has timestamps and the video doesn't already show subtitles.
+  // Subtitles from the transcript, only when it has timestamps and the video doesn't already show subtitles.
   if (subs) Object.assign(opts, await subtitlePlan({ funnel, providers, driveId: id, trimEndSec: opts.trimEndSec, name, source }));
   // GitHub Actions runs ffmpeg and keeps the file in your Drive; Railway is the original path.
   const where = normalizeRunner(runner || (providers.resolved.clean || {}).runner);
   if (where === 'github') return startCleanGithub({ funnel, providers, id, opts, name, source, baseUrl });
-  if (!providers.resolved.postformeKey) throw new Error('No Post for Me API key — set it under Setup → Keys and credit');
+  if (!providers.resolved.postformeKey) throw new Error('No Post for Me API key, set it under Setup → Keys and credit');
   const running = { state: 'running', startedAt: Date.now(), phase: 'starting', pct: 0, ...opts };
   cleanJobs.set(id, running);
   const onPhase = (patch) => { const j = cleanJobs.get(id); if (j && j.state === 'running') Object.assign(j, patch); };
@@ -555,25 +555,25 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endTe
   return running;
 }
 
-const NO_TIMED_SRT = "This video's transcript has no timestamps, so there are no subtitles to burn — 🎙 Transcribe it (Whisper keeps the timings) or paste an SRT in step 2, then clean again. Editing the transcribed text drops Whisper's timings.";
+const NO_TIMED_SRT = "This video's transcript has no timestamps, so there are no subtitles to burn. 🎙 Transcribe it (Whisper keeps the timings) or paste an SRT in step 2, then clean again. Editing the transcribed text drops Whisper's timings.";
 
 const CAPTION_CHECK_SYSTEM = 'You check frames of a short video for subtitles: lines of text at the bottom or middle of the picture that show the words being spoken (burned-in captions). '
   + 'A title, a slide or chart, a logo, a watermark or a name tag is NOT subtitles. '
-  + 'Return JSON: {"frames":[{"captions":true|false}, ...]} — one entry per image, in order.';
+  + 'Return JSON: {"frames":[{"captions":true|false}, ...]}, one entry per image, in order.';
 
 /**
  * Whether Clean adds subtitles: { subs: true } when the transcript is timed and
  * the video shows none yet; else { subsNote } saying why not (shown with the
- * cleaned video). An AI looks at 3 frames — a check that fails adds none, so
+ * cleaned video). An AI looks at 3 frames, a check that fails adds none, so
  * subtitles are never doubled. Its small cost is kept on the instance.
  */
 async function subtitlePlan({ funnel, providers, driveId, trimEndSec, name, source }) {
   const srt = await videoSrt(funnel, driveId);
-  if (!srt) return { subsNote: 'no subtitles added — the transcript has no timestamps (🎙 Transcribe, or paste an SRT)' };
+  if (!srt) return { subsNote: 'no subtitles added: the transcript has no timestamps (🎙 Transcribe, or paste an SRT)' };
   const url = publicDlUrl(driveId);
   const ffmpeg = createFfmpegProvider({}, log);
   try {
-    if ((await ffmpeg.probeVideo({ url })).hasSubtitles) return { subsNote: 'no subtitles added — the video already has a subtitle track' };
+    if ((await ffmpeg.probeVideo({ url })).hasSubtitles) return { subsNote: 'no subtitles added: the video already has a subtitle track' };
     const total = (await videoDurations([driveId]))[driveId] || 0;
     const frames = [];
     // Frames taken mid-speech, where any existing subtitles would be on screen.
@@ -586,10 +586,10 @@ async function subtitlePlan({ funnel, providers, driveId, trimEndSec, name, sour
     await recordCost(funnel, driveId, 'stitch', cost, { name, source }).catch((err) => log.warn({ err: err.message, driveId }, 'subtitle check cost not saved'));
     const has = captionsVerdict((r.data || {}).frames);
     log.info({ driveId, has, frames: (r.data || {}).frames }, 'on-screen subtitle check');
-    return has ? { subsNote: 'no subtitles added — the video already shows subtitles' } : { subs: true };
+    return has ? { subsNote: 'no subtitles added: the video already shows subtitles' } : { subs: true };
   } catch (err) {
     log.warn({ err: err.message, driveId }, 'on-screen subtitle check failed (none added)');
-    return { subsNote: `no subtitles added — could not check whether the video already has them (${String(err.message).slice(0, 120)})` };
+    return { subsNote: `no subtitles added: could not check whether the video already has them (${String(err.message).slice(0, 120)})` };
   }
 }
 
@@ -662,7 +662,7 @@ async function startCleanGithub({ funnel, providers, id, opts, name, source, bas
   const tenantId = funnel.tenant_id;
   const c = providers.resolved.clean || {};
   if (!(await driveConnect.status(tenantId)).connected) {
-    throw new Error('Google Drive is not connected — Setup → Settings → Google → Connect Google Drive');
+    throw new Error('Google Drive is not connected. Setup → Settings → Google → Connect Google Drive');
   }
   if (!/^https:\/\//.test(baseUrl || '')) throw new Error("couldn't tell this app's https address for GitHub to call back");
   const ticket = signTicket({ t: tenantId, f: funnel.id, d: id, o: opts, n: String(name || '').slice(0, 200), s: sourceOf(source) }, await driveConnect.hookSecret(tenantId));
@@ -708,7 +708,7 @@ export async function cleanHookJob({ ticket }) {
   const { token, folderId } = await driveConnect.drive(p.t);
   hookPhase(p.d, { phase: 'downloading', pct: 0 });
   const o = p.o || {};
-  // The full timed SRT — the runner cuts it to the kept part once it knows the video's length.
+  // The full timed SRT, the runner cuts it to the kept part once it knows the video's length.
   let srt = '';
   if (o.subs) {
     const { funnel } = await loadFunnel(p.f);
@@ -808,7 +808,7 @@ export async function cleanStatus({ funnelId, driveId }) {
   const job = cleanJobs.get(String(driveId));
   // A GitHub run that has gone quiet for 40 min isn't coming back.
   if (job && job.state === 'running' && job.runner === 'github' && Date.now() - (job.lastAt || job.startedAt) > 40 * 60 * 1000) {
-    const failed = { state: 'failed', error: 'GitHub went quiet for 40 min — check the Actions tab, then press ✂ Clean again' };
+    const failed = { state: 'failed', error: 'GitHub went quiet for 40 min, check the Actions tab, then press ✂ Clean again' };
     cleanJobs.set(String(driveId), failed);
     return failed;
   }
@@ -831,7 +831,7 @@ async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, cos
   // A manual save (edits) updates the current copy; only a real generation is
   // added to the history.
   const generations = edit ? prev : [...prev, { at, copy, thumbs, sizes, thumbError }].slice(-20);
-  // The transcript belongs to its own stage (transcribe / approve) — never touched here.
+  // The transcript belongs to its own stage (transcribe / approve): never touched here.
   steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, generations, ...(ctaLink !== undefined ? { ctaLink } : {}) } });
   if (sizes.length || !edit) steps = patchStep(steps, 'images', { status: sizes.length ? 'done' : 'skipped', artifacts: { thumbs, sizes } });
   const durationSec = durationCache.get(driveId) || 0;
@@ -855,7 +855,7 @@ export async function saveDraftEdit({ funnelId, driveId, copy, thumbs = {}, size
   if (!driveId) throw new Error('driveId required');
   const { funnel } = await loadFunnel(funnelId);
   const clean = normalizeCopy(copy);
-  if (!clean.title && !clean.description) throw new Error('nothing to save — generate or write the copy first');
+  if (!clean.title && !clean.description) throw new Error('nothing to save: generate or write the copy first');
   const urls = Object.fromEntries(Object.entries(thumbs && typeof thumbs === 'object' ? thumbs : {})
     .filter(([k, v]) => PLATFORM_SIZE[k] && /^https:\/\/\S+$/.test(String(v))));
   let grouped = (Array.isArray(sizes) ? sizes : []).filter((z) => z && THUMB_SIZES[z.size] && /^https:\/\/\S+$/.test(String(z.url)));
@@ -906,7 +906,7 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
   const sched = { postRefs: ref ? [ref] : [], scheduledFor: scheduledIso ? new Date(scheduledIso) : null, postNow: !scheduledIso };
   const draft = copy ? (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [driveId]).catch(() => ({})))[driveId] : null;
   if (draft) {
-    // The generation (and its cost) is already on the draft — finish it.
+    // The generation (and its cost) is already on the draft, finish it.
     let steps = instanceService.parseSteps(draft);
     steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, ctaLink } });
     steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
@@ -917,7 +917,7 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
       durationSeconds: durationSec || undefined,
       scheduledFor: scheduledIso ? new Date(scheduledIso) : undefined,
     });
-    // Scheduled (still editable) until Post for Me reports it published — see refreshScheduled.
+    // Scheduled (still editable) until Post for Me reports it published, see refreshScheduled.
     await instanceRepo.markScheduled(draft.id, sched);
     return draft.id;
   }
@@ -962,9 +962,9 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
 
   // The Post for Me key is central (API Keys page); the funnel picks the accounts.
   const postformeKey = providers.resolved.postformeKey || '';
-  if (!postformeKey) throw new Error('No Post for Me API key — set it once under Setup → Keys and credit');
+  if (!postformeKey) throw new Error('No Post for Me API key, set it once under Setup → Keys and credit');
   const accounts = Array.isArray(resolved.accounts) ? resolved.accounts : [];
-  if (!accounts.length) throw new Error('No accounts ticked — tick the accounts to post to (top of this page)');
+  if (!accounts.length) throw new Error('No accounts ticked: tick the accounts to post to (top of this page)');
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
 
   // YouTube needs a title. When any selected account is a YouTube one and the
@@ -1036,7 +1036,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
  * Scheduled → posted only when Post for Me says so. For each scheduled
  * instance whose time has come: read every post it made, mark each channel
  * ✅ / ❌ from Post for Me's per-account results, then posted (locked, all ✅),
- * partly posted (some ✅ — open for a retry of the rest) or failed (none ✅),
+ * partly posted (some ✅: open for a retry of the rest) or failed (none ✅),
  * and email the outcome. Runs on a 5-minute timer, on /jobs/run-due, and when
  * the instances list or an instance opens. Returns how many changed.
  */
@@ -1154,7 +1154,7 @@ async function refreshAllTenantsOnce() {
 
 /**
  * ↻ Post to the failed channels only: the same post (caption, video,
- * per-platform copy and thumbnails), sent again to just the ❌ accounts —
+ * per-platform copy and thumbnails), sent again to just the ❌ accounts:
  * after you reconnect them in Post for Me. The ✅ ones are not posted twice.
  */
 export async function retryFailed({ instanceId, auto = false }) {
@@ -1171,7 +1171,7 @@ export async function retryFailed({ instanceId, auto = false }) {
   // Posts made before requests were saved: read the original back from Post for Me.
   let req = pub.request && pub.request.mediaUrl ? pub.request : null;
   if (!req && oldRefs[0]) req = requestFromPost(await publish.getPost(oldRefs[0]).catch(() => null));
-  if (!req) throw new Error('could not read the original post from Post for Me — use ✏ Edit and post it again');
+  if (!req) throw new Error('could not read the original post from Post for Me, use ✏ Edit and post it again');
   const platforms = new Set(failed.map((c) => platformKey(c.platform)).filter(Boolean));
   const configs = req.platformConfigurations
     ? Object.fromEntries(Object.entries(req.platformConfigurations).filter(([k]) => !platforms.size || platforms.has(k)))
@@ -1233,7 +1233,7 @@ async function sendOutcomeEmail({ providers, row, steps, channels, outcome, post
   const kind = row.source_type === 'sheet' ? 'image' : 'video';
   const html = `<p><b>${head}</b> · ${esc(row.funnel_name || '')} · ${kind}</p>
     <p><b>${esc(copy.title || row.title || '')}</b></p>
-    <p>Scheduled: ${esc(row.scheduled_for ? formatIst(row.scheduled_for) : '— (posted now)')}<br>Posted: ${esc(formatIst(postedAt))}</p>
+    <p>Scheduled: ${esc(row.scheduled_for ? formatIst(row.scheduled_for) : '(posted now)')}<br>Posted: ${esc(formatIst(postedAt))}</p>
     <table border="1" cellpadding="6" style="border-collapse:collapse"><thead><tr><th></th><th>Platform</th><th>Account</th><th>Post / error</th></tr></thead><tbody>${rows}</tbody></table>
     ${outcome === 'posted' ? '' : nextAt
     ? `<p><b>Reconnect the ❌ accounts in Post for Me. That is all.</b> The app re-posts to just those channels by itself (next try ${esc(formatIst(nextAt))} IST, up to ${AUTO_RETRY_MINUTES.length} tries over about 2 days). The ✅ ones are not posted again.</p>`
@@ -1251,7 +1251,7 @@ async function sendOutcomeEmail({ providers, row, steps, channels, outcome, post
 export async function unscheduleInstance({ instanceId }) {
   const row = await instanceRepo.get(instanceId);
   if (!row) throw new Error('instance not found');
-  if (row.locked) throw new Error('already posted — it can no longer be edited');
+  if (row.locked) throw new Error('already posted: it can no longer be edited');
   if (!['scheduled', 'failed'].includes(row.status)) throw new Error('this instance is not scheduled');
   const refs = (Array.isArray(row.post_refs) ? row.post_refs : JSON.parse(row.post_refs || '[]')).filter(Boolean);
   if (row.status === 'scheduled' && refs.length) {
@@ -1259,7 +1259,7 @@ export async function unscheduleInstance({ instanceId }) {
     const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
     for (const ref of refs) {
       const post = await publish.getPost(ref).catch(() => null);
-      if (post && ['processing', 'processed'].includes(post.status)) throw new Error('Post for Me is already publishing this post — it can no longer be edited');
+      if (post && ['processing', 'processed'].includes(post.status)) throw new Error('Post for Me is already publishing this post, it can no longer be edited');
       await publish.deletePost(ref);
     }
   }

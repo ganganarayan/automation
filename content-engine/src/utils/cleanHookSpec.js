@@ -1,5 +1,5 @@
 /**
- * ✂ Clean on GitHub Actions + one-time Google Drive connect (pure — no I/O).
+ * ✂ Clean on GitHub Actions + one-time Google Drive connect (pure: no I/O).
  *
  * Purpose:      Everything the GitHub clean runner and the Drive connect need
  *               that can be tested without a network: the signed job ticket the
@@ -8,7 +8,7 @@
  * Responsibility:
  *               - signTicket / readTicket: an HMAC-signed, expiring job ticket
  *                 (base64url JSON + "." + sha256 HMAC). The workflow holds only
- *                 this — no app key, no Post for Me key.
+ *                 this: no app key, no Post for Me key.
  *               - driveAuthUrl / DRIVE_SCOPE: the consent-screen link
  *               - dispatchRequest: the GitHub API call that starts the workflow
  *               - keepSecFor: seconds to keep after cutting the outro
@@ -33,7 +33,7 @@ export function signTicket(payload, secret, now = Date.now(), ttlMs = TICKET_TTL
   return `${body}.${mac(secret, body)}`;
 }
 
-/** The ticket's payload without checking it — only to find which tenant's secret to check it with. */
+/** The ticket's payload without checking it, only to find which tenant's secret to check it with. */
 export function peekTicket(ticket) {
   const [body] = String(ticket || '').split('.');
   try { return JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) || null; } catch { return null; }
@@ -78,7 +78,7 @@ export function normalizeRepo(repo) {
 export function dispatchRequest({ repo, token, ref, hook, ticket }) {
   const r = normalizeRepo(repo);
   if (!r) throw new Error('GitHub repo must look like owner/name');
-  if (!token) throw new Error('No GitHub token — set it under Setup → Keys and credit → Video clean');
+  if (!token) throw new Error('No GitHub token: set it under Setup → Keys and credit → Video clean');
   return {
     url: `https://api.github.com/repos/${r}/actions/workflows/${CLEAN_WORKFLOW}/dispatches`,
     init: {

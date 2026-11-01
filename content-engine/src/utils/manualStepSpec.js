@@ -1,7 +1,7 @@
 /**
  * Manual stepper: pure helpers.
  *
- * Purpose:      The settings-free rules for the in-app stage-by-stage runner —
+ * Purpose:      The settings-free rules for the in-app stage-by-stage runner:
  *               stage order, which stages take an editable input, and whether a
  *               stage can be executed yet (its predecessor is done). Kept apart
  *               so it unit-tests without a database.

@@ -1,9 +1,9 @@
 /**
  * Stage runner (the pipeline's engine).
  *
- * Purpose:      Drive one instance through its artifact-producing stages — script,
+ * Purpose:      Drive one instance through its artifact-producing stages, script,
  *               images, image->video, voiceover, transcript, FFmpeg stitch,
- *               publish — calling the right provider at each step, uploading the
+ *               publish: calling the right provider at each step, uploading the
  *               artifact to the funnel's Drive folder, and recording the REAL
  *               per-step AI cost (measured usage × the price table). Connects the
  *               slice 3/4 seams: scheduler -> script -> script review; approve ->
@@ -406,7 +406,7 @@ async function manualAnimate(ctx, promptOverride) {
   const { instance, cfg, resolved, providers } = ctx;
   const folder = cfg.drive_folder_id || resolved.driveFolder || '';
   const images = stepArtifacts(instance, 'images').images || [];
-  if (!images.length) throw new Error('no images to animate — run Images first');
+  if (!images.length) throw new Error('no images to animate, run Images first');
   const anim = createAnimationProvider(resolveAnimationConfig(withAnimationKeys(cfg, providers.resolved)), log);
   const stamp = Date.now().toString(36);
   const override = String(promptOverride || '').trim();
@@ -426,7 +426,7 @@ async function manualAnimate(ctx, promptOverride) {
 async function manualTranscript(ctx) {
   const { instance, providers } = ctx;
   const audioDriveId = stepArtifacts(instance, 'voiceover').audio?.driveId;
-  if (!audioDriveId) throw new Error('no voiceover to transcribe — run Voiceover first');
+  if (!audioDriveId) throw new Error('no voiceover to transcribe, run Voiceover first');
   const audioBuffer = await providers.storage.download(audioDriveId);
   return runTranscript(ctx, audioBuffer, audioDriveId);
 }
@@ -434,7 +434,7 @@ async function manualTranscript(ctx) {
 async function manualStitch(ctx) {
   const { instance, providers } = ctx;
   const clips = stepArtifacts(instance, 'animate').clips || [];
-  if (!clips.length) throw new Error('no clips to stitch — run Image → video first');
+  if (!clips.length) throw new Error('no clips to stitch, run Image → video first');
   const audioDriveId = stepArtifacts(instance, 'voiceover').audio?.driveId;
   const audioBuffer = audioDriveId ? await providers.storage.download(audioDriveId) : null;
   const cues = stepArtifacts(instance, 'transcript').cues || [];
@@ -442,7 +442,7 @@ async function manualStitch(ctx) {
 }
 
 /**
- * Execute ONE stage for a manual run and persist its artifact — no auto-advance.
+ * Execute ONE stage for a manual run and persist its artifact, no auto-advance.
  * Editable inputs: script.text (save edited script) or script.correction (regen);
  * images.prompts[]; animate.prompt; publish.caption. On error the step is marked
  * failed but the instance stays 'manual', so the operator can edit and retry.

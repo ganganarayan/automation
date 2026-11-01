@@ -5,7 +5,7 @@
  *               link. Post for Me has no first-comment option, so the moment it
  *               reports a channel live (its social.post.result.created webhook)
  *               that channel gets the link as its first comment, posted with the
- *               account's own token — before anyone else can comment. The
+ *               account's own token: before anyone else can comment. The
  *               5-minute timer is the backstop (a missed webhook, a retryable
  *               failure) and closes each job once the post is processed.
  * Responsibility: Queue + orchestration; platform calls in firstCommentSenders.

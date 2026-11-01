@@ -10,7 +10,7 @@
  * Dependencies: configManifest (itself pure) for the settings panel labels.
  *
  * The menu has two groups: WORK items are real pages, SETUP items are panels on
- * the settings page — rendered as tab buttons there (where show() owns them) and
+ * the settings page: rendered as tab buttons there (where show() owns them) and
  * as links to the right hash from anywhere else. The footer shows who is signed
  * in and the one Sign out button.
  */
@@ -39,7 +39,7 @@ export function workItemFor(current = '') {
 
 /**
  * The settings panels shown in the menu. tracking-bridge is still a panel on
- * the settings page, reached from inside Settings — not a menu entry.
+ * the settings page, reached from inside Settings, not a menu entry.
  */
 export function setupItems({ superAdmin = false } = {}) {
   return [
@@ -122,7 +122,7 @@ export const NAV_CSS = `
  .nvwho{color:#8a8aa2;font-size:.76rem;padding:0 .7rem .4rem;word-break:break-all}
  .nvwho span{display:block;color:#6f6f88;font-size:.7rem;margin-top:.1rem}`;
 
-/** The page frame the menu sits in — for pages that have no layout of their own. */
+/** The page frame the menu sits in, for pages that have no layout of their own. */
 export const NAV_SHELL_CSS = `
  .layout{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
  aside{background:#0f0f17;border-right:1px solid #1e1e2c;padding:1rem .7rem;position:sticky;top:0;height:100vh;overflow:auto}

@@ -1,12 +1,12 @@
 /**
  * AI cost engine (real spend from measured usage).
  *
- * Purpose:      Turn the ACTUAL quantities an API call reports — tokens, image
- *               count, clip seconds, characters, audio minutes — into a dollar
+ * Purpose:      Turn the ACTUAL quantities an API call reports, tokens, image
+ *               count, clip seconds, characters, audio minutes, into a dollar
  *               cost, using a unit-price table the operator controls. Every
  *               figure is auditable: each entry carries provider, model, unit,
  *               quantity, unit price, and the computed cost. Not an estimate of
- *               usage — the usage is real; only the per-unit price is a setting.
+ *               usage: the usage is real; only the per-unit price is a setting.
  * Responsibility: Pure functions + the default price table. No I/O.
  * Dependencies: none.
  *

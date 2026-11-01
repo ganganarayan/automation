@@ -128,7 +128,7 @@ export async function createSample({ tenantId = 'default' } = {}) {
 
   const id = randomUUID();
   const total = sumInstanceCost(steps);
-  await repo.create({ id, tenantId, funnelName: 'Sample', title: 'SAMPLE — delete me', status: 'final_review', steps });
+  await repo.create({ id, tenantId, funnelName: 'Sample', title: 'SAMPLE: delete me', status: 'final_review', steps });
   await repo.saveSteps(id, steps, total);
   await repo.setMeta(id, { durationSeconds: 47 });
   return id;

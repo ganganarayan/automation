@@ -3,7 +3,7 @@
  *
  * Purpose:      On boot, ensure the operator's existing brands ("Gita",
  *               "VidaPulse") exist as funnels for the default tenant, seeded
- *               from the current environment values — so the migration from the
+ *               from the current environment values, so the migration from the
  *               two hardcoded brands to the funnel model is transparent.
  * Responsibility: Idempotent seed; only fills a funnel's config when empty.
  * Dependencies: funnelsRepository, settings.

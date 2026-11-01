@@ -48,7 +48,7 @@ async function makeImage(providers, folderId, size, prompt, name) {
 export async function precheck({ tenantId = 'default', funnelId }) {
   const providers = await buildProviders(tenantId);
   const { cfg } = await loadFunnel(funnelId);
-  if (!providers.resolved.openai.apiKey) throw new ExternalAPIError('OpenAI key not set — add it in content-engine settings');
+  if (!providers.resolved.openai.apiKey) throw new ExternalAPIError('OpenAI key not set, add it in content-engine settings');
   if (!cfg.drive_folder_id) throw new ExternalAPIError('This funnel has no Drive folder (set it in step 1)');
   return true;
 }
@@ -62,7 +62,7 @@ export async function generateForFunnel({ tenantId = 'default', funnelId, prompt
   const providers = await buildProviders(tenantId);
   const { funnel, cfg } = await loadFunnel(funnelId);
 
-  if (!providers.resolved.openai.apiKey) throw new ExternalAPIError('OpenAI key not set — add it in content-engine settings');
+  if (!providers.resolved.openai.apiKey) throw new ExternalAPIError('OpenAI key not set, add it in content-engine settings');
   if (!cfg.drive_folder_id) throw new ExternalAPIError('This funnel has no Drive folder (set it in step 1)');
 
   const size = mapImageSize(cfg.image_size);
@@ -82,7 +82,7 @@ export async function generateForFunnel({ tenantId = 'default', funnelId, prompt
   const { id, reviewUrl } = await approvalService.createRequest({ tenantId, kind: KIND, payload });
   await providers.mail.send({
     to: approvalEmail,
-    subject: `Review images — ${funnel.name} (${images.length})`,
+    subject: `Review images: ${funnel.name} (${images.length})`,
     html: reviewEmailHtml(funnel.name, images, reviewUrl),
   });
   log.info({ funnel: funnel.name, count: images.length }, 'image gate sent');
@@ -120,7 +120,7 @@ export async function regenerate(approval, body) {
   const { reviewUrl } = await approvalService.createRequest({ tenantId, kind: KIND, payload });
   await providers.mail.send({
     to: approvalEmail,
-    subject: `Images reworked — ${p.funnelName || 'funnel'} (round ${payload.round})`,
+    subject: `Images reworked: ${p.funnelName || 'funnel'} (round ${payload.round})`,
     html: reviewEmailHtml(p.funnelName || 'funnel', next, reviewUrl),
   });
   log.info({ regen: regenIds.length, round: payload.round }, 'image gate regenerated');
@@ -143,7 +143,7 @@ export async function finalizeSelection(approval, body) {
       const providers = await buildProviders(tenantId);
       await providers.mail.send({
         to,
-        subject: `Images locked — ${p.funnelName || 'funnel'} (${kept.length})`,
+        subject: `Images locked: ${p.funnelName || 'funnel'} (${kept.length})`,
         text: `${kept.length} image(s) kept. They become animated clips when the animation stage runs.`,
       });
     } catch (err) {
@@ -171,7 +171,7 @@ function reviewEmailHtml(funnelName, images, reviewUrl) {
     .join('');
   return `<p>${esc(String(images.length))} images are ready for <b>${esc(funnelName)}</b>.</p>
     <p>${thumbs}</p>
-    <p><a href="${esc(reviewUrl)}">Review — keep or regenerate</a></p>`;
+    <p><a href="${esc(reviewUrl)}">Review: keep or regenerate</a></p>`;
 }
 
 /** The keep / regenerate grid shown at /review/:token. */
@@ -190,7 +190,7 @@ export function renderReview(approval, token) {
     .join('');
 
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Review images — ${esc(p.funnelName || 'funnel')}</title>
+<title>Review images: ${esc(p.funnelName || 'funnel')}</title>
 <style>
  body{font-family:system-ui;max-width:900px;margin:1.5rem auto;padding:0 1rem;color:#111}
  h1{font-size:1.3rem}.sub{color:#555;font-size:.9rem;margin:.2rem 0 1rem}
@@ -205,7 +205,7 @@ export function renderReview(approval, token) {
  .approve{background:#0a7d32;color:#fff}.rework{background:#b45309;color:#fff}
  #msg{font-size:.9rem;margin-left:.5rem;align-self:center}
 </style>
-<h1>Review images — ${esc(p.funnelName || 'funnel')}</h1>
+<h1>Review images: ${esc(p.funnelName || 'funnel')}</h1>
 <p class="sub">Round ${esc(String(p.round || 1))} · ${esc(String(images.length))} images. Untick <b>Keep</b> to drop one; tick <b>Regenerate</b> (optionally edit its prompt) to re-roll it.</p>
 <div class="grid">${cards || '<p>No images.</p>'}</div>
 <div class="bar">

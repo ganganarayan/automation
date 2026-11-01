@@ -70,7 +70,7 @@ export async function finishConnect({ tenantId = 'default', baseUrl, code }) {
   const c = await client(tenantId);
   const tok = await exchangeCode({ ...c, code, redirectUri: redirectUri(baseUrl) });
   const refresh = tok.refresh_token || (await tenantConfig.get(tenantId, K.refresh));
-  if (!refresh) throw new Error('Google sent no refresh token — remove the app at myaccount.google.com/permissions and connect again');
+  if (!refresh) throw new Error('Google sent no refresh token, remove the app at myaccount.google.com/permissions and connect again');
   const drive = createDriveOAuthClient(tok.access_token);
   const email = await drive.userEmail().catch(() => '');
   const folderId = await drive.ensureFolder(FOLDER_NAME, await tenantConfig.get(tenantId, K.folder));
@@ -88,7 +88,7 @@ export async function disconnect(tenantId = 'default') {
   tenantSettings.invalidate(tenantId);
 }
 
-/** { connected, email, folderId } — for the settings page and the clean runner. */
+/** { connected, email, folderId }, for the settings page and the clean runner. */
 export async function status(tenantId = 'default') {
   const [refresh, email, folderId] = await Promise.all([K.refresh, K.email, K.folder].map((k) => tenantConfig.get(tenantId, k)));
   return { connected: !!refresh, email: email || '', folderId: folderId || '' };
@@ -99,7 +99,7 @@ export async function accessToken(tenantId = 'default') {
   const hit = tokens.get(tenantId);
   if (hit && hit.until > Date.now()) return hit.token;
   const refresh = await tenantConfig.get(tenantId, K.refresh);
-  if (!refresh) throw new Error('Google Drive is not connected — Setup → Settings → Google → Connect Google Drive');
+  if (!refresh) throw new Error('Google Drive is not connected. Setup → Settings → Google → Connect Google Drive');
   const tok = await refreshAccess({ ...(await client(tenantId)), refreshToken: refresh });
   tokens.set(tenantId, { token: tok.access_token, until: Date.now() + (Number(tok.expires_in) || 3600) * 1000 - 5 * 60 * 1000 });
   return tok.access_token;

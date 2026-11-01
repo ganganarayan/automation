@@ -1,9 +1,9 @@
 /**
  * Instance: pure helpers.
  *
- * Purpose:      The settings-free pieces of the instance model — the canonical
+ * Purpose:      The settings-free pieces of the instance model, the canonical
  *               pipeline steps, initial-steps builder, per-step cost roll-up, and
- *               display formatting — kept apart from the repository/service so
+ *               display formatting: kept apart from the repository/service so
  *               they unit-test without a database (like utils/animationSpec).
  * Responsibility: Pure functions only.
  * Dependencies: utils/pricing (pure).

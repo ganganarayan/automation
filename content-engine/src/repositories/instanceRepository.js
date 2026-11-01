@@ -5,7 +5,7 @@
  *               per-step artifacts and real per-step AI costs, so a run survives
  *               restarts and feeds the review + posted-log views.
  * Responsibility: The only place instances SQL runs. A locked instance (posted)
- *               rejects every mutation — enforced in the UPDATE WHERE clause.
+ *               rejects every mutation: enforced in the UPDATE WHERE clause.
  * Dependencies: core/db.
  */
 import { query } from '../core/db.js';
@@ -85,7 +85,7 @@ export async function setStatus(id, status, note) {
 
 /**
  * Move from one status to another only if the instance is still in `from`
- * (and unlocked) — so a double-clicked approval acts once. True if we won.
+ * (and unlocked): so a double-clicked approval acts once. True if we won.
  */
 export async function transition(id, from, to, note) {
   const { rowCount } = await query(
@@ -229,7 +229,7 @@ export async function remove(id) {
 /**
  * Idempotency guard for scheduled runs: is there already a LIVE instance for this
  * funnel whose scheduled_for falls on the given IST date (yyyy-MM-dd)? "Live"
- * excludes only the dead-ends (failed / superseded) — a posted instance counts,
+ * excludes only the dead-ends (failed / superseded): a posted instance counts,
  * since a post already exists for that date and must not be created twice.
  * scheduled_for is a timestamptz; AT TIME ZONE converts it to the IST wall-clock
  * date before comparison.
@@ -266,7 +266,7 @@ export async function videoOnDate(funnelId, dateKey, tenantId = 'default') {
 }
 
 /**
- * Drive file ids this funnel has already posted or scheduled (the stitch step's video) — how
+ * Drive file ids this funnel has already posted or scheduled (the stitch step's video): how
  * the ready-video lanes hide posted files when they can't rename them in Drive.
  */
 export async function postedDriveIds(funnelId, tenantId = 'default') {
@@ -300,7 +300,7 @@ export async function draftsByDriveIds(funnelId, tenantId = 'default', driveIds 
 
 /**
  * The LIVE instance (not failed / superseded) delivering this funnel's post on
- * this IST date (yyyy-MM-dd), or null — the router's "already lined up" check.
+ * this IST date (yyyy-MM-dd), or null: the router's "already lined up" check.
  * Same date rule as existsForFunnelOnDate; a posted one counts.
  */
 export async function liveOnDate(funnelId, dateKey, tenantId = 'default') {

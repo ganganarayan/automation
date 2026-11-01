@@ -2,7 +2,7 @@
  * Ready video + AI copy: pure helpers.
  *
  * Purpose:      The settings-free pieces of the "upload a finished video, let the
- *               app transcribe it and write per-video, per-platform copy" lane —
+ *               app transcribe it and write per-video, per-platform copy" lane:
  *               the audio-extract ffmpeg args, the copy prompts, normalising the
  *               model's JSON into the four copy fields, and mapping those fields
  *               onto Post for Me per-platform configurations.
@@ -45,7 +45,7 @@ export const DEFAULT_COPY_PROMPT = [
   '  "description": a 3-6 short-paragraph post that works as the YouTube description and as a LinkedIn and Facebook post. Hook first line, value in the middle, a clear call to action at the end. Up to 5 relevant hashtags on the last line. No links (the app appends the link).',
   '  "igCaption": an Instagram caption: hook line, 2-4 short lines of value, a call to action (when a comment keyword is given below, tell people to comment that keyword to get the link in their DMs; otherwise "link in bio"), then 8-15 relevant hashtags. No links.',
   '  "short": one punchy post for X and Threads, max 220 characters, at most 2 hashtags. No links.',
-  '  "thumbText": the thumbnail hook — 2 to 6 bold, curiosity-driven words drawn from the video. No hashtags, no emojis, no quotes.',
+  '  "thumbText": the thumbnail hook: 2 to 6 bold, curiosity-driven words drawn from the video. No hashtags, no emojis, no quotes.',
   '  "thumbPrompt": an English prompt for an image model to create the thumbnail artwork: describe one vivid, emotionally striking scene that captures the core idea of the video (subject, setting, mood, lighting, colours, camera angle). No text, letters or logos in the image.',
   'Stay faithful to what is actually said in the video; never invent claims, numbers or names.',
   'Write in the same language as the transcript.',
@@ -84,7 +84,7 @@ export function clip(text, max) {
 
 /** Em / en dashes → a comma (the copy must never carry them, whatever the model wrote). */
 export function noDashes(text) {
-  return String(text ?? '').replace(/\s*[—–]\s*/g, ', ').replace(/^, |, $/g, '').replace(/,\s*([,.:;!?])/g, '$1');
+  return String(text ?? '').replace(/\s*[\u2014\u2013]\s*/g, ', ').replace(/^, |, $/g, '').replace(/,\s*([,.:;!?])/g, '$1');
 }
 
 /** Normalise the model's JSON (or an edited copy from the UI) into the four fields. */

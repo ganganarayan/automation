@@ -2,7 +2,7 @@
  * Ready-video direct post: pure helpers.
  *
  * Purpose:      The settings-free pieces of the "pick a ready video from Drive and
- *               post it directly via Post-for-Me" path — selecting which Drive
+ *               post it directly via Post-for-Me" path: selecting which Drive
  *               files are postable, the default sequential publish slots, IST
  *               datetime parsing, the default caption, and normalising the
  *               operator's tick-order selection. Kept apart from the service so
@@ -98,7 +98,7 @@ export function filterReadyVideos(files) {
 /**
  * Default sequential schedule slots (ISO, IST) for `count` uploads: the funnel's
  * publish_time on consecutive days, starting from the next slot strictly ahead of
- * "now" — one per day, in selection order. The operator can override each.
+ * "now", one per day, in selection order. The operator can override each.
  */
 export function defaultSlotsIso(publishTime, count, now = DateTime.now().setZone(ZONE)) {
   const [h, m] = String(publishTime || '08:02').split(':').map((x) => parseInt(x, 10) || 0);

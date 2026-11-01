@@ -2,7 +2,7 @@
  * Comment-capture config resolver.
  *
  * Purpose:      Read the Meta / capture settings a tenant saved in the app
- *               (tenant_config) — app secret, verify token, page tokens, our own
+ *               (tenant_config): app secret, verify token, page tokens, our own
  *               account IDs, extra abuse words. Nothing here is an env secret.
  * Responsibility: Read + shape config; no network, no business logic.
  * Dependencies: tenantConfigRepository, captureSpec (word-list parsing).

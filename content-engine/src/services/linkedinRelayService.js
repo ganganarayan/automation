@@ -3,8 +3,8 @@
  *
  * Purpose:      LinkedIn has no DM automation API, so we don't reply there.
  *               Instead we watch a Gmail mailbox for LinkedIn comment/message
- *               notification emails and relay each — commenter name, first line,
- *               direct post link — to the operator on WhatsApp (via Evolution),
+ *               notification emails and relay each, commenter name, first line,
+ *               direct post link: to the operator on WhatsApp (via Evolution),
  *               then mark the email read so it is never relayed twice.
  * Responsibility: Orchestration + side effects; parsing lives in
  *               utils/linkedinRelaySpec, mailbox I/O in providers/imapClient,
@@ -12,7 +12,7 @@
  * Dependencies: tenantConfigRepository, providerFactory (wa), imapClient,
  *               linkedinRelaySpec, logger.
  *
- * We never reply to anyone on LinkedIn — the user replies themselves.
+ * We never reply to anyone on LinkedIn, the user replies themselves.
  */
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { buildProviders } from './providerFactory.js';

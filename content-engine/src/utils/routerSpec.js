@@ -2,10 +2,10 @@
  * Daily post router: pure helpers.
  *
  * Purpose:      The settings-free pieces of the router (docs/daily-router-plan.md)
- *               — the target post date, which lane an existing instance belongs
+ *, the target post date, which lane an existing instance belongs
  *               to, the image sheet's Ready / Approved / Posted bookkeeping, and
  *               the prompt that writes new sheet rows from the funnel's landing
- *               page + post history — so they unit-test without a database.
+ *               page + post history, so they unit-test without a database.
  * Responsibility: Pure functions only (luxon + postCompose, no settings/DB/I/O).
  * Dependencies: luxon, utils/postCompose.
  *
@@ -235,7 +235,7 @@ export function refillPrompt({ funnelName = '', landingUrl = '', landingText = '
   if (columns.hashtags) fields.push('"hashtags": 3-6 relevant hashtags in one line');
   const system = [
     `You plan daily social media image posts for the brand/funnel "${funnelName}".`,
-    'Each post must be NEW: a different topic, angle and format from every past post listed — no repeats, no near-duplicates, and the set itself must vary (e.g. a tip, a story, a myth vs fact, a question, a quote, a checklist, a before/after).',
+    'Each post must be NEW: a different topic, angle and format from every past post listed, no repeats, no near-duplicates, and the set itself must vary (e.g. a tip, a story, a myth vs fact, a question, a quote, a checklist, a before/after).',
     'Stay true to what the landing page offers and who it is for. Do not invent prices, guarantees or facts that are not on it.',
     'Do not put links in captions (the link is added separately).',
     `Return ONLY a JSON object: {"posts": [ ${count} objects ]}, each object with:`,
