@@ -778,7 +778,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
             <label class="fl">Edit the transcript, or paste an SRT, cue numbers and timestamps are removed before the AI reads it (the SRT itself is kept)<textarea id="tx-${id}" rows="7" oninput="txEdited('${id}')"></textarea></label>
             <label class="fl">Thumbnail headline: big text on the image (you write it)<input id="hl-${id}" maxlength="80" placeholder="e.g. Why STHIRA works"></label>
             <label class="fl">Thumbnail sub-head: smaller line under it (optional)<input id="su-${id}" maxlength="120"></label>
-            <label class="fl">Image prompt: drafted from the transcript; edit it to change the artwork<textarea id="ip-${id}" rows="4"></textarea></label>
+            <label class="fl">Image prompt: the artwork you want on the thumbnail (blank = the one the AI writes with the copy)<textarea id="ip-${id}" rows="4"></textarea></label>
             <div class="nowrow">
               <button class="act" id="tb-${id}" onclick="transcribe('${id}')">🎙 Transcribe</button>
               <button class="act" id="ts-${id}" onclick="saveTx('${id}', false)">💾 Save</button>
@@ -952,10 +952,9 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         const j=await post('transcribe', { driveId:id, name:$('nm',id).value, source:SOURCE, accessToken: await driveToken() });
         if(!j.ok) throw new Error(j.error||'failed');
         $('tx',id).value=j.transcript||''; approved[id]=false; timed[id]=!!j.transcribed; subsNote(id); setStage(id, 'transcript'); setInst(id, j.instanceId);
-        if(j.imagePrompt) $('ip',id).value=j.imagePrompt;
         costs[id]=(costs[id]||[]).concat(j.costs||[]);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
-        $('tg',id).textContent=(j.transcribed?'🟡 Transcribed':'🟡 No speech found. Type the text yourself (or paste an SRT) to write the copy from')+' · $'+usd.toFixed(4)+'. Check the names, type the headline, check the image prompt, then ✅ Approve + generate copy and 🖼 Generate thumbnail.'+(j.promptError?' (Image prompt draft failed: '+j.promptError+', write one.)':'');
+        $('tg',id).textContent=(j.transcribed?'🟡 Transcribed':'🟡 No speech found. Type the text yourself (or paste an SRT) to write the copy from')+' · $'+usd.toFixed(4)+'. Check the names, then ✅ Approve + generate copy. Your headline, sub-head and image prompt were not touched.';
       }catch(e){ $('tg',id).textContent='⚠ '+e.message; }
       busy[id]=false; $('tb',id).disabled=false; gateUi(id);
     }

@@ -66,15 +66,6 @@ import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'readyPost' });
 
-// Drafts the thumbnail artwork prompt at the transcript stage (reviewed by the
-// operator before anything is paid for).
-const IMAGE_PROMPT_SYSTEM = [
-  'You write one English prompt for an image model to create the thumbnail artwork of a short video, from its transcript.',
-  'Describe one vivid, emotionally striking scene that captures the core idea (subject, setting, mood, lighting, colours, camera angle).',
-  'No text, letters, words or logos in the image. Stay faithful to the video.',
-  'Return ONLY a JSON object: {"imagePrompt": "..."}',
-].join('\n');
-
 async function loadFunnel(funnelId, pickedAccounts = null) {
   const funnel = await funnels.get(Number(funnelId));
   if (!funnel) throw new Error(`funnel ${funnelId} not found`);
@@ -281,41 +272,22 @@ export async function transcribeVideo({ tenantId = 'default', funnelId, driveId,
     if (t.durationSeconds > 0) durationCache.set(id, Math.round(t.durationSeconds));
     cost = { ...costTranscript({ provider: tp.provider, minutes: t.minutes }), at: new Date().toISOString() };
   }
-  // Draft the thumbnail image prompt from the same transcript, for the operator
-  // to review with it. The headline + sub-head are typed by the operator.
-  let imagePrompt = '';
-  let promptCost = null;
-  let promptError = '';
-  try {
-    const r = await providers.llm.generateJsonDetailed({
-      system: IMAGE_PROMPT_SYSTEM,
-      user: copyUserPrompt({ transcript: text, fileName: name, glossary: glossaryTerms(providers.resolved.prompts?.glossary) }),
-      maxTokens: 1500,
-    });
-    imagePrompt = String((r.data || {}).imagePrompt || '').trim().slice(0, 1500);
-    promptCost = { ...costText({ inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, model: r.model }), at: new Date().toISOString() };
-  } catch (err) {
-    promptError = err.message;
-    log.warn({ err: err.message, driveId: id }, 'image prompt draft failed (write it by hand)');
-  }
+  // Only the transcript fields change: the headline, sub-head and image prompt are the operator's and stay as they are.
   const { inst, steps: base } = await ensureInstance({ funnel, driveId: id, name, source });
-  const prevArt = ((base.find((x) => x.key === 'transcript') || {}).artifacts) || {};
   let steps = patchStep(base, 'transcript', {
     status: 'done',
-    artifacts: { text, cues, srt: '', source: 'whisper', approvedAt: null, headline: prevArt.headline || '', subhead: prevArt.subhead || '', imagePrompt: imagePrompt || prevArt.imagePrompt || '' },
+    artifacts: { text, cues, srt: '', source: 'whisper', approvedAt: null },
     finishedAt: new Date().toISOString(), error: null,
   });
   if (cost) steps = addCostToSteps(steps, 'transcript', { ...cost, costUsd: Number(cost.costUsd) || 0 });
-  if (promptCost) steps = addCostToSteps(steps, 'images', { ...promptCost, costUsd: Number(promptCost.costUsd) || 0 });
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   await instanceRepo.setStatus(inst.id, TRANSCRIPT_REVIEW);
   const durationSec = durationCache.get(id) || 0;
   if (durationSec) await instanceRepo.setMeta(inst.id, { durationSeconds: durationSec });
   log.info({ funnel: funnel.name, driveId: id, words: text.split(/\s+/).filter(Boolean).length }, 'ready video transcribed (awaiting approval)');
   return {
-    instanceId: inst.id, transcript: text, transcribed: audio.length > 0, imagePrompt: imagePrompt || prevArt.imagePrompt || '', promptError,
-    headline: prevArt.headline || '', subhead: prevArt.subhead || '',
-    costs: [...(cost ? [{ step: 'transcript', ...cost }] : []), ...(promptCost ? [{ step: 'images', ...promptCost }] : [])], stage: 'transcript',
+    instanceId: inst.id, transcript: text, transcribed: audio.length > 0,
+    costs: cost ? [{ step: 'transcript', ...cost }] : [], stage: 'transcript',
   };
 }
 
