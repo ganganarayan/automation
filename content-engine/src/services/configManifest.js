@@ -76,7 +76,7 @@ export const CONFIG_MANIFEST = {
             default: 'railway',
             options: [{ value: 'railway', label: 'Railway (this server)' }, { value: 'github', label: 'GitHub Actions (cleaned file goes to your Google Drive)' }],
           },
-          { key: 'github_actions_token', label: 'GitHub token (fine-grained: this repo only, Actions = Read and write)', type: 'secret' },
+          { key: 'github_actions_token', label: 'GitHub token (fine-grained: this repo only; Actions and Variables = Read and write)', type: 'secret' },
           { key: 'github_repo', label: 'GitHub repo (owner/name)', placeholder: 'ganganarayan/automation' },
           { key: 'github_ref', label: 'Branch the clean runs from (blank = the branch this server was deployed from)', placeholder: 'orbitq on staging, main on production' },
         ],
