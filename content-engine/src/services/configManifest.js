@@ -26,7 +26,7 @@ export const CONFIG_MANIFEST = {
   // never store keys — a funnel only picks which provider/model to use for each
   // action, and the key is taken from this page.
   'api-keys': {
-    label: 'API Keys',
+    label: 'Keys and credit',
     blurb: 'All provider keys in one place. Funnels choose the provider/model; the key comes from here.',
     groups: [
       {
@@ -173,14 +173,14 @@ export const CONFIG_MANIFEST = {
       {
         title: 'Comment capture (Meta — Instagram & Facebook auto-DM)',
         fields: [
-          { key: 'meta_self_ids', label: 'Our own account IDs (JSON array)', type: 'json', help: 'IG user IDs / Page IDs we post as. Comments FROM these are ignored so we never reply to ourselves. (Meta app ID/secret, verify token and page tokens live under API Keys.)' },
+          { key: 'meta_self_ids', label: 'Our own account IDs (JSON array)', type: 'json', help: 'IG user IDs / Page IDs we post as. Comments FROM these are ignored so we never reply to ourselves. (Meta app ID/secret, verify token and page tokens live under Keys and credit.)' },
           { key: 'capture_abuse_words', label: 'Extra abuse words to block (comma / new line)', type: 'textarea', help: 'Merged with the built-in Hindi + Hinglish + English blocklist. A comment that matches gets logged but no DM is sent.' },
         ],
       },
       {
         title: 'LinkedIn → WhatsApp relay (notify me; no auto-reply)',
         fields: [
-          { key: 'linkedin_imap_user', label: 'Gmail address to watch (blank = SMTP user)', help: 'The Gmail app password for this mailbox lives under API Keys.' },
+          { key: 'linkedin_imap_user', label: 'Gmail address to watch (blank = SMTP user)', help: 'The Gmail app password for this mailbox lives under Keys and credit.' },
           { key: 'linkedin_imap_host', label: 'IMAP host', placeholder: 'imap.gmail.com' },
           { key: 'linkedin_imap_mailbox', label: 'Mailbox / label to watch', placeholder: 'INBOX (or a Gmail label like LinkedIn)' },
           { key: 'linkedin_wa_instance', label: 'WhatsApp (Evolution) instance name' },

@@ -8,6 +8,7 @@
  *               - findRowIndex(sheetId, tab, colName, value): 1-based row number.
  *               - updateCells(sheetId, range, values): write a range.
  *               - appendRow(sheetId, tab, values): append.
+ *               - appendRows(sheetId, tab, rows): append several rows in one call.
  *               - upsertByKey(sheetId, tab, keyCol, rows): idempotent upsert.
  * Dependencies: googleapis, logger.
  *
@@ -35,6 +36,9 @@ export function createGoogleSheetsProvider(cfg, log) {
         log.warn('Sheets not configured; update skipped');
       },
       async appendRow() {
+        log.warn('Sheets not configured; append skipped');
+      },
+      async appendRows() {
         log.warn('Sheets not configured; append skipped');
       },
       async upsertByKey() {
@@ -102,6 +106,19 @@ export function createGoogleSheetsProvider(cfg, log) {
         range: tab,
         valueInputOption: 'RAW',
         requestBody: { values: [values] },
+      });
+      cache.clear();
+    },
+
+    /** Append several rows in one call (rows: string[][]). */
+    async appendRows(sheetId, tab, rows) {
+      if (!rows || !rows.length) return;
+      await api.spreadsheets.values.append({
+        spreadsheetId: sheetId,
+        range: tab,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: rows },
       });
       cache.clear();
     },

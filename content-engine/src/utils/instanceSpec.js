@@ -24,6 +24,7 @@ export const INSTANCE_STEPS = [
 
 export const INSTANCE_STATUSES = [
   'script_review', 'running', 'final_review', 'approved', 'posted', 'failed', 'superseded',
+  'image_review', // a router image post waiting on its approval email
 ];
 
 /** A fresh steps array, every stage pending with no artifacts or costs. */

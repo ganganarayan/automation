@@ -37,11 +37,13 @@ const artOf = (steps, key) => (stepOf(steps, key) || {}).artifacts || {};
 
 /**
  * The lane an instance runs in: 'ready' (a finished video from Drive),
- * 'generated' (hand-stepped pipeline run) or 'pipeline' (the automated daily run).
+ * 'image' (a sheet image post), 'generated' (hand-stepped pipeline run) or
+ * 'pipeline' (the automated daily run).
  */
 export function laneOf(row = {}) {
   const t = row.source_type || '';
   if (t === 'drive_folder' || t === 'drive_pick') return 'ready';
+  if (t === 'sheet') return 'image'; // the daily router's Lane 3 image post
   if (t === 'generated' || row.status === 'manual') return 'generated';
   if (row.status === 'draft' || row.status === TRANSCRIPT_REVIEW) return 'ready';
   return 'pipeline';

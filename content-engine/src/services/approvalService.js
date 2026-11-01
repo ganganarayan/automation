@@ -67,6 +67,11 @@ export async function createRequest({ tenantId = 'default', kind, payload }) {
   return { id, reviewUrl };
 }
 
+/** The (relative) review page path for an existing approval id — for admin links. */
+export function reviewPath(id) {
+  return `/api/v1/review/${encodeURIComponent(sign(String(id)))}`;
+}
+
 /** Mount the review routes on a router. */
 export function register(router) {
   router.get('/review/:token', async (req, res, next) => {
@@ -183,4 +188,4 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export default { onKind, createRequest, register };
+export default { onKind, createRequest, reviewPath, register };

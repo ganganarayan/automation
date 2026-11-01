@@ -34,6 +34,7 @@ export const WIZARD_STEPS = [
       { key: 'drive_folder_id', label: 'Drive folder ID (media for this funnel)' },
       { key: 'approval_email', label: 'Approval email' },
       { key: 'cta_link', label: 'CTA / assessment link' },
+      { key: 'landing_page_url', label: 'Landing page link', placeholder: 'https://…', help: 'The funnel’s landing page (where the CTA sends people).' },
       { key: 'audience_prefix', label: 'Audience prefix (caption line, optional)' },
       {
         key: 'manual_stepper', label: 'Run mode', type: 'select', default: 'off',
@@ -132,7 +133,7 @@ export const WIZARD_STEPS = [
     id: 'animate',
     title: 'Image → video',
     icon: 'ti-movie',
-    desc: 'Animate each kept still into a short clip. Clips are saved to Drive, then stitched later. Pick the provider — its key comes from the API Keys page.',
+    desc: 'Animate each kept still into a short clip. Clips are saved to Drive, then stitched later. Pick the provider — its key comes from the Keys and credit page.',
     requiredFn: animateRequired,
     fields: [
       {
@@ -256,7 +257,7 @@ export const WIZARD_STEPS = [
     id: 'publish',
     title: 'Publish',
     icon: 'ti-send',
-    desc: 'Once approved, the reel is posted to this funnel’s channels through Post for Me. The API key lives on the API Keys page — here you only pick which connected accounts this funnel posts to.',
+    desc: 'Once approved, the reel is posted to this funnel’s channels through Post for Me. The API key lives on the Keys and credit page — here you only pick which connected accounts this funnel posts to.',
     required: ['postforme_accounts'],
     fields: [
       { key: 'postforme_accounts', label: 'Post for Me accounts', type: 'json' },

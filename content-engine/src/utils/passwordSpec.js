@@ -79,11 +79,11 @@ export function safeEqual(a, b) {
 
 /**
  * Where to go after sign-in. Only this app's own pages; anything else (an
- * absolute URL, //host, a backslash trick) falls back to the settings page.
+ * absolute URL, //host, a backslash trick) falls back to Today, the landing page.
  */
-export function safeNext(next, fallback = '/api/v1/admin/settings') {
+export function safeNext(next, fallback = '/api/v1/admin/today') {
   const s = String(next || '');
-  if (s === 'dashboard') return '/api/v1/dashboard';
+  if (s === 'dashboard' || s === 'today') return '/api/v1/admin/today';
   if (!s.startsWith('/api/v1/') || s.startsWith('//') || s.includes('\\')) return fallback;
   if (s.startsWith('/api/v1/admin/login') || s.startsWith('/api/v1/admin/logout')) return fallback;
   return s;

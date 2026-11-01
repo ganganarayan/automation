@@ -83,6 +83,19 @@ export async function setStatus(id, status, note) {
   return rowCount > 0;
 }
 
+/**
+ * Move from one status to another only if the instance is still in `from`
+ * (and unlocked) — so a double-clicked approval acts once. True if we won.
+ */
+export async function transition(id, from, to, note) {
+  const { rowCount } = await query(
+    `UPDATE instances SET status = $3, note = COALESCE($4, note), updated_at = now()
+       WHERE id = $1 AND status = $2 AND locked = false`,
+    [id, from, to, note ?? null],
+  );
+  return rowCount > 0;
+}
+
 export async function setMeta(id, { title, durationSeconds, scheduledFor } = {}) {
   const { rowCount } = await query(
     `UPDATE instances
@@ -285,7 +298,51 @@ export async function draftsByDriveIds(funnelId, tenantId = 'default', driveIds 
   return Object.fromEntries(rows.map((r) => [r.drive_id, r]));
 }
 
+/**
+ * The LIVE instance (not failed / superseded) delivering this funnel's post on
+ * this IST date (yyyy-MM-dd), or null — the router's "already lined up" check.
+ * Same date rule as existsForFunnelOnDate; a posted one counts.
+ */
+export async function liveOnDate(funnelId, dateKey, tenantId = 'default') {
+  if (!funnelId || !dateKey) return null;
+  const { rows } = await query(
+    `SELECT * FROM instances
+       WHERE tenant_id = $1 AND funnel_id = $2
+         AND status NOT IN ('failed', 'superseded')
+         AND COALESCE(scheduled_for, posted_at) IS NOT NULL
+         AND (COALESCE(scheduled_for, posted_at) AT TIME ZONE 'Asia/Kolkata')::date = $3::date
+       ORDER BY (status IN ('scheduled', 'posted', 'partial')) DESC, created_at
+       LIMIT 1`,
+    [tenantId, funnelId, dateKey],
+  );
+  return rows[0] || null;
+}
+
+/** Sheet-row keys (source_ref) held by this funnel's open image-lane instances. */
+export async function openSheetRefs(funnelId, tenantId = 'default') {
+  if (!funnelId) return [];
+  const { rows } = await query(
+    `SELECT DISTINCT source_ref FROM instances
+      WHERE tenant_id = $1 AND funnel_id = $2 AND source_type = 'sheet'
+        AND source_ref IS NOT NULL AND status NOT IN ('posted', 'failed', 'superseded')`,
+    [tenantId, funnelId],
+  );
+  return rows.map((r) => r.source_ref);
+}
+
+/** This funnel's most recent instances (any lane), for the router's post history. */
+export async function recentForFunnel(funnelId, tenantId = 'default', limit = 40) {
+  if (!funnelId) return [];
+  const { rows } = await query(
+    `SELECT id, title, status, source_type, steps, created_at FROM instances
+      WHERE tenant_id = $1 AND funnel_id = $2 AND status NOT IN ('superseded')
+      ORDER BY created_at DESC LIMIT $3`,
+    [tenantId, funnelId, limit],
+  );
+  return rows;
+}
+
 export default {
-  create, get, list, logRows, saveSteps, setStatus, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, moveFunnel, unschedule, scheduledDue, retryDue, setPostStatus, remove,
-  existsForFunnelOnDate, videoOnDate, postedDriveIds, draftsByDriveIds,
+  create, get, list, logRows, saveSteps, setStatus, transition, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, moveFunnel, unschedule, scheduledDue, retryDue, setPostStatus, remove,
+  existsForFunnelOnDate, videoOnDate, postedDriveIds, draftsByDriveIds, liveOnDate, openSheetRefs, recentForFunnel,
 };

@@ -104,7 +104,7 @@ export function register(ctx) {
         return res.status(401).type('html').send(resetPage({ enabled: access.resetEnabled(), error: result.error, email }));
       }
       log.warn({ email }, 'super-admin password reset with the reset code');
-      res.redirect('/api/v1/admin/settings');
+      res.redirect('/api/v1/admin/today');
     } catch (err) {
       next(err);
     }

@@ -20,7 +20,7 @@ import * as captureService from '../services/captureService.js';
 import * as captureConfig from '../services/captureConfig.js';
 import { captureSenders } from '../services/captureSenders.js';
 import { verifyMetaSignature, parseCommentEvents, parseMessageEvents } from '../utils/captureSpec.js';
-import { keyOk } from '../services/accessService.js';
+import { keyOk, currentSession } from '../services/accessService.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst } from '../utils/time.js';
 
@@ -39,11 +39,12 @@ export function register(ctx) {
   router.get('/admin/capture', async (req, res, next) => {
     try {
       if (!(await guardHtml(req, res))) return;
-      const [ruleRows, leadRows] = await Promise.all([
+      const [ruleRows, leadRows, session] = await Promise.all([
         rules.listByTenant({ tenantId: req.tenantId }),
         leads.listByTenant({ tenantId: req.tenantId }),
+        currentSession(req),
       ]);
-      res.type('html').send(capturePage(ruleRows, leadRows));
+      res.type('html').send(capturePage(ruleRows, leadRows, session));
     } catch (err) {
       next(err);
     }
@@ -219,7 +220,7 @@ function dmStatusDot(status) {
  * every other comment that arrived. An unmatched comment is NOT a lead — nothing
  * is sent for it — but it is still shown so it can be answered by hand.
  */
-function capturePage(ruleRows, leadRows) {
+function capturePage(ruleRows, leadRows, session = null) {
   const leadsOnly = leadRows.filter((l) => l.dm_status !== 'no_rule');
   const others = leadRows.filter((l) => l.dm_status === 'no_rule');
 
@@ -263,7 +264,7 @@ function capturePage(ruleRows, leadRows) {
  form.inline{display:inline;margin:0}
 </style>
 <div class="layout">
-  <aside>${navHtml({ current: 'capture' })}</aside>
+  <aside>${navHtml({ current: 'capture', session })}</aside>
   <main><div class="wrap">
     <h1>🎯 Comments</h1>
     <p class="sub">Instagram &amp; Facebook. A comment matching an armed keyword becomes a lead and gets a DM; everything else is just listed here for you to answer yourself.</p>

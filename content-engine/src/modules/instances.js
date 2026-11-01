@@ -8,7 +8,7 @@
  * Responsibility: HTTP + auth + HTML rendering; logic in instanceService.
  * Dependencies: instanceService, instanceSpec, utils/time, accessService.
  *
- * Routes: GET  /api/v1/admin/instances           the table (?status= filters)
+ * Routes: GET  /api/v1/admin/instances           the Library table (?label= / ?funnel= chips; old ?status= still filters)
  *         GET  /api/v1/admin/instances/new        start: Prepare (ready videos) or a generated run
  *         GET  /api/v1/admin/instances/prepare    a funnel's sources + ready videos, per-video stage panels
  *         GET  /api/v1/admin/instances/:id        the instance view: stage panels for a ready video or a
@@ -35,11 +35,12 @@ import { READY_STAGES, SOURCE_TYPES, laneOf, readyStage, stageLabel, istToInputV
 import cron from 'node-cron';
 import { settings } from '../settings/index.js';
 import { MANUAL_STAGES, STAGE_LABEL, inputKind, canExecute } from '../utils/manualStepSpec.js';
-import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
+import { navSlot, fillNav, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
+import { LIBRARY_LABELS, libraryStatus, statusesFor } from '../utils/libraryStatus.js';
 import { formatIst } from '../utils/time.js';
 import { defaultSlotsIso, parseDriveFolderId, parsePickedFiles } from '../utils/readyPostSpec.js';
 import { driveThumbUrl } from '../utils/reviewSpec.js';
-import { keyOk } from '../services/accessService.js';
+import { keyOk, currentSession } from '../services/accessService.js';
 
 const MANUAL_JOB = 'manual_stage';
 
@@ -50,15 +51,24 @@ export function register(ctx) {
     res.redirect(`/api/v1/admin/login?next=${encodeURIComponent(req.originalUrl)}`);
     return false;
   };
+  // Pages render the menu as a slot; fill it with the signed-in user here.
+  const sendPage = async (req, res, html) => res.type('html').send(fillNav(html, { session: await currentSession(req) }));
 
   router.get('/admin/instances', async (req, res, next) => {
     try {
       if (!(await guardHtml(req, res))) return;
       const status = req.query.status ? String(req.query.status) : null;
+      const label = LIBRARY_LABELS.some((l) => l.key === req.query.label) ? String(req.query.label) : '';
+      const funnel = req.query.funnel ? String(req.query.funnel) : '';
       // Scheduled posts whose time has come: ask Post for Me whether they went out.
       await readyPost.refreshScheduled({ tenantId: req.tenantId }).catch((err) => log.warn({ err: err.message }, 'scheduled refresh failed'));
-      const rows = await instances.list({ tenantId: req.tenantId, status });
-      res.type('html').send(listPage(rows, status));
+      // Label / funnel chips filter in memory over a wider page; an old ?status=
+      // bookmark still filters in SQL.
+      const [all, funnelList] = await Promise.all([
+        instances.list({ tenantId: req.tenantId, status, limit: 300 }),
+        funnelsRepo.listByTenant(req.tenantId).catch(() => []),
+      ]);
+      await sendPage(req, res, listPage(all, { status, label, funnel, funnelList }));
     } catch (err) {
       next(err);
     }
@@ -78,7 +88,7 @@ export function register(ctx) {
   router.get('/admin/instances/new', async (req, res, next) => {
     try {
       if (!(await guardHtml(req, res))) return;
-      res.type('html').send(newPage(await funnelsRepo.listByTenant(req.tenantId)));
+      await sendPage(req, res, newPage(await funnelsRepo.listByTenant(req.tenantId)));
     } catch (err) {
       next(err);
     }
@@ -105,12 +115,12 @@ export function register(ctx) {
       if (!(await guardHtml(req, res))) return;
       const funnelId = req.query.funnel ? String(req.query.funnel) : '';
       const list = await funnelsRepo.listByTenant(req.tenantId);
-      if (!funnelId) return res.type('html').send(readyChooserPage(list));
+      if (!funnelId) return await sendPage(req, res, readyChooserPage(list));
       const folder = parseDriveFolderId(req.query.folder);
       const picked = parsePickedFiles(req.query.picked);
       const out = await readyPost.listReadyVideos({ tenantId: req.tenantId, funnelId, folder, picked });
       const prefills = defaultSlotsIso(out.resolved.publishTime, out.videos.length).map((iso) => formatIst(iso));
-      res.type('html').send(readyAiPickerPage({ ...out, prefills }));
+      await sendPage(req, res, readyAiPickerPage({ ...out, prefills }));
     } catch (err) {
       next(err);
     }
@@ -253,13 +263,13 @@ export function register(ctx) {
       if (lane === 'ready' && !row.locked && row.funnel_id) {
         try {
           const funnelList = await funnelsRepo.listByTenant(row.tenant_id).catch(() => []);
-          return res.type('html').send(readyAiPickerPage({ ...(await readyPost.instanceView(row)), funnelList }));
+          return await sendPage(req, res, readyAiPickerPage({ ...(await readyPost.instanceView(row)), funnelList }));
         } catch (err) {
           log.warn({ err: err.message, instance: row.id }, 'ready instance view failed (showing detail)');
         }
       }
       const manual = row.status === 'manual' && !row.locked;
-      res.type('html').send(manual ? manualPage(row, steps) : detailPage(row, steps));
+      await sendPage(req, res, manual ? manualPage(row, steps) : detailPage(row, steps));
     } catch (err) {
       next(err);
     }
@@ -388,6 +398,7 @@ const STATUS_LABEL = {
   script_review: 'Script review',
   running: 'Running',
   final_review: 'Final review',
+  image_review: 'Image post to approve',
   approved: 'Approved',
   posted: 'Posted',
   failed: 'Failed',
@@ -404,9 +415,19 @@ function channelsOf(steps) {
   return Array.isArray(pub.channels) ? pub.channels : [];
 }
 
+// One of the seven Library labels with its colour dot (utils/libraryStatus);
+// the precise stage name stays in the tooltip.
 function statusPill(status) {
-  const cls = status === 'posted' ? 'ok' : status === 'failed' ? 'bad' : status === 'superseded' ? 'mut' : status === 'scheduled' ? 'info' : 'warn';
-  return `<span class="pill ${cls}">${esc(STATUS_LABEL[status] || status)}</span>`;
+  const st = libraryStatus(status);
+  const cls = { '🟢': 'ok', '🟡': 'warn', '🔴': 'bad', '🔵': 'info' }[st.dot] || 'mut';
+  return `<span class="pill ${cls}" title="${esc(STATUS_LABEL[status] || status)}">${st.dot} ${esc(st.label)}${st.note ? ` (${esc(st.note)})` : ''}</span>`;
+}
+
+// The Library's two views: every instance, or the ready videos by funnel source
+// (the page that used to be Prepare).
+function libraryTabs(active) {
+  return `<div class="tabs">${[['all', 'All', '/api/v1/admin/instances'], ['ready', 'Ready videos', PREPARE.base]]
+    .map(([k, l, h]) => `<a class="tab${active === k ? ' on' : ''}" href="${h}">${esc(l)}</a>`).join('')}</div>`;
 }
 
 function usd(n) {
@@ -418,10 +439,22 @@ function finalVideoId(steps) {
   return stitch && stitch.artifacts && stitch.artifacts.video ? stitch.artifacts.video.driveId : '';
 }
 
-function listPage(rows, status) {
-  const tabs = [['', 'All'], ['transcript_review', 'Transcripts to verify'], ['draft', 'Ready videos'], ['scheduled', 'Scheduled'], ['final_review', 'In review'], ['posted', 'Posted']]
-    .map(([v, l]) => `<a class="tab${(status || '') === v ? ' on' : ''}" href="/api/v1/admin/instances${v ? `?status=${v}` : ''}">${esc(l)}</a>`)
-    .join('');
+function listPage(all, { status = null, label = '', funnel = '', funnelList = [] } = {}) {
+  // Replaced (superseded) runs are hidden unless asked for by an old ?status= link.
+  const visible = (all || []).filter((r) => status === 'superseded' || !libraryStatus(r.status).hidden);
+  const inFunnel = visible.filter((r) => !funnel || String(r.funnel_id) === funnel);
+  const rows = label ? inFunnel.filter((r) => statusesFor(label).includes(r.status)) : inFunnel;
+  const link = (q) => {
+    const p = new URLSearchParams(Object.entries({ label, funnel, ...q }).filter(([, v]) => v));
+    return `/api/v1/admin/instances${p.toString() ? `?${p}` : ''}`;
+  };
+  const count = (k) => inFunnel.filter((r) => libraryStatus(r.status).key === k).length;
+  const labelChips = [`<a class="chip${!label && !status ? ' on' : ''}" href="${link({ label: '' })}">All</a>`,
+    ...LIBRARY_LABELS.map((l) => `<a class="chip${label === l.key ? ' on' : ''}" href="${link({ label: l.key })}">${l.dot} ${esc(l.label)} ${count(l.key)}</a>`)].join('');
+  const funnelChips = (funnelList || []).length > 1
+    ? [`<a class="chip${!funnel ? ' on' : ''}" href="${link({ funnel: '' })}">All funnels</a>`,
+      ...funnelList.map((f) => `<a class="chip${funnel === String(f.id) ? ' on' : ''}" href="${link({ funnel: String(f.id) })}">${esc(f.name)}</a>`)].join('')
+    : '';
 
   const body = (rows || [])
     .map((r) => {
@@ -445,18 +478,21 @@ function listPage(rows, status) {
     })
     .join('');
 
-  return shell('Instances', `
+  return shell('Library', `
     <div class="top">
-      <h1>Instances</h1>
+      <h1>Library</h1>
       <div class="toprow">
-        <div class="tabs">${tabs}</div>
+        ${libraryTabs('all')}
         <a class="act primary" href="/api/v1/admin/instances/new">+ New</a>
         <button class="act" onclick="sample()">+ Sample</button>
       </div>
     </div>
+    <div class="libchips">${labelChips}</div>
+    ${funnelChips ? `<div class="libchips">${funnelChips}</div>` : ''}
+    ${status ? `<p class="hint">Showing raw status “${esc(STATUS_LABEL[status] || status)}” (old link). <a href="/api/v1/admin/instances">Show all</a></p>` : ''}
     <table>
       <thead><tr><th>Instance</th><th>Title</th><th>Funnel</th><th>Length</th><th>Cost</th><th>Status</th><th>Scheduled / posted</th><th>Actions</th><th>Channels</th></tr></thead>
-      <tbody>${body || '<tr><td colspan="9" class="hint">No instances yet. A run creates one; use + Sample to preview the UI.</td></tr>'}</tbody>
+      <tbody>${body || `<tr><td colspan="9" class="hint">${label || funnel || status ? 'Nothing matches this filter.' : 'Nothing in the library yet. A run creates one; use + Sample to preview the UI.'}</td></tr>`}</tbody>
     </table>
     ${previewModal()}
   `, `
@@ -509,7 +545,7 @@ function detailPage(row, steps) {
       <div class="toprow">
         ${statusPill(row.status)}
         ${row.locked ? '<span class="pill ok">🔒 locked</span>' : ''}
-        <a class="act" href="/api/v1/admin/instances">← All instances</a>
+        <a class="act" href="/api/v1/admin/instances">← Library</a>
       </div>
     </div>
     <p class="ro">Read-only here. ${row.locked ? 'Posted and locked.' : 'Approve or request a change from the emailed review link.'}</p>
@@ -544,7 +580,8 @@ function btn(call, kind = '') {
   return `<button class="act ${kind}" onclick="${call}">▶ Preview</button>`;
 }
 
-const PREPARE = { base: '/api/v1/admin/instances/prepare', title: 'Prepare — ready videos', nav: 'prepare' };
+// The old Prepare page: now the Library's "Ready videos" tab (same route).
+const PREPARE = { base: '/api/v1/admin/instances/prepare', title: 'Ready videos', nav: 'library' };
 
 // Ready-video: funnel chooser when none is in the query.
 function readyChooserPage(funnels, lane = PREPARE) {
@@ -553,8 +590,8 @@ function readyChooserPage(funnels, lane = PREPARE) {
     .join(' ');
   return shell(lane.title, `
     <div class="top">
-      <h1>${esc(lane.title)}</h1>
-      <div class="toprow"><a class="act" href="/api/v1/admin/instances">← All instances</a></div>
+      <h1>Library</h1>
+      <div class="toprow">${libraryTabs('ready')}</div>
     </div>
     <p class="ro">Pick a funnel. Its saved sources (Drive folders of finished videos) open with their videos; each video becomes one instance and moves through ✂ Clean → transcript → copy + thumbnails → schedule.</p>
     <div class="row">${items || '<span class="hint">No funnels yet.</span>'}</div>
@@ -782,25 +819,25 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       <div class="toprow">${statusPill(single.status)}
         ${['draft', 'transcript_review', 'failed'].includes(single.status) && funnelList.length > 1 ? `<label class="nowrow">Funnel <select id="mvf">${funnelList.map((f) => `<option value="${esc(String(f.id))}"${String(f.id) === String(funnel.id) ? ' selected' : ''}>${esc(f.name)}</option>`).join('')}</select></label>
         <button class="act" onclick="moveFunnel()">⇄ Move</button>` : ''}
-        <a class="act" href="${PREPARE.base}?funnel=${encodeURIComponent(funnel.id)}">← Prepare list</a>
-        <a class="act" href="/api/v1/admin/instances">All instances</a>
+        <a class="act" href="${PREPARE.base}?funnel=${encodeURIComponent(funnel.id)}">← Ready videos</a>
+        <a class="act" href="/api/v1/admin/instances">Library</a>
       </div>
     </div>
     <script>const PICKED=false; function driveToken(){ return Promise.resolve(''); }</script>`
     : `<div class="top">
       <div>
-        <h1>Prepare — ${esc(funnel.name)}</h1>
+        <h1>Ready videos — ${esc(funnel.name)}</h1>
         <div class="sub">Tick a video and take it through its stages: ✂ Clean (optional) → 🎙 Transcript (fix the names, or paste an SRT) → ✅ Approve → ✨ Generate copy + thumbnails → schedule. Nothing paid runs on a transcript you haven't approved. Each video is one instance. Posts go out in the order you ticked.</div>
       </div>
       <div class="toprow">
+        ${libraryTabs('ready')}
         <a class="act" href="${PREPARE.base}">↺ Change funnel</a>
-        <a class="act" href="/api/v1/admin/instances">← All instances</a>
       </div>
     </div>
     ${sourcesBar(funnel, src.sources, src.folder)}
     ${folderBar(funnel, src)}`;
 
-  return shell(single ? `Instance ${shortId(single.id)}` : `Prepare — ${funnel.name}`, `
+  return shell(single ? `Instance ${shortId(single.id)}` : `Ready videos — ${funnel.name}`, `
     ${head}
     ${banner}
     ${acctBar(src.resolved)}
@@ -1040,7 +1077,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
           const bad=(j.results||[]).filter(x=>!x.ok);
           const okd=(j.results||[]).filter(x=>x.ok);
           const when=okd.map(x=>x.scheduledIso?('📅 '+x.whenIst):'⚡ now').join(', ');
-          msg((okd.length?'🟢 '+(nowCount===selections.length?'Sent to Post for Me to post now':'Scheduled')+' ('+when+'). You get an email when it goes live.':'')+(bad.length?(' 🔴 '+bad.length+' failed: '+bad.map(x=>x.name+': '+x.error).join('; ')):' Opening Instances…'));
+          msg((okd.length?'🟢 '+(nowCount===selections.length?'Sent to Post for Me to post now':'Scheduled')+' ('+when+'). You get an email when it goes live.':'')+(bad.length?(' 🔴 '+bad.length+' failed: '+bad.map(x=>x.name+': '+x.error).join('; ')):' Opening Library…'));
           if(!bad.length) setTimeout(()=>location.href='/api/v1/admin/instances?status=scheduled',2500);
         }
         else msg('Failed: '+(j.error||''));
@@ -1069,7 +1106,7 @@ function newPage(funnels) {
   return shell('New instance', `
     <div class="top">
       <h1>New instance</h1>
-      <div class="toprow"><a class="act" href="/api/v1/admin/instances">← All instances</a></div>
+      <div class="toprow"><a class="act" href="/api/v1/admin/instances">← Library</a></div>
     </div>
     <h3>📥 Ready videos <span class="hint">the everyday lane</span></h3>
     <p class="ro">Finished videos from a funnel's Drive folder: ✂ Clean → transcript (you approve it) → AI copy + thumbnails → schedule.</p>
@@ -1140,7 +1177,7 @@ function manualPage(row, steps) {
   return shell(`Manual — ${shortId(row.id)}`, `
     <div class="top">
       <div><h1>${esc(row.title || 'Generated run')}</h1><div class="sub">${esc(row.funnel_name || '—')} · ${esc(shortId(row.id))} · 🎛 generated lane, stepped by hand</div></div>
-      <div class="toprow">${statusPill(row.status)}<a class="act" href="/api/v1/admin/instances">← All instances</a></div>
+      <div class="toprow">${statusPill(row.status)}<a class="act" href="/api/v1/admin/instances">← Library</a></div>
     </div>
     <p class="ro">Run each stage in order: edit the input where shown, <b>Execute</b>, <b>Preview</b>, then do the next. The final stage posts.${running ? ' <b>Running…</b> this page refreshes itself.' : ''}</p>
     <div class="mcards">${cards}</div>
@@ -1225,6 +1262,7 @@ ${NAV_CSS}
  .toprow{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
  .tabs{display:flex;gap:.3rem}.tab{color:#c7c7d9;text-decoration:none;font-size:.85rem;padding:.4rem .8rem;border:1px solid #24243a;border-radius:8px}
  .tab.on{background:#2a2a44;color:#fff}
+ .libchips{display:flex;flex-wrap:wrap;gap:.35rem;margin:-.3rem 0 .7rem}.libchips .chip{text-decoration:none}
  .act{background:#2a2a44;color:#fff;border:0;border-radius:8px;padding:.4rem .8rem;cursor:pointer;font-size:.82rem;text-decoration:none;display:inline-flex;align-items:center;gap:.25rem}
  .act.primary{background:#2d6cdf}.act.danger{background:#5a1d1d}
  table{width:100%;border-collapse:collapse;font-size:.88rem;background:#12121b;border:1px solid #24243a;border-radius:12px;overflow:hidden}
@@ -1307,7 +1345,7 @@ ${NAV_CSS}
  .approve{background:#0a7d32;color:#fff;border:0;border-radius:8px;padding:.7rem 1.3rem;font-size:1rem;cursor:pointer}
 </style>
 <div class="layout">
-  <aside>${navHtml({ current })}</aside>
+  <aside>${navSlot(current)}</aside>
   <main><div class="wrap">${inner}</div></main>
 </div>
 <script>${script || ''}</script>`;

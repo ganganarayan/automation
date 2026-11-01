@@ -38,10 +38,10 @@ describe('tokens', () => {
 describe('safeNext', () => {
   it('keeps own pages and rejects anything off-site', () => {
     expect(safeNext('/api/v1/admin/instances?x=1')).toBe('/api/v1/admin/instances?x=1');
-    expect(safeNext('dashboard')).toBe('/api/v1/dashboard');
-    expect(safeNext('https://evil.example')).toBe('/api/v1/admin/settings');
-    expect(safeNext('//evil.example/api/v1/')).toBe('/api/v1/admin/settings');
-    expect(safeNext('/api/v1/admin/login')).toBe('/api/v1/admin/settings');
-    expect(safeNext('')).toBe('/api/v1/admin/settings');
+    expect(safeNext('dashboard')).toBe('/api/v1/admin/today');
+    expect(safeNext('https://evil.example')).toBe('/api/v1/admin/today');
+    expect(safeNext('//evil.example/api/v1/')).toBe('/api/v1/admin/today');
+    expect(safeNext('/api/v1/admin/login')).toBe('/api/v1/admin/today');
+    expect(safeNext('')).toBe('/api/v1/admin/today');
   });
 });

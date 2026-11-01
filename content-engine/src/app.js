@@ -31,6 +31,7 @@ import * as capture from './modules/capture.js';
 import * as firstComments from './modules/firstComments.js';
 import * as linkedinRelay from './modules/linkedinRelay.js';
 import * as videoScheduler from './modules/videoScheduler.js';
+import * as dailyRouter from './modules/router.js';
 import * as instanceReview from './modules/instanceReview.js';
 import * as imageFactory from './modules/imageFactory.js';
 import * as dashboard from './modules/dashboard.js';
@@ -38,6 +39,7 @@ import * as configUi from './modules/configUi.js';
 import * as authModule from './modules/auth.js';
 import * as cleanHooks from './modules/cleanHooks.js';
 import * as admin from './modules/admin.js';
+import * as workPages from './modules/workPages.js';
 
 export function createApp() {
   const app = express();
@@ -57,8 +59,8 @@ export function createApp() {
   }));
   app.use(express.urlencoded({ extended: true }));
 
-  // Bare domain opens the app (the unified dashboard), so the root URL just works.
-  app.get('/', (_req, res) => res.redirect('/api/v1/dashboard'));
+  // Bare domain opens the app (Today, the admin landing page), so the root URL just works.
+  app.get('/', (_req, res) => res.redirect('/api/v1/admin/today'));
   app.get('/health', (_req, res) => res.json({ status: 'ok', service: settings.service }));
   app.get('/live', (_req, res) => res.json({ status: 'alive' }));
   // Running build identity — lets a deploy be verified against the pushed commit.
@@ -100,12 +102,14 @@ export function createApp() {
     .add({ name: 'first-comments', enabled: true, register: firstComments.register })
     .add({ name: 'linkedin-relay', enabled: true, register: linkedinRelay.register })
     .add({ name: 'video-scheduler', enabled: true, register: videoScheduler.register })
+    .add({ name: 'router', enabled: true, register: dailyRouter.register })
     .add({ name: 'instance-review', enabled: true, register: instanceReview.register })
     .add({ name: 'image-factory', enabled: settings.modules.imageFactory, register: imageFactory.register })
     .add({ name: 'dashboard', enabled: settings.modules.dashboard, register: dashboard.register })
     .add({ name: 'auth', enabled: settings.modules.admin, register: authModule.register })
     .add({ name: 'clean-hooks', enabled: settings.modules.admin, register: cleanHooks.register })
     .add({ name: 'config-ui', enabled: settings.modules.admin, register: configUi.register })
+    .add({ name: 'work-pages', enabled: settings.modules.admin, register: workPages.register })
     .add({ name: 'admin', enabled: settings.modules.admin, register: admin.register });
 
   registry.registerAll(ctx);

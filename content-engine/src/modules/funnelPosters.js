@@ -10,7 +10,10 @@
  *                 generate_time matches the current HH:mm IST and today's weekday
  *                 is in its generate_days (blank = daily), run it.
  *               - Register approve/rework handlers.
- *               - A manual "run all now" endpoint.
+ *               - A manual "run all now" endpoint (not gated).
+ *               - Scheduled runs defer to the daily router (modules/router.js):
+ *                 each claims the funnel's post date in router_days and skips
+ *                 when the router already decided that day.
  * Dependencies: node-cron, funnelPosterService, funnelsRepository, approvalService.
  *
  * Route: POST /api/v1/jobs/funnel-posters (run all active funnels immediately).
@@ -21,6 +24,8 @@ import * as poster from '../services/funnelPosterService.js';
 import * as approvalService from '../services/approvalService.js';
 import * as readyPost from '../services/readyPostService.js';
 import * as funnels from '../repositories/funnelsRepository.js';
+import * as routerDays from '../repositories/routerDaysRepository.js';
+import { targetPostAt, postDateKey } from '../utils/videoSchedule.js';
 import { requireAdminKey } from '../middleware/auth.js';
 import { settings } from '../settings/index.js';
 import { ZONE } from '../utils/time.js';
@@ -45,6 +50,17 @@ async function runDue(forwardMin, backMin, log) {
     if (diffMin > forwardMin || diffMin < -backMin) continue;
     const days = (cfg.generateDays || '').split(',').map((d) => d.trim()).filter(Boolean);
     if (days.length && !days.includes(dow)) continue;
+    // The daily router owns the day: claim the funnel's post date in
+    // router_days first. If the router (or an earlier tick) already decided it,
+    // skip — so the router and this legacy trigger never both post.
+    const postDate = postDateKey(targetPostAt({ publishTime: cfg.publishTime, now }));
+    const claimed = await routerDays.claim({
+      tenantId: funnel.tenant_id, funnelId: funnel.id, postDate, lane: 'image', reason: 'legacy image poster (generate_time)',
+    }).catch((e) => { log.warn({ err: e.message, funnel: funnel.name }, 'router_days claim failed; legacy poster skipped'); return null; });
+    if (!claimed) {
+      log.info({ funnel: funnel.name, postDate }, 'router already decided this day; legacy poster skipped');
+      continue;
+    }
     log.info({ funnel: funnel.name, at: cfg.generateTime }, 'funnel due; running');
     poster.runFunnel(funnel).catch((e) => log.error({ err: e.message, funnel: funnel.name }, 'funnel run failed'));
   }

@@ -68,7 +68,7 @@ export function register(ctx) {
       const superAdmin = !!(session && session.role === 'super_admin');
       const tenantList = superAdmin ? await tenantRepo.listWithSubscription().catch(() => []) : [];
       res.type('html').send(
-        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', key: '', saved: req.query.saved, superAdmin, tenantList }),
+        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', session, key: '', saved: req.query.saved, superAdmin, tenantList }),
       );
     } catch (err) {
       next(err);
@@ -194,11 +194,11 @@ export function register(ctx) {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
       let apiKey = (req.body?.api_key || '').toString().trim();
       if (!apiKey) {
-        // The Post for Me key is central now (Settings → API Keys), not per funnel.
+        // The Post for Me key is central now (Keys and credit), not per funnel.
         const t = await tenantSettings.forTenant(req.tenantId);
         apiKey = t.postformeKey || '';
       }
-      if (!apiKey) return res.json({ ok: false, error: 'No Post for Me API key — set it once under Settings → API Keys, then come back and Fetch.' });
+      if (!apiKey) return res.json({ ok: false, error: 'No Post for Me API key — set it once under Keys and credit, then come back and Fetch.' });
       const provider = createPostForMeProvider({ apiKey }, log);
       const data = await provider.listAccounts();
       return res.json({ ok: true, accounts: normalizeAccounts(data) });
@@ -214,7 +214,7 @@ export function register(ctx) {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
       const t = await tenantSettings.forTenant(req.tenantId);
       const apiKey = (t.tts && t.tts.elevenlabsApiKey) || '';
-      if (!apiKey) return res.json({ ok: false, missingKey: true, error: 'No ElevenLabs API key. Set it once under Settings → API Keys, then reload this step.' });
+      if (!apiKey) return res.json({ ok: false, missingKey: true, error: 'No ElevenLabs API key. Set it once under Keys and credit, then reload this step.' });
       return res.json({ ok: true, voices: await listElevenLabsVoices(apiKey) });
     } catch (err) {
       return res.json({ ok: false, error: err.message });
@@ -359,11 +359,21 @@ export function register(ctx) {
 
 // ---- rendering -------------------------------------------------------------
 
-function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, key, saved, superAdmin = false, tenantList = [] }) {
-  const menu = navHtml({ key, tabs: true, superAdmin });
+function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, session = null, key, saved, superAdmin = false, tenantList = [] }) {
+  const menu = navHtml({ key, tabs: true, superAdmin, session });
 
+  // Said once, on the two panels with plain config fields (not under every panel).
+  const fallbackHint = '<p class="hint">Blank config fields fall back to a platform default where one exists. Secrets are never shown — leave blank to keep the current value. Changes apply within ~1 minute.</p>';
+  // tracking-bridge is no longer a menu entry; it is reached from Settings.
+  const extras = {
+    'api-keys': fallbackHint,
+    'content-engine': `${fallbackHint}
+      <fieldset><legend>More</legend>
+        <p class="hint" style="margin:0"><a href="#tracking-bridge" onclick="show('tracking-bridge');return false">Tracking bridge →</a> Razorpay → Meta CAPI purchases and daily ad insights.</p>
+      </fieldset>`,
+  };
   const appSections = APPS
-    .map((a) => (hasFlow(a) ? flowSection(a, tenantId, configMap, key) : appSection(a, tenantId, configMap, key)))
+    .map((a) => (hasFlow(a) ? flowSection(a, tenantId, configMap, key, extras[a]) : appSection(a, tenantId, configMap, key, extras[a])))
     .join('');
 
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -452,8 +462,6 @@ ${NAV_CSS}
     ${usersPanel({ userList, me })}
     ${funnelsPanel({ funnelList, funnelConfigs, tenantId, key })}
     ${appSections}
-
-    <p class="hint">Blank config fields fall back to a platform default where one exists. Secrets are never shown — leave blank to keep the current value. Changes apply within ~1 minute.</p>
   </main>
 </div>
 <script>
@@ -619,39 +627,30 @@ function usersPanel({ userList, me }) {
       const roleSel = users.ROLES
         .map((r) => `<option value="${r}"${u.role === r ? ' selected' : ''}>${r}</option>`)
         .join('');
-      const forever = !u.plan_ends_at;
-      const dateVal = u.plan_ends_at ? new Date(u.plan_ends_at).toISOString().slice(0, 10) : '';
       const lastLogin = formatIst(u.last_login_at);
       return `<tr>
         <td>${esc(u.email)}</td>
         <td><select onchange="saveRole(${i}, '${escJs(u.email)}', this)"${isSuper ? ' disabled title="protected"' : ''}>${roleSel}</select></td>
-        <td><div class="planwrap">
-          <input id="dt-${i}" type="date" value="${dateVal}"${forever ? ' disabled' : ''} onchange="savePlan(${i}, '${escJs(u.email)}')">
-          <label style="margin:0;font-size:.8rem"><input id="fv-${i}" type="checkbox"${forever ? ' checked' : ''} onchange="savePlan(${i}, '${escJs(u.email)}')"> forever</label>
-        </div></td>
-        <td>${esc(lastLogin)}</td>
-        <td><button class="act" onclick="toggleBilling(${i}, '${escJs(u.email)}')">Billing</button><span id="flag-${i}" class="saveflag">saved</span></td>
-      </tr>
-      <tr id="bill-${i}" style="display:none"><td colspan="5"><div id="billbody-${i}"></div></td></tr>`;
+        <td>${esc(lastLogin)}<span id="flag-${i}" class="saveflag">saved</span></td>
+      </tr>`;
     })
     .join('');
 
   return `<section class="panel active card" id="panel-users">
     <h2>Users</h2>
-    <p class="blurb">Accounts are created when people sign up from the landing page. Change a role or plan end date and it saves instantly — no save button. Users manage their own password in their own login.</p>
+    <p class="blurb">Accounts are created when people sign up from the landing page. Change a role and it saves instantly — no save button. Users manage their own password in their own login. Account expiry lives on Tenants.</p>
 
     <fieldset><legend>Users</legend>
-      <table><thead><tr><th>Email</th><th>Role</th><th>Plan ends</th><th>Last login</th><th></th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="5" class="hint">No users yet — they appear here after signing up.</td></tr>'}</tbody></table>
+      <table><thead><tr><th>Email</th><th>Role</th><th>Last login</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="3" class="hint">No users yet — they appear here after signing up.</td></tr>'}</tbody></table>
       <p class="hint">The super admin is protected: it cannot be demoted or removed.</p>
     </fieldset>
 
     <fieldset><legend>Sign-in</legend>
       <p class="hint" style="margin:0">Signed in as <b>${esc(me || 'machine key')}</b>. Everyone signs in with email + password.
-        Locked out? The super admin can set a new password at <a href="/api/v1/admin/reset">/api/v1/admin/reset</a> with the reset code kept on the server.</p>
+        Locked out? The super admin can set a new password on the <a href="/api/v1/admin/reset">reset page</a> with the reset code kept on the server.</p>
       <div class="row" style="margin-top:.6rem">
         <a class="act" href="/api/v1/admin/password?next=${encodeURIComponent('/api/v1/admin/settings#users')}">Change my password</a>
-        <form method="post" action="/api/v1/admin/logout" style="margin:0"><button class="act" type="submit">Sign out</button></form>
       </div>
     </fieldset>
   </section>`;
@@ -880,7 +879,7 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
 </script>`;
 }
 
-function flowSection(app, tenantId, configMap, key) {
+function flowSection(app, tenantId, configMap, key, extra = '') {
   const m = CONFIG_MANIFEST[app];
   const flow = FLOW_MANIFEST[app];
 
@@ -924,10 +923,11 @@ function flowSection(app, tenantId, configMap, key) {
       <div class="flow">${phases}</div>
       <button class="save" type="submit">Save ${esc(m.label)}</button>
     </form>
+    ${extra}
   </section>`;
 }
 
-function appSection(app, tenantId, configMap, key) {
+function appSection(app, tenantId, configMap, key, extra = '') {
   const m = CONFIG_MANIFEST[app];
   const groups = m.groups
     .map((g) => `<fieldset><legend>${esc(g.title)}</legend>${g.fields.map((f) => fieldRow(f, configMap)).join('')}</fieldset>`)
@@ -952,6 +952,7 @@ function appSection(app, tenantId, configMap, key) {
       ${mods ? `<fieldset><legend>Background jobs (apply to all funnels)</legend><div class="mods">${mods}</div></fieldset>` : ''}
       <button class="save" type="submit">Save ${esc(m.label)}</button>
     </form>
+    ${extra}
   </section>`;
 }
 
@@ -1166,7 +1167,7 @@ function pfmAccountsRow(cfg, fid) {
       <button type="button" class="act" onclick="fetchPfm('${fid}')">↻ Fetch accounts from Post for Me</button>
       <span id="pfmstatus-${fid}" class="hint"></span>
     </div>
-    <div id="pfmlist-${fid}" class="acctlist">${pre || '<span class="hint">No accounts yet — click Fetch (uses the Post for Me key from Settings → API Keys) and tick the accounts.</span>'}</div>
+    <div id="pfmlist-${fid}" class="acctlist">${pre || '<span class="hint">No accounts yet — click Fetch (uses the Post for Me key from Keys and credit) and tick the accounts.</span>'}</div>
     <input type="hidden" id="pfmaccts-${fid}" name="set[postforme_accounts]" value="${esc(JSON.stringify(ids))}">
     <input type="hidden" id="pfmmap-${fid}" name="set[account_map]" value="${esc(JSON.stringify(map))}">
     <p class="hint">One click — no JSON. Tick the accounts this funnel posts to.</p></div>`;

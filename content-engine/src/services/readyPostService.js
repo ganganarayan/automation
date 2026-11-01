@@ -429,7 +429,7 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
  */
 async function renderThumbs({ providers, platforms, base, text, sub = '' }) {
   const postformeKey = providers.resolved.postformeKey || '';
-  if (!postformeKey) throw new Error('No Post for Me API key — set it under Settings → API Keys');
+  if (!postformeKey) throw new Error('No Post for Me API key — set it under Setup → Keys and credit');
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
   const thumbs = {};
   const sizes = [];
@@ -498,7 +498,7 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endTe
   // GitHub Actions runs ffmpeg and keeps the file in your Drive; Railway is the original path.
   const where = normalizeRunner(runner || (providers.resolved.clean || {}).runner);
   if (where === 'github') return startCleanGithub({ funnel, providers, id, opts, name, source, baseUrl });
-  if (!providers.resolved.postformeKey) throw new Error('No Post for Me API key — set it under Settings → API Keys');
+  if (!providers.resolved.postformeKey) throw new Error('No Post for Me API key — set it under Setup → Keys and credit');
   const running = { state: 'running', startedAt: Date.now(), phase: 'starting', pct: 0, ...opts };
   cleanJobs.set(id, running);
   const onPhase = (patch) => { const j = cleanJobs.get(id); if (j && j.state === 'running') Object.assign(j, patch); };
@@ -848,7 +848,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
 
   // The Post for Me key is central (API Keys page); the funnel picks the accounts.
   const postformeKey = providers.resolved.postformeKey || '';
-  if (!postformeKey) throw new Error('No Post for Me API key — set it once under Settings → API Keys');
+  if (!postformeKey) throw new Error('No Post for Me API key — set it once under Setup → Keys and credit');
   const accounts = Array.isArray(resolved.accounts) ? resolved.accounts : [];
   if (!accounts.length) throw new Error('No accounts ticked — tick the accounts to post to (top of this page)');
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
@@ -926,6 +926,16 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
  * and email the outcome. Runs on a 5-minute timer, on /jobs/run-due, and when
  * the instances list or an instance opens. Returns how many changed.
  */
+/**
+ * Callbacks run when the post check finds an instance live ('posted' or
+ * 'partial'): fn(row, { outcome, refs, channels }). The image lane uses this to
+ * write Posted + the Post for Me id into its sheet row. Errors are logged only.
+ */
+const postedHooks = [];
+export function onPosted(fn) {
+  if (typeof fn === 'function') postedHooks.push(fn);
+}
+
 export async function refreshScheduled({ tenantId = 'default' } = {}) {
   const rows = await instanceRepo.scheduledDue(tenantId).catch(() => []);
   if (!rows.length) return 0;
@@ -980,6 +990,11 @@ export async function refreshScheduled({ tenantId = 'default' } = {}) {
       else {
         await instanceRepo.setStatus(row.id, 'failed', failedNote || 'Post for Me reported a failure');
         await instanceRepo.setPostStatus(row.id, 'failed');
+      }
+      if (outcome === 'posted' || outcome === 'partial') {
+        for (const fn of postedHooks) {
+          await Promise.resolve(fn(row, { outcome, refs, channels })).catch((err) => log.warn({ err: err.message, instance: row.id }, 'post-live hook failed'));
+        }
       }
       if (outcome === 'posted' || !retry.attempts || !nextAt) {
         await sendOutcomeEmail({ providers, row, steps, channels, outcome, postedAt: when, nextAt }).catch((err) => log.warn({ err: err.message }, 'post outcome email failed'));
@@ -1101,16 +1116,17 @@ async function sendOutcomeEmail({ providers, row, steps, channels, outcome, post
   const base = settings.app.publicBaseUrl || '';
   const link = `${base}/api/v1/admin/instances/${row.id}`;
   const rows = channels.map((c) => `<tr><td>${c.state === 'ok' ? '✅' : '❌'}</td><td>${esc(c.platform)}</td><td>${esc(c.name)}</td><td>${c.url ? `<a href="${esc(c.url)}">open</a>` : esc(c.error || '')}</td></tr>`).join('');
-  const html = `<p><b>${head}</b> · ${esc(row.funnel_name || '')} · video</p>
+  const kind = row.source_type === 'sheet' ? 'image' : 'video';
+  const html = `<p><b>${head}</b> · ${esc(row.funnel_name || '')} · ${kind}</p>
     <p><b>${esc(copy.title || row.title || '')}</b></p>
     <p>Scheduled: ${esc(row.scheduled_for ? formatIst(row.scheduled_for) : '— (posted now)')}<br>Posted: ${esc(formatIst(postedAt))}</p>
     <table border="1" cellpadding="6" style="border-collapse:collapse"><thead><tr><th></th><th>Platform</th><th>Account</th><th>Post / error</th></tr></thead><tbody>${rows}</tbody></table>
     ${outcome === 'posted' ? '' : nextAt
     ? `<p><b>Reconnect the ❌ accounts in Post for Me. That is all.</b> The app re-posts to just those channels by itself (next try ${esc(formatIst(nextAt))} IST, up to ${AUTO_RETRY_MINUTES.length} tries over about 2 days). The ✅ ones are not posted again.</p>`
     : '<p>Reconnect the ❌ accounts in Post for Me, then open the instance and press <b>↻ Post to the failed channels only</b>.</p>'}
-    <p>${req.mediaUrl ? `<a href="${esc(req.mediaUrl)}">▶ The video</a> · ` : ''}<a href="${esc(link)}">Open the instance</a></p>
+    <p>${req.mediaUrl ? `<a href="${esc(req.mediaUrl)}">${kind === 'image' ? '🖼 The image' : '▶ The video'}</a> · ` : ''}<a href="${esc(link)}">Open the instance</a></p>
     <pre style="white-space:pre-wrap;font:inherit">${esc(copy.description || req.caption || '')}</pre>`;
-  await providers.mail.send({ to, subject: `${head}: ${copy.title || row.title || 'video'}`, html });
+  await providers.mail.send({ to, subject: `${head}: ${copy.title || row.title || kind}`, html });
 }
 
 /**
@@ -1168,5 +1184,5 @@ function esc(s) {
 }
 
 export default {
-  refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, postSelections,
+  onPosted, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, postSelections,
 };

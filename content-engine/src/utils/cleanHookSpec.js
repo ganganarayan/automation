@@ -78,7 +78,7 @@ export function normalizeRepo(repo) {
 export function dispatchRequest({ repo, token, ref, hook, ticket }) {
   const r = normalizeRepo(repo);
   if (!r) throw new Error('GitHub repo must look like owner/name');
-  if (!token) throw new Error('No GitHub token — set it under Settings → API Keys → Video clean');
+  if (!token) throw new Error('No GitHub token — set it under Setup → Keys and credit → Video clean');
   return {
     url: `https://api.github.com/repos/${r}/actions/workflows/${CLEAN_WORKFLOW}/dispatches`,
     init: {

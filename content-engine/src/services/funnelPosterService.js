@@ -13,6 +13,8 @@
  *                 short) when the sheet provides both, at the funnel's publish
  *                 time; fire the IG webhook; mark the sheet Posted.
  *               - rework(approval, note): regenerate with the reviewer note.
+ *               - Shared with the daily router's image lane (imageLaneService):
+ *                 tabFor, generate, armPostExtras, markSheetRow, approvalEmail.
  * Dependencies: funnelsRepository, providerFactory, publishProvider, caption/
  *               scheduling utils, httpClient, approvals.
  *
@@ -34,6 +36,7 @@ import { publishAtIst } from '../utils/scheduling.js';
 import { targetPostAt, postDateKey } from '../utils/videoSchedule.js';
 import { videoOnDate } from '../repositories/instanceRepository.js';
 import { request } from '../core/httpClient.js';
+import { planHeader, colIndex, colLetter } from '../utils/routerSpec.js';
 import { childLogger } from '../core/logger.js';
 import { settings } from '../settings/index.js';
 
@@ -45,7 +48,7 @@ const DEFAULT_TAB = 'Sheet1';
  * (leftmost) tab of the spreadsheet. Returned ready for A1 notation — names with
  * spaces/special chars are single-quoted so `${tab}!A1` and bare-title ranges work.
  */
-async function tabFor(sheets, f) {
+export async function tabFor(sheets, f) {
   let title = f.sheetTab;
   if (!title) {
     try {
@@ -73,7 +76,7 @@ async function nextReadyRow(sheets, sheetId, tab) {
  * when present (honors the image size), otherwise Gemini. If neither is set the
  * OpenAI path throws a clear "not configured" error.
  */
-async function generate(providers, prompt, size) {
+export async function generate(providers, prompt, size) {
   const r = providers.resolved || {};
   if (!r.openai?.apiKey && r.gemini?.apiKey) {
     return providers.llm.generateImageGemini({ prompt });
@@ -165,10 +168,22 @@ export async function publish(approval) {
     platformConfigurations,
   });
 
-  // Arm comment-to-DM: the sheet row's keyword/dm_text/dm_link, else funnel defaults.
   const ref = result && result.id ? result.id : null;
   // The link goes in each channel's first comment once the post is live.
   await firstComment.queue({ tenantId: f.tenantId, postformePostId: ref, link: f.ctaLink, scheduledAt });
+  await armPostExtras({ f, p, ref, accounts, log });
+
+  await markSheetPosted(providers.sheets, f.sheetId, await tabFor(providers.sheets, f), p.matchColName, p.matchKey, log);
+  await setStatus(approval.id, 'published');
+  log.info({ match: p.matchKey, accounts: accounts.length, perPlatform: !!platformConfigurations }, 'published');
+}
+
+/**
+ * After a funnel post is created: arm comment-to-DM (the sheet row's
+ * keyword/dm_text/dm_link, else the funnel defaults) and fire the optional
+ * IG-comment webhook. Best-effort; never fails the post.
+ */
+export async function armPostExtras({ f, p, ref, accounts, log }) {
   const keyword = (p.dmKeyword || f.captureKeyword || '').trim();
   if (ref && keyword) {
     await captureRules.createForPublish({
@@ -189,10 +204,6 @@ export async function publish(approval) {
   if (f.igWebhookUrl) {
     request(f.igWebhookUrl, { method: 'POST', body: { funnel: f.name, match: p.matchKey }, label: 'ig.webhook', log, retries: 0 }).catch(() => {});
   }
-
-  await markSheetPosted(providers.sheets, f.sheetId, await tabFor(providers.sheets, f), p.matchColName, p.matchKey, log);
-  await setStatus(approval.id, 'published');
-  log.info({ match: p.matchKey, accounts: accounts.length, perPlatform: !!platformConfigurations }, 'published');
 }
 
 /** Rework — regenerate with the reviewer note. */
@@ -235,31 +246,46 @@ export async function runAllActive() {
 // ---- helpers ---------------------------------------------------------------
 
 async function markSheetPosted(sheets, sheetId, tab, matchColName, matchKey, log) {
+  await markSheetRow(sheets, sheetId, tab, { matchColName: matchColName || 'day', matchKey, status: 'Posted' }, log);
+}
+
+/**
+ * Write a sheet row's status and any extra columns ({ header: value }). The
+ * row is found by its match column + key, or by `rowNumber` (1-based) when the
+ * sheet has no key column (key "row:N"). Missing extra header cells are created
+ * at the end of row 1. Best-effort: returns false (and logs) instead of throwing.
+ */
+export async function markSheetRow(sheets, sheetId, tab, { matchColName = null, matchKey = '', rowNumber = 0, status = '', extra = {} } = {}, log) {
   try {
-    const matchCol = matchColName || 'day';
-    const rowNumber = await sheets.findRowIndex(sheetId, tab, matchCol, matchKey);
-    if (rowNumber <= 0) return;
     const rows = await sheets.readTab(sheetId, tab, { fresh: true });
-    const header = rows[0].map((h) => String(h).trim().toLowerCase());
-    const idx = header.indexOf('status');
-    if (idx === -1) return;
-    await sheets.updateCells(sheetId, `${tab}!${colLetter(idx)}${rowNumber}`, [['Posted']]);
+    if (!rows.length) return false;
+    const plan = planHeader(rows[0], Object.keys(extra));
+    for (const a of plan.added) await sheets.updateCells(sheetId, `${tab}!${colLetter(a.index)}1`, [[a.name]]);
+    const header = plan.header;
+    const key = String(matchKey ?? '').trim();
+    let n = 0;
+    if (key.startsWith('row:')) n = parseInt(key.slice(4), 10) || 0;
+    else if (matchColName && key) {
+      const ci = colIndex(header, matchColName);
+      for (let i = 1; ci !== -1 && i < rows.length; i += 1) {
+        if (String((rows[i] || [])[ci] ?? '').trim() === key) { n = i + 1; break; }
+      }
+    } else n = rowNumber;
+    if (n <= 1) return false;
+    const cells = { ...(status ? { status } : {}), ...extra };
+    for (const [name, value] of Object.entries(cells)) {
+      const ci = colIndex(header, name);
+      if (ci !== -1) await sheets.updateCells(sheetId, `${tab}!${colLetter(ci)}${n}`, [[String(value ?? '')]]);
+    }
+    return true;
   } catch (err) {
-    log.warn({ err: err.message }, 'failed to mark sheet Posted');
+    log.warn({ err: err.message }, `failed to mark sheet row${status ? ` ${status}` : ''}`);
+    return false;
   }
 }
 
-function colLetter(index0) {
-  let n = index0;
-  let s = '';
-  do {
-    s = String.fromCharCode(65 + (n % 26)) + s;
-    n = Math.floor(n / 26) - 1;
-  } while (n >= 0);
-  return s;
-}
-
-function approvalEmail(funnelName, thumbnailUrl, full, short, reviewUrl) {
+/** The approval email body (image, caption(s), optional "posts at" line, the review link). */
+export function approvalEmail(funnelName, thumbnailUrl, full, short, reviewUrl, scheduledText = '') {
   const distinct = full && short && full !== short;
   const caps = distinct
     ? `<p><b>LinkedIn (full):</b></p><pre style="white-space:pre-wrap;background:#f5f5f5;padding:12px;border-radius:6px">${escapeHtml(full)}</pre>
@@ -269,6 +295,7 @@ function approvalEmail(funnelName, thumbnailUrl, full, short, reviewUrl) {
     <p>New ${escapeHtml(funnelName)} post ready for review:</p>
     ${thumbnailUrl ? `<img src="${thumbnailUrl}" style="max-width:420px;border-radius:8px">` : ''}
     ${caps}
+    ${scheduledText ? `<p><b>Posts:</b> ${escapeHtml(scheduledText)} on all of this funnel's channels. Approved after that time, it posts at once.</p>` : ''}
     <p><a href="${reviewUrl}" style="background:#0a7d32;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Review &amp; Approve</a></p>
   </div>`;
 }
@@ -276,7 +303,7 @@ function approvalEmail(funnelName, thumbnailUrl, full, short, reviewUrl) {
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
-function slug(s) {
+export function slug(s) {
   return String(s || 'funnel').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
