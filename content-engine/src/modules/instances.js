@@ -1013,10 +1013,12 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':', the first frame will be used')+'</div>':'');
     }
     // 🖼 Thumbnail only: from step 2's headline / sub-head / image prompt; the copy on the page and on the instance is left alone.
+    // Its own busy flag: the thumbnail and the copy can run at the same time (separate OpenAI calls).
+    const thumbBusy = {};
     async function genThumb(id){
-      if(busy[id]) return;
+      if(thumbBusy[id]) return;
       if(!$('hl',id).value.trim()){ $('gs',id).textContent='🟡 Type the thumbnail headline in step 2 first.'; $('hl',id).focus(); return; }
-      busy[id]=true; gateUi(id); $('gt',id).disabled=true; $('gs',id).textContent='🖼 Designing the thumbnail… (under a minute): your copy is not touched';
+      thumbBusy[id]=true; $('gt',id).disabled=true; $('gs',id).textContent='🖼 Designing the thumbnail… (under a minute): your copy is not touched';
       try{
         const j=await post('thumbnail', { driveId:id, name:$('nm',id).value, source:SOURCE, accounts: pickedAccounts(), accessToken: await driveToken(), headline:$('hl',id).value, subhead:$('su',id).value, imagePrompt:$('ip',id).value });
         if(!j.ok) throw new Error(j.error||'failed');
@@ -1024,7 +1026,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
         $('gs',id).textContent=(!(j.sizes||[]).length?'🟡 No thumbnail made':j.thumbError?'🟡 Saved, but on a frame of the video, the AI artwork failed (see below)':'🟢 Thumbnail saved to the instance')+' · $'+usd.toFixed(4)+' · copy unchanged';
       }catch(e){ $('gs',id).textContent='⚠ '+e.message; }
-      busy[id]=false; $('gt',id).disabled=false; gateUi(id);
+      thumbBusy[id]=false; $('gt',id).disabled=false;
     }
     const SAVED = ${JSON.stringify(drafts).replace(/</g, '\\u003c')};
     // ✂ Clean: the last zoom / cut used in this browser is the default for the next video.
