@@ -80,7 +80,15 @@ export function register(ctx) {
 
   router.post('/admin/settings/save', async (req, res, next) => {
     try {
-      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
+      if (!(await keyOk(req))) {
+        // A browser form (signed out in another tab, or the sign-in ended): send
+        // them to sign in and back to Settings instead of a bare JSON error.
+        if (!req.is('application/json')) {
+          const back = encodeURIComponent(`/api/v1/admin/settings?error=${encodeURIComponent('You were signed out, so nothing was saved. Sign in and save again.')}`);
+          return res.redirect(303, `/api/v1/admin/login?next=${back}`);
+        }
+        return res.status(401).json({ error: 'unauthorized' });
+      }
       const body = req.body || {};
       const tenantId = (body.tenant || 'default').toString();
       const submitted = { settings: body.set || {}, modules: body.mod || {} };
