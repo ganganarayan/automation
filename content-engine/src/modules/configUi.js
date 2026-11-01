@@ -1234,7 +1234,7 @@ function fieldRow(field, configMap) {
   }
   if (field.type === 'secret') {
     return `<div class="field"><label>${esc(field.label)}</label>
-      <input type="password" name="set[${esc(field.key)}]" autocomplete="off"
+      <input type="password" name="set[${esc(field.key)}]" autocomplete="new-password" data-lpignore="true" data-1p-ignore
         placeholder="${has ? '•••• (set — blank keeps current)' : (field.placeholder ? esc(field.placeholder) : 'unset')}"></div>`;
   }
 /**
@@ -1285,7 +1285,7 @@ function uniqueId(prefix = 'u') {
 function funnelKeyRow(field, cfg, fid) {
   const has = !!(cfg && cfg[field.key]);
   return `<div class="field"><label>${esc(field.label)}</label>
-    <input id="pfmkey-${fid}" type="password" name="set[${esc(field.key)}]" autocomplete="off"
+    <input id="pfmkey-${fid}" type="password" name="set[${esc(field.key)}]" autocomplete="new-password" data-lpignore="true" data-1p-ignore
       placeholder="${has ? '•••• (set — blank keeps current)' : 'paste your Post for Me API key'}"></div>`;
 }
 

@@ -999,7 +999,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         if(!j.ok) throw new Error(j.error||'failed');
         showThumbs(id, j); setInst(id, j.instanceId);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
-        $('gs',id).textContent=((j.sizes||[]).length?'🟢 Thumbnail saved to the instance':'🟡 No thumbnail made')+' · $'+usd.toFixed(4)+' · copy unchanged';
+        $('gs',id).textContent=(!(j.sizes||[]).length?'🟡 No thumbnail made':j.thumbError?'🟡 Saved, but on a frame of the video — the AI artwork failed (see below)':'🟢 Thumbnail saved to the instance')+' · $'+usd.toFixed(4)+' · copy unchanged';
       }catch(e){ $('gs',id).textContent='⚠ '+e.message; }
       busy[id]=false; $('gt',id).disabled=false; gateUi(id);
     }
