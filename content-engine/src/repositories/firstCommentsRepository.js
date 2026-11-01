@@ -31,19 +31,43 @@ export async function due(tenantId = 'default', limit = 25) {
   return rows;
 }
 
-/** Save progress: per-channel results, status, the next check. */
-export async function save(id, { status, done, attempts, nextAt, lastError = null }) {
-  await query(
-    `UPDATE first_comments
-        SET status = $2, done = $3, attempts = $4, next_at = COALESCE($5, next_at), last_error = $6, updated_at = now()
-      WHERE id = $1`,
-    [id, status, JSON.stringify(done || {}), attempts, nextAt, lastError],
-  );
-}
-
 export async function getByPost(postformePostId) {
   const { rows } = await query('SELECT * FROM first_comments WHERE postforme_post_id = $1', [postformePostId]);
   return rows[0] || null;
 }
 
-export default { enqueue, due, save, getByPost };
+/**
+ * Claim one channel before commenting (the webhook and the timer can race):
+ * true only for the caller that marked it 'sending'.
+ */
+export async function claim(id, accountId) {
+  const { rows } = await query(
+    `UPDATE first_comments SET done = done || jsonb_build_object($2::text, '{"state":"sending"}'::jsonb), updated_at = now()
+      WHERE id = $1 AND NOT (done ? $2::text) RETURNING id`,
+    [id, accountId],
+  );
+  return rows.length > 0;
+}
+
+/** Record one channel's outcome ({ state, platform, error }). */
+export async function mark(id, accountId, value) {
+  await query(
+    `UPDATE first_comments SET done = done || jsonb_build_object($2::text, $3::jsonb), updated_at = now() WHERE id = $1`,
+    [id, accountId, JSON.stringify(value)],
+  );
+}
+
+/** Give a claimed channel back (a retryable failure: try it on the next pass). */
+export async function release(id, accountId) {
+  await query(`UPDATE first_comments SET done = done - $2::text, updated_at = now() WHERE id = $1`, [id, accountId]);
+}
+
+/** Finish a pass: status, attempts, next check (per-channel results are already saved). */
+export async function finish(id, { status, attempts, nextAt = null, lastError = null }) {
+  await query(
+    `UPDATE first_comments SET status = $2, attempts = $3, next_at = COALESCE($4, next_at), last_error = $5, updated_at = now() WHERE id = $1`,
+    [id, status, attempts, nextAt, lastError],
+  );
+}
+
+export default { enqueue, due, getByPost, claim, mark, release, finish };

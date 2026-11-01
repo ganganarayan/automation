@@ -118,6 +118,13 @@ export function createPostForMeProvider(cfg, log) {
       return res.data;
     },
 
+    /** Register a webhook: { id, url, secret, event_types }. The secret comes back in each call's Post-For-Me-Webhook-Secret header. */
+    async createWebhook({ url, eventTypes }) {
+      const res = await request(`${BASE}/webhooks`, { method: 'POST', headers: requireKey(), body: { url, event_types: eventTypes }, label: 'postforme.createWebhook', log, retries: 1 });
+      if (!res.ok) throw new ExternalAPIError(`Post for Me webhook create failed (${res.status})`, { details: res.text?.slice(0, 300) });
+      return res.data;
+    },
+
     async listAccounts() {
       const headers = requireKey();
       const res = await request(`${BASE}/social-accounts?limit=50`, {

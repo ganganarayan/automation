@@ -2,21 +2,27 @@
  * First comment: the post's link in its first comment, on every channel.
  *
  * Purpose:      Every publish path queues its Post for Me post here with the
- *               link. Post for Me has no first-comment option, so once it
- *               reports the post live, each ✅ channel gets the link as its first
- *               comment, posted with that account's own token. Runs on the same
- *               5-minute timer as the scheduled-post check.
+ *               link. Post for Me has no first-comment option, so the moment it
+ *               reports a channel live (its social.post.result.created webhook)
+ *               that channel gets the link as its first comment, posted with the
+ *               account's own token — before anyone else can comment. The
+ *               5-minute timer is the backstop (a missed webhook, a retryable
+ *               failure) and closes each job once the post is processed.
  * Responsibility: Queue + orchestration; platform calls in firstCommentSenders.
- * Dependencies: firstCommentsRepository, providerFactory, publishProvider,
- *               firstCommentSenders, laneSpec (postOutcome), logger.
+ * Dependencies: firstCommentsRepository, tenantConfigRepository, providerFactory,
+ *               publishProvider, firstCommentSenders, laneSpec, settings, logger.
  *
  * Never blocks or fails a post: every error here is logged and kept on the row.
+ * Each channel is claimed before it is commented, so it is commented once.
  */
+import { timingSafeEqual } from 'node:crypto';
 import * as repo from '../repositories/firstCommentsRepository.js';
+import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { buildProviders } from './providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { createFirstCommentSenders } from './firstCommentSenders.js';
 import { postOutcome } from '../utils/laneSpec.js';
+import { settings } from '../settings/index.js';
 import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'firstComment' });
@@ -24,6 +30,7 @@ const senders = createFirstCommentSenders({ log });
 
 const CHECK_MINUTES = 5;
 const MAX_ATTEMPTS = 6;
+const HOOK_EVENT = 'social.post.result.created';
 
 /** The first comment for a link ('' = nothing to comment). */
 export function commentText(link) {
@@ -49,63 +56,129 @@ export async function queue({ tenantId = 'default', postformePostId, link, sched
 
 const later = (minutes) => new Date(Date.now() + minutes * 60000);
 
-/** Work off one tenant's due jobs. Returns how many comments went out. */
+/**
+ * Comment on one channel's result, if it succeeded and nobody has claimed it.
+ * Returns 'ok' | 'skipped' | 'failed' | 'retry' | null (nothing to do).
+ */
+async function commentOn(publish, row, r, attempts) {
+  const accountId = r && r.social_account_id;
+  // A failed channel gets no comment; its retry is a new post with its own job.
+  if (!r || !r.success || !accountId) return null;
+  if (!(await repo.claim(row.id, accountId))) return null;
+  let platform = '';
+  try {
+    const account = await publish.getAccount(accountId);
+    platform = (account && account.platform) || '';
+    const out = await senders.comment({
+      platform, postId: r.platform_data && r.platform_data.id, token: account && account.access_token, text: row.text, account,
+    });
+    await repo.mark(row.id, accountId, { state: out.state, platform, ...(out.error ? { error: out.error } : {}) });
+    log.info({ post: row.postforme_post_id, platform, state: out.state }, 'first comment');
+    return out.state;
+  } catch (err) {
+    if (err.retryable && attempts < MAX_ATTEMPTS) {
+      await repo.release(row.id, accountId);
+      return 'retry';
+    }
+    await repo.mark(row.id, accountId, { state: 'failed', platform, error: String(err.message).slice(0, 200) });
+    log.warn({ post: row.postforme_post_id, platform, err: err.message }, 'first comment failed');
+    return 'failed';
+  }
+}
+
+/** Work off one tenant's due jobs (the backstop). Returns how many comments went out. */
 export async function runDue({ tenantId = 'default' } = {}) {
   const rows = await repo.due(tenantId).catch(() => []);
   if (!rows.length) return 0;
   const providers = await buildProviders(tenantId);
   if (!providers.resolved.postformeKey) return 0;
   const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log);
+  await ensureWebhook(tenantId, publish);
   let sent = 0;
   for (const row of rows) {
-    const done = { ...(row.done || {}) };
     const attempts = (row.attempts || 0) + 1;
     try {
       const post = await publish.getPost(row.postforme_post_id);
       if (postOutcome(post) === 'pending') {
         // Not out yet: look again at its scheduled time, else in a few minutes.
         const at = post && post.scheduled_at ? new Date(post.scheduled_at) : null;
-        const nextAt = at && at > later(CHECK_MINUTES) ? at : later(CHECK_MINUTES);
-        await repo.save(row.id, { status: 'pending', done, attempts: row.attempts || 0, nextAt });
+        await repo.finish(row.id, { status: 'pending', attempts: row.attempts || 0, nextAt: at && at > later(CHECK_MINUTES) ? at : later(CHECK_MINUTES) });
         continue;
       }
       const results = await publish.postResults(row.postforme_post_id);
-      let retry = false;
-      let lastError = null;
+      let retry = !results.length && attempts < MAX_ATTEMPTS; // Post for Me can lag in writing results
       for (const r of results) {
-        const accountId = r.social_account_id;
-        // A failed channel gets no comment; its retry is a new post with its own job.
-        if (!r.success || !accountId || done[accountId]) continue;
-        let platform = '';
-        try {
-          const account = await publish.getAccount(accountId);
-          platform = (account && account.platform) || '';
-          const out = await senders.comment({
-            platform, postId: r.platform_data && r.platform_data.id, token: account && account.access_token, text: row.text, account,
-          });
-          done[accountId] = { state: out.state, platform, ...(out.error ? { error: out.error } : {}) };
-          if (out.state === 'ok') sent += 1;
-        } catch (err) {
-          lastError = `${platform || accountId}: ${err.message}`;
-          if (err.retryable && attempts < MAX_ATTEMPTS) retry = true;
-          else done[accountId] = { state: 'failed', platform, error: String(err.message).slice(0, 200) };
-        }
+        const state = await commentOn(publish, row, r, attempts);
+        if (state === 'ok') sent += 1;
+        if (state === 'retry') retry = true;
       }
-      // Post for Me can lag in writing results: wait for them a few rounds.
-      if (!results.length && attempts < MAX_ATTEMPTS) retry = true;
-      await repo.save(row.id, {
-        status: retry ? 'pending' : (Object.values(done).some((d) => d.state === 'failed') ? 'failed' : 'done'),
-        done, attempts, nextAt: retry ? later(CHECK_MINUTES) : null, lastError,
+      const fresh = await repo.getByPost(row.postforme_post_id);
+      const states = Object.values((fresh && fresh.done) || {}).map((d) => d.state);
+      // A channel still 'sending' is the webhook mid-comment: check once more.
+      if (states.includes('sending') && attempts < MAX_ATTEMPTS) retry = true;
+      await repo.finish(row.id, {
+        status: retry ? 'pending' : (states.includes('failed') ? 'failed' : 'done'),
+        attempts, nextAt: retry ? later(CHECK_MINUTES) : null,
       });
-      log.info({ post: row.postforme_post_id, done, retry }, 'first comment pass');
     } catch (err) {
       log.warn({ err: err.message, post: row.postforme_post_id }, 'first comment check failed (will retry)');
-      await repo.save(row.id, {
-        status: attempts < MAX_ATTEMPTS ? 'pending' : 'failed', done, attempts, nextAt: later(CHECK_MINUTES), lastError: err.message,
+      await repo.finish(row.id, {
+        status: attempts < MAX_ATTEMPTS ? 'pending' : 'failed', attempts, nextAt: later(CHECK_MINUTES), lastError: err.message,
       }).catch(() => {});
     }
   }
   return sent;
 }
 
-export default { queue, runDue, commentText };
+/** The URL Post for Me calls for this tenant ('' when the app has no public URL). */
+export function webhookUrl(tenantId = 'default', base = settings.publicBaseUrl) {
+  return base ? `${base}/api/v1/webhook/postforme/${encodeURIComponent(tenantId)}` : '';
+}
+
+/**
+ * Register our webhook with Post for Me once per tenant (and again if the
+ * app's URL changes). Its secret is kept in tenant_config to verify each call.
+ */
+export async function ensureWebhook(tenantId, publish) {
+  const url = webhookUrl(tenantId);
+  if (!url) return false;
+  try {
+    const cfg = await tenantConfig.getAll(tenantId).catch(() => ({}));
+    if (cfg.pfm_webhook_url === url && cfg.pfm_webhook_secret) return true;
+    const hook = await publish.createWebhook({ url, eventTypes: [HOOK_EVENT] });
+    if (!hook || !hook.secret) throw new Error('Post for Me returned no webhook secret');
+    await tenantConfig.set(tenantId, 'pfm_webhook_secret', hook.secret);
+    await tenantConfig.set(tenantId, 'pfm_webhook_id', hook.id || '');
+    await tenantConfig.set(tenantId, 'pfm_webhook_url', url);
+    log.info({ tenantId, url }, 'Post for Me webhook registered');
+    return true;
+  } catch (err) {
+    log.warn({ err: err.message, tenantId }, 'Post for Me webhook registration failed (the timer still comments)');
+    return false;
+  }
+}
+
+/** Is this call really from Post for Me? (the Post-For-Me-Webhook-Secret header). */
+export async function verifyWebhook(tenantId, header) {
+  const secret = (await tenantConfig.get(tenantId, 'pfm_webhook_secret').catch(() => '')) || '';
+  const a = Buffer.from(String(header || ''));
+  const b = Buffer.from(String(secret));
+  return !!secret && a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** A channel just went live: put the link in its first comment now. */
+export async function onWebhook({ tenantId = 'default', event }) {
+  if (!event || event.event_type !== HOOK_EVENT) return false;
+  const r = event.data || {};
+  if (!r.post_id || !r.success) return false;
+  const row = await repo.getByPost(r.post_id);
+  if (!row || row.status !== 'pending') return false;
+  const providers = await buildProviders(tenantId);
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+  const state = await commentOn(publish, row, r, 1);
+  // The timer closes the job (and retries a retryable failure) on its next pass.
+  await repo.finish(row.id, { status: 'pending', attempts: row.attempts || 0, nextAt: later(1) });
+  return state === 'ok';
+}
+
+export default { queue, runDue, commentText, webhookUrl, ensureWebhook, verifyWebhook, onWebhook };

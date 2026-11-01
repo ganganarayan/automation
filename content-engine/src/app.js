@@ -28,6 +28,7 @@ import * as videoPipeline from './modules/videoPipeline.js';
 import * as imageGate from './modules/imageGate.js';
 import * as instances from './modules/instances.js';
 import * as capture from './modules/capture.js';
+import * as firstComments from './modules/firstComments.js';
 import * as linkedinRelay from './modules/linkedinRelay.js';
 import * as videoScheduler from './modules/videoScheduler.js';
 import * as instanceReview from './modules/instanceReview.js';
@@ -96,6 +97,7 @@ export function createApp() {
     .add({ name: 'image-gate', enabled: true, register: imageGate.register })
     .add({ name: 'instances', enabled: true, register: instances.register })
     .add({ name: 'capture', enabled: true, register: capture.register })
+    .add({ name: 'first-comments', enabled: true, register: firstComments.register })
     .add({ name: 'linkedin-relay', enabled: true, register: linkedinRelay.register })
     .add({ name: 'video-scheduler', enabled: true, register: videoScheduler.register })
     .add({ name: 'instance-review', enabled: true, register: instanceReview.register })
