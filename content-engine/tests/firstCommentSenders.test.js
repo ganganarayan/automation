@@ -68,6 +68,32 @@ describe('firstCommentSenders', () => {
     await expect(s4.comment({ platform: 'facebook', postId: '1', token: 't', text: link })).rejects.toMatchObject({ retryable: false });
   });
 
+  it('fallback: a failed first token falls through to the next', async () => {
+    const { calls, req } = recorder([{ ok: false, status: 400, data: { error: { message: 'no perm' } } }, ok]);
+    const out = await createFirstCommentSenders({ request: req }).commentWithFallback({
+      platform: 'instagram', postId: 'm1', text: link, tokens: [{ via: 'meta', token: 'META' }, { via: 'postforme', token: 'PFM' }],
+    });
+    expect(out).toMatchObject({ state: 'ok', via: 'postforme' });
+    expect(out.tried[0]).toContain('meta');
+    expect(calls.map((c) => c.opts.headers.Authorization)).toEqual(['Bearer META', 'Bearer PFM']);
+  });
+
+  it('fallback: the first token that works is the only one used', async () => {
+    const { calls, req } = recorder(ok);
+    const out = await createFirstCommentSenders({ request: req }).commentWithFallback({
+      platform: 'facebook', postId: '1_2', text: link, tokens: [{ via: 'meta', token: 'META' }, { via: 'postforme', token: 'PFM' }],
+    });
+    expect(out.via).toBe('meta');
+    expect(calls.length).toBe(1);
+  });
+
+  it('fallback: every token failing throws both errors; no tokens is skipped', async () => {
+    const s = createFirstCommentSenders({ request: recorder({ ok: false, status: 400, data: { error: { message: 'bad' } } }).req });
+    await expect(s.commentWithFallback({ platform: 'facebook', postId: '1', text: link, tokens: [{ via: 'meta', token: 'a' }, { via: 'postforme', token: 'b' }] }))
+      .rejects.toThrow(/meta: .*\| postforme: /);
+    expect((await s.commentWithFallback({ platform: 'facebook', postId: '1', text: link, tokens: [] })).state).toBe('skipped');
+  });
+
   it('helpers', () => {
     expect(commentPlatform('X')).toBe('x');
     expect(commentPlatform('pinterest')).toBe('');

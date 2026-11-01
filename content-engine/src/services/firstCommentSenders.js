@@ -130,6 +130,30 @@ export function createFirstCommentSenders({ request: req = realRequest, log } = 
       await senders[key]({ postId, token, text, account });
       return { state: 'ok' };
     },
+
+    /**
+     * Try each token in order until one comments: [{ via, token }]. Returns
+     * { state: 'ok', via, tried } or { state: 'skipped' }; when every token
+     * fails, throws the last error (retryable only if that one was).
+     */
+    async commentWithFallback({ platform, postId, tokens = [], text, account }) {
+      const list = (tokens || []).filter((t) => t && t.token);
+      if (!list.length) return this.comment({ platform, postId, token: '', text, account });
+      const tried = [];
+      let last = null;
+      for (const { via, token } of list) {
+        try {
+          const out = await this.comment({ platform, postId, token, text, account });
+          if (out.state !== 'ok') return out;
+          return { ...out, via, tried };
+        } catch (err) {
+          tried.push(`${via}: ${err.message}`);
+          last = err;
+        }
+      }
+      last.message = tried.join(' | ');
+      throw last;
+    },
   };
 }
 

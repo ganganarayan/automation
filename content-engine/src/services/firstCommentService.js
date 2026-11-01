@@ -20,7 +20,8 @@ import * as repo from '../repositories/firstCommentsRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { buildProviders } from './providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
-import { createFirstCommentSenders } from './firstCommentSenders.js';
+import { createFirstCommentSenders, commentPlatform } from './firstCommentSenders.js';
+import * as captureConfig from './captureConfig.js';
 import { postOutcome } from '../utils/laneSpec.js';
 import { settings } from '../settings/index.js';
 import { childLogger } from '../core/logger.js';
@@ -57,6 +58,22 @@ export async function queue({ tenantId = 'default', postformePostId, link, sched
 const later = (minutes) => new Date(Date.now() + minutes * 60000);
 
 /**
+ * Tokens to comment with, in order. Facebook / Instagram: your own Meta token
+ * (the one comment → DM already replies with) first, then Post for Me's.
+ * Everything else: Post for Me's account token.
+ */
+async function tokensFor(tenantId, platform, postId, account = {}) {
+  const pfm = { via: 'postforme', token: account.access_token || '' };
+  const key = commentPlatform(platform);
+  if (key !== 'facebook' && key !== 'instagram') return [pfm];
+  const cfg = await captureConfig.forTenant(tenantId).catch(() => null);
+  // A Facebook post id is "{page-id}_{post-id}": the page id finds the token too.
+  const ids = [account.user_id, account.external_id, key === 'facebook' ? String(postId || '').split('_')[0] : ''].filter(Boolean);
+  const meta = ids.map((id) => captureConfig.tokenFor(cfg, id)).find(Boolean) || '';
+  return [{ via: 'meta', token: meta }, pfm].filter((t) => t.token && !(t.via === 'postforme' && t.token === meta));
+}
+
+/**
  * Comment on one channel's result, if it succeeded and nobody has claimed it.
  * Returns 'ok' | 'skipped' | 'failed' | 'retry' | null (nothing to do).
  */
@@ -69,11 +86,16 @@ async function commentOn(publish, row, r, attempts) {
   try {
     const account = await publish.getAccount(accountId);
     platform = (account && account.platform) || '';
-    const out = await senders.comment({
-      platform, postId: r.platform_data && r.platform_data.id, token: account && account.access_token, text: row.text, account,
+    const postId = r.platform_data && r.platform_data.id;
+    const out = await senders.commentWithFallback({
+      platform, postId, text: row.text, account,
+      tokens: await tokensFor(row.tenant_id, platform, postId, account),
     });
-    await repo.mark(row.id, accountId, { state: out.state, platform, ...(out.error ? { error: out.error } : {}) });
-    log.info({ post: row.postforme_post_id, platform, state: out.state }, 'first comment');
+    await repo.mark(row.id, accountId, {
+      state: out.state, platform, ...(out.via ? { via: out.via } : {}), ...(out.error ? { error: out.error } : {}),
+      ...(out.tried && out.tried.length ? { fallbackFrom: out.tried.join(' | ').slice(0, 200) } : {}),
+    });
+    log.info({ post: row.postforme_post_id, platform, state: out.state, via: out.via }, 'first comment');
     return out.state;
   } catch (err) {
     if (err.retryable && attempts < MAX_ATTEMPTS) {
