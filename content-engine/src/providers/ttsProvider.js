@@ -70,7 +70,7 @@ export async function listElevenLabsVoices(apiKey, { fetchImpl = fetch, maxPages
     }
     const data = await res.json();
     for (const v of data.voices || []) {
-      if (v && v.voice_id) voices.push({ voice_id: v.voice_id, name: v.name || v.voice_id, category: v.category || '' });
+      if (v && v.voice_id) voices.push({ voice_id: v.voice_id, name: v.name || v.voice_id, category: v.category || '', preview_url: v.preview_url || '' });
     }
     token = data.next_page_token || '';
     if (!data.has_more || !token) break;

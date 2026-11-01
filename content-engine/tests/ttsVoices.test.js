@@ -14,7 +14,7 @@ describe('listElevenLabsVoices', () => {
         : reply({ voices: [{ voice_id: 'a1', name: 'Ann', category: 'cloned' }], has_more: false, next_page_token: null });
     };
     const out = await listElevenLabsVoices('k', { fetchImpl });
-    expect(out).toEqual([{ voice_id: 'a1', name: 'Ann', category: 'cloned' }, { voice_id: 'b1', name: 'Zed', category: 'premade' }]);
+    expect(out).toEqual([{ voice_id: 'a1', name: 'Ann', category: 'cloned', preview_url: '' }, { voice_id: 'b1', name: 'Zed', category: 'premade', preview_url: '' }]);
     expect(calls[0].url).toContain('https://api.elevenlabs.io/v2/voices?page_size=100');
     expect(calls[1].url).toContain('next_page_token=p2');
     expect(calls.every((c) => c.key === 'k')).toBe(true);

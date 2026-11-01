@@ -1142,10 +1142,18 @@ function fieldRow(field, configMap) {
       <select id="vsel-${k}" class="pick" style="display:none" onchange="pickVoice('${k}')"></select>
       <input id="vid-${k}" type="text" name="set[${k}]" value="${esc(val)}"
         placeholder="${field.placeholder ? esc(field.placeholder) : ''}">
+      <p style="margin:.3rem 0 0"><button type="button" id="vplay-${k}" class="act" style="display:none" onclick="playVoice('${k}')">▶ Preview</button></p>
+      <audio id="vaud-${k}" preload="none"></audio>
       <p id="vmsg-${k}" class="hint">Loading your ElevenLabs voices…</p>
       <script>
-        function pickVoice(k){const s=document.getElementById('vsel-'+k),i=document.getElementById('vid-'+k);
-          if(s.value==='__type__'){i.style.display='';i.focus();}else{i.value=s.value;i.style.display='none';}}
+        function voicePreview(k){const o=document.getElementById('vsel-'+k).selectedOptions[0];return o?(o.dataset.preview||''):'';}
+        function syncPlay(k){const b=document.getElementById('vplay-'+k);b.style.display=voicePreview(k)?'':'none';}
+        function playVoice(k){const a=document.getElementById('vaud-'+k),b=document.getElementById('vplay-'+k),u=voicePreview(k);if(!u)return;
+          if(!a.paused&&a.src===u){a.pause();b.textContent='▶ Preview';return;}
+          a.src=u;b.textContent='■ Stop';a.onended=()=>{b.textContent='▶ Preview';};a.play().catch(()=>{b.textContent='▶ Preview';});}
+        function pickVoice(k){const s=document.getElementById('vsel-'+k),i=document.getElementById('vid-'+k),a=document.getElementById('vaud-'+k);
+          a.pause();document.getElementById('vplay-'+k).textContent='▶ Preview';
+          if(s.value==='__type__'){i.style.display='';i.focus();}else{i.value=s.value;i.style.display='none';}syncPlay(k);}
         (async function(k){
           const s=document.getElementById('vsel-'+k),i=document.getElementById('vid-'+k),m=document.getElementById('vmsg-'+k);
           const esc=(x)=>String(x).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -1156,9 +1164,9 @@ function fieldRow(field, configMap) {
           const known=vs.some((v)=>v.voice_id===cur);
           let h=cur?'':'<option value="" selected>Choose a voice…</option>';
           if(cur&&!known) h+='<option value="'+esc(cur)+'" selected>'+esc(cur)+' (saved, not on this key)</option>';
-          h+=vs.map((v)=>'<option value="'+esc(v.voice_id)+'"'+(v.voice_id===cur?' selected':'')+'>'+esc(v.name)+(v.category?' ('+esc(v.category)+')':'')+'</option>').join('');
+          h+=vs.map((v)=>'<option value="'+esc(v.voice_id)+'" data-preview="'+esc(v.preview_url||'')+'"'+(v.voice_id===cur?' selected':'')+'>'+esc(v.name)+(v.category?' ('+esc(v.category)+')':'')+'</option>').join('');
           h+='<option value="__type__">✎ Type an ID…</option>';
-          s.innerHTML=h; s.style.display=''; i.style.display='none';
+          s.innerHTML=h; s.style.display=''; i.style.display='none'; syncPlay(k);
           m.textContent=vs.length?('🟢 '+vs.length+' voice'+(vs.length===1?'':'s')+' on your ElevenLabs key.'):'🟡 No voices on your ElevenLabs key. Type a voice ID instead.';
           if(!vs.length){ s.style.display='none'; i.style.display=''; }
         })('${k}');
