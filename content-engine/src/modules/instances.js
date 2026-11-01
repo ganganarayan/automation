@@ -185,9 +185,10 @@ export function register(ctx) {
   router.post('/admin/instances/ready-ai/clean', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      const { funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, name, source } = req.body || {};
+      const { funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, name, source, runner } = req.body || {};
       if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
-      res.json({ ok: true, ...(await readyPost.startClean({ funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, name: String(name || ''), source })) });
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      res.json({ ok: true, ...(await readyPost.startClean({ funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, name: String(name || ''), source, runner: String(runner || ''), baseUrl })) });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -703,6 +704,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
             <div class="nowrow cleanrow"><span>Remove watermark + outro —</span>
               <label class="nowrow">zoom % <input id="zm-${id}" class="cleanzm" type="number" min="0" max="30" step="0.5" style="width:4.5rem"></label>
               <label class="nowrow">cut last s <input id="tr-${id}" class="cleantr" type="number" min="0" max="60" step="0.5" style="width:4.5rem"></label>
+              <label class="nowrow">on <select id="rn-${id}" class="cleanrn"><option value="">default (Settings)</option><option value="railway">Railway</option><option value="github">GitHub</option></select></label>
               <button class="act" id="cl-${id}" onclick="cleanVid('${id}')">✂ Clean video</button>
             </div>
             <div class="endcard">
@@ -934,13 +936,14 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     const cleaning = {};
     let CO = { zoomPct: 10, trimEndSec: 0, endText: '', endLink: '', endSec: 4 };
     try{ CO = Object.assign(CO, JSON.parse(localStorage.getItem('cleanOpts')||'{}')); }catch(e){}
+    document.querySelectorAll('.cleanrn').forEach(e=>{ e.value=CO.runner||''; });
     document.querySelectorAll('.cleanzm').forEach(e=>{ e.value=CO.zoomPct; }); document.querySelectorAll('.cleantr').forEach(e=>{ e.value=CO.trimEndSec; });
     document.querySelectorAll('.endtx').forEach(e=>{ e.value=CO.endText||''; }); document.querySelectorAll('.endln').forEach(e=>{ e.value=CO.endLink||CTA; }); document.querySelectorAll('.endsec').forEach(e=>{ e.value=CO.endSec; });
     const mmss = n=>Math.floor(n/60)+':'+String(Math.round(n)%60).padStart(2,'0');
     function bar(id, pct, on){ const b=$('pb',id); if(!b) return; b.classList.toggle('on', !!on); b.firstElementChild.style.width=Math.max(0,Math.min(100,pct||0))+'%'; b.classList.toggle('busy', on && !(pct>0)); }
     function showClean(id, c){
       bar(id, 0, false);
-      $('cs',id).innerHTML='🟢 Cleaned (zoom '+c.zoomPct+'%, cut last '+c.trimEndSec+' s'+(c.endSec?', end card '+c.endSec+' s':'')+' → '+mmss(c.durationSec||0)+') · <a href="'+c.url+'" target="_blank" rel="noopener">▶ Preview cleaned video</a> · posting uses this copy';
+      $('cs',id).innerHTML='🟢 Cleaned (zoom '+c.zoomPct+'%, cut last '+c.trimEndSec+' s'+(c.endSec?', end card '+c.endSec+' s':'')+' → '+mmss(c.durationSec||0)+(c.runner==='github'?', on GitHub':'')+') · <a href="'+c.url+'" target="_blank" rel="noopener">▶ Preview cleaned video</a> · posting uses this copy'+(c.runner==='github'?(c.removedAt?' (removed from your Drive after posting)':' (kept in your Google Drive until it posts)'):'');
       if($('zm',id)) $('zm',id).value=c.zoomPct; if($('tr',id)) $('tr',id).value=c.trimEndSec;
     }
     async function pollClean(id){
@@ -948,8 +951,11 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         const j=await post('clean-status', { driveId:id });
         if(j.ok && j.state==='running'){
           const secs=Math.round((Date.now()-j.startedAt)/1000);
-          const what = j.phase==='uploading' ? '⬆ Uploading the cleaned video to Post for Me…'
-            : j.phase==='encoding' ? '✂ Downloading + re-encoding… '+(j.pct||0)+'%'+(j.totalSec?(' ('+mmss(j.doneSec||0)+' of '+mmss(j.totalSec)+')'):'')
+          const gh = j.runner==='github';
+          const what = j.phase==='uploading' ? (gh ? '⬆ GitHub is uploading the cleaned video to your Google Drive…' : '⬆ Uploading the cleaned video to Post for Me…')
+            : j.phase==='encoding' ? (gh ? '✂ GitHub is re-encoding… ' : '✂ Downloading + re-encoding… ')+(j.pct||0)+'%'+(j.totalSec?(' ('+mmss(j.doneSec||0)+' of '+mmss(j.totalSec)+')'):'')
+            : j.phase==='downloading' ? '⬇ GitHub is downloading the video from Drive…'
+            : j.phase==='queued' ? '⏳ Waiting for a GitHub runner to pick it up…'
             : '✂ Starting… reading the video length';
           bar(id, j.phase==='uploading'?100:(j.pct||0), true);
           $('cs',id).textContent=what+' · '+secs+' s — you can work on other videos meanwhile';
@@ -964,10 +970,11 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if(cleaning[id]) return;
       const zoomPct=Number($('zm',id).value)||0, trimEndSec=Number($('tr',id).value)||0;
       const endText=$('ec',id).value, endLink=$('el',id).value.trim(), endSec=(endText.trim()||endLink)?(Number($('es',id).value)||0):0;
-      try{ localStorage.setItem('cleanOpts', JSON.stringify({ zoomPct, trimEndSec, endText, endLink, endSec:Number($('es',id).value)||0 })); }catch(e){}
+      const runner=$('rn',id) ? $('rn',id).value : '';
+      try{ localStorage.setItem('cleanOpts', JSON.stringify({ zoomPct, trimEndSec, endText, endLink, endSec:Number($('es',id).value)||0, runner })); }catch(e){}
       cleaning[id]=true; $('cl',id).disabled=true; bar(id, 0, true); $('cs',id).textContent='✂ Starting…';
       try{
-        const j=await post('clean', { driveId:id, zoomPct, trimEndSec, endText, endLink, endSec, name:$('nm',id).value, source:SOURCE });
+        const j=await post('clean', { driveId:id, zoomPct, trimEndSec, endText, endLink, endSec, name:$('nm',id).value, source:SOURCE, runner });
         if(!j.ok) throw new Error(j.error||'failed');
         pollClean(id);
       }catch(e){ cleaning[id]=false; $('cl',id).disabled=false; bar(id, 0, false); $('cs',id).textContent='⚠ '+e.message; }

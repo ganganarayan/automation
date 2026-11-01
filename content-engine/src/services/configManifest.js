@@ -65,6 +65,22 @@ export const CONFIG_MANIFEST = {
         ],
       },
       {
+        // Keep Railway until the GitHub run is tested; then switch the default.
+        title: 'Video clean (✂ Clean on the ready-video page)',
+        fields: [
+          {
+            key: 'clean_runner',
+            label: 'Default place ✂ Clean runs',
+            type: 'select',
+            default: 'railway',
+            options: [{ value: 'railway', label: 'Railway (this server)' }, { value: 'github', label: 'GitHub Actions (cleaned file goes to your Google Drive)' }],
+          },
+          { key: 'github_actions_token', label: 'GitHub token (fine-grained: this repo only, Actions = Read and write)', type: 'secret' },
+          { key: 'github_repo', label: 'GitHub repo (owner/name)', placeholder: 'ganganarayan/automation' },
+          { key: 'github_ref', label: 'Branch the clean runs from (blank = the branch this server was deployed from)', placeholder: 'orbitq on staging, main on production' },
+        ],
+      },
+      {
         title: 'Meta (comment → DM)',
         fields: [
           { key: 'meta_app_id', label: 'Meta app ID' },
@@ -124,8 +140,15 @@ export const CONFIG_MANIFEST = {
             key: 'google_oauth_client_id',
             label: 'Sign in with Google — OAuth client ID',
             placeholder: '1234567890-abc….apps.googleusercontent.com',
-            help: 'Web-application OAuth client. Its Authorized JavaScript origins must include this app\'s address. Used by "📂 Pick from Drive" on the ready-video pages. The client secret is NOT needed — never paste it here.',
+            help: 'Web-application OAuth client. Its Authorized JavaScript origins must include this app\'s address. Used by "📂 Pick from Drive" on the ready-video pages. Also used by "Connect Google Drive" below.',
           },
+          {
+            key: 'google_oauth_client_secret',
+            label: 'OAuth client secret (only for "Connect Google Drive")',
+            type: 'secret',
+            help: 'The same OAuth client\'s secret. It stays on the server; the browser never sees it.',
+          },
+          { key: 'google_drive_connect', label: 'Google Drive (for cleaned videos)', type: 'drive_connect' },
           {
             key: 'google_picker_api_key',
             label: 'Sign in with Google — Picker API key',

@@ -44,6 +44,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanWithCardArgs, progressPct } from '../utils/cleanSpec.js';
 import { writeFile } from 'node:fs/promises';
+import * as driveConnect from './driveConnectService.js';
+import { signTicket, peekTicket, readTicket, dispatchRequest, normalizeRunner, keepSecFor, DEFAULT_REPO } from '../utils/cleanHookSpec.js';
 import { TRANSCRIPT_REVIEW, postOutcome, mergeChannels, channelOutcome, channelText, nextAutoRetry, requestFromPost, AUTO_RETRY_MINUTES, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
 import { formatIst } from '../utils/time.js';
 import { driveEmbedUrl } from '../utils/reviewSpec.js';
@@ -468,15 +470,18 @@ const cleanJobs = new Map();
  * corner watermark leaves the frame, cut the outro), then upload it to Post for
  * Me. The page polls cleanStatus.
  */
-export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endText = '', endLink = '', endSec = 0, name = '', source = null }) {
+export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endText = '', endLink = '', endSec = 0, name = '', source = null, runner = '', baseUrl = '' }) {
   if (!driveId) throw new Error('driveId required');
   const id = String(driveId);
   const { funnel } = await loadFunnel(funnelId);
   const providers = await buildProviders(funnel.tenant_id);
-  if (!providers.resolved.postformeKey) throw new Error('No Post for Me API key — set it under Settings → API Keys');
   const job = cleanJobs.get(id);
   if (job && job.state === 'running') return job;
   const opts = { ...normalizeCleanOpts({ zoomPct, trimEndSec }), ...normalizeEndCard({ endText, endLink, endSec }) };
+  // GitHub Actions runs ffmpeg and keeps the file in your Drive; Railway is the original path.
+  const where = normalizeRunner(runner || (providers.resolved.clean || {}).runner);
+  if (where === 'github') return startCleanGithub({ funnel, providers, id, opts, name, source, baseUrl });
+  if (!providers.resolved.postformeKey) throw new Error('No Post for Me API key — set it under Settings → API Keys');
   const running = { state: 'running', startedAt: Date.now(), phase: 'starting', pct: 0, ...opts };
   cleanJobs.set(id, running);
   const onPhase = (patch) => { const j = cleanJobs.get(id); if (j && j.state === 'running') Object.assign(j, patch); };
@@ -491,8 +496,7 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endTe
 
 async function runClean({ funnel, providers, driveId, opts, name, source, onPhase = () => {} }) {
   const total = (await videoDurations([driveId]))[driveId] || 0;
-  if (opts.trimEndSec && !total) throw new Error("couldn't read the video's length to trim its end");
-  const keepSec = opts.trimEndSec ? Math.max(1, total - opts.trimEndSec) : 0;
+  const keepSec = keepSecFor(total, opts.trimEndSec);
   const dir = await mkdtemp(join(tmpdir(), 'clean-'));
   try {
     const outPath = join(dir, 'clean.mp4');
@@ -526,6 +530,136 @@ async function runClean({ funnel, providers, driveId, opts, name, source, onPhas
   }
 }
 
+/**
+ * ✂ Clean on GitHub Actions: send the workflow a signed ticket (the only thing
+ * it holds). The workflow then calls the clean hooks below with it: job details
+ * + a short-lived Drive token, progress, the end-card image, done / failed.
+ */
+async function startCleanGithub({ funnel, providers, id, opts, name, source, baseUrl }) {
+  const tenantId = funnel.tenant_id;
+  const c = providers.resolved.clean || {};
+  if (!(await driveConnect.status(tenantId)).connected) {
+    throw new Error('Google Drive is not connected — Settings → Workspace → Google → Connect Google Drive');
+  }
+  if (!/^https:\/\//.test(baseUrl || '')) throw new Error("couldn't tell this app's https address for GitHub to call back");
+  const ticket = signTicket({ t: tenantId, f: funnel.id, d: id, o: opts, n: String(name || '').slice(0, 200), s: sourceOf(source) }, await driveConnect.hookSecret(tenantId));
+  const ref = c.githubRef || process.env.RAILWAY_GIT_BRANCH || 'main';
+  const { url, init } = dispatchRequest({ repo: c.githubRepo || DEFAULT_REPO, token: c.githubToken, ref, hook: baseUrl, ticket });
+  const res = await fetch(url, init);
+  if (res.status !== 204) {
+    const text = await res.text().catch(() => '');
+    let msg = text.slice(0, 200);
+    try { msg = JSON.parse(text).message || msg; } catch { /* keep the raw text */ }
+    throw new Error(`GitHub refused to start the clean (${res.status}): ${msg || 'no reason given'}`);
+  }
+  const running = { state: 'running', runner: 'github', startedAt: Date.now(), lastAt: Date.now(), phase: 'queued', pct: 0, ...opts };
+  cleanJobs.set(id, running);
+  log.info({ driveId: id, ref }, 'clean sent to GitHub Actions');
+  return running;
+}
+
+/** A clean hook call whose ticket is missing, forged or expired. */
+export class HookError extends Error {}
+
+/** The ticket's payload, checked against its tenant's secret. */
+async function hookTicket(ticket) {
+  const peek = peekTicket(ticket);
+  if (!peek || !peek.t || !peek.d) throw new HookError('bad ticket');
+  const p = readTicket(ticket, await driveConnect.hookSecret(peek.t));
+  if (!p || !p.d || !p.f) throw new HookError('ticket is invalid or expired');
+  return p;
+}
+
+function hookPhase(driveId, patch) {
+  const j = cleanJobs.get(driveId);
+  const base = j && j.state === 'running' ? j : { state: 'running', runner: 'github', startedAt: Date.now(), phase: 'queued', pct: 0 };
+  cleanJobs.set(driveId, { ...base, ...patch, lastAt: Date.now() });
+}
+
+const safeFileName = (s) => String(s || '').replace(/\.[a-z0-9]{2,4}$/i, '').replace(/[^\p{L}\p{N} ._-]+/gu, ' ').trim().slice(0, 120) || 'video';
+
+/** What the workflow needs: where to download, the options, a Drive token and the app folder. */
+export async function cleanHookJob({ ticket }) {
+  const p = await hookTicket(ticket);
+  const { token, folderId } = await driveConnect.drive(p.t);
+  hookPhase(p.d, { phase: 'downloading', pct: 0 });
+  const o = p.o || {};
+  return {
+    driveId: p.d,
+    downloadUrl: publicDlUrl(p.d),
+    zoomPct: o.zoomPct || 0,
+    trimEndSec: o.trimEndSec || 0,
+    endSec: o.endSec || 0,
+    accessToken: token,
+    folderId,
+    fileName: `${safeFileName(p.n || p.d)} (clean).mp4`,
+  };
+}
+
+/** A fresh Drive token just before the upload (the first one may be close to expiring after a long encode). */
+export async function cleanHookToken({ ticket }) {
+  const p = await hookTicket(ticket);
+  const { token, folderId } = await driveConnect.drive(p.t);
+  return { accessToken: token, folderId };
+}
+
+/** The end card as a PNG at the video's own size. */
+export async function cleanHookCard({ ticket, w, h }) {
+  const p = await hookTicket(ticket);
+  const o = p.o || {};
+  return sharp(Buffer.from(endCardSvg({ w: Number(w) || 1080, h: Number(h) || 1920, text: o.endText, link: o.endLink }))).png().toBuffer();
+}
+
+export async function cleanHookProgress({ ticket, phase, pct, doneSec, totalSec }) {
+  const p = await hookTicket(ticket);
+  const ph = ['downloading', 'encoding', 'uploading'].includes(phase) ? phase : 'encoding';
+  hookPhase(p.d, { phase: ph, pct: Math.max(0, Math.min(100, Math.round(Number(pct) || 0))), doneSec: Math.round(Number(doneSec) || 0), totalSec: Math.round(Number(totalSec) || 0) });
+  return { ok: true };
+}
+
+/** The cleaned file is in the app's Drive folder: share it by link and keep it on the video's instance. */
+export async function cleanHookDone({ ticket, fileId, durationSec }) {
+  const p = await hookTicket(ticket);
+  if (!/^[\w-]{10,}$/.test(String(fileId || ''))) throw new HookError('fileId required');
+  const { client, folderId } = await driveConnect.drive(p.t);
+  const meta = await client.fileMeta(fileId);
+  if (folderId && Array.isArray(meta.parents) && !meta.parents.includes(folderId)) throw new HookError('file is not in the app folder');
+  const { funnel } = await loadFunnel(p.f);
+  if (String(funnel.tenant_id) !== String(p.t)) throw new HookError('ticket does not match the funnel');
+  await client.makePublic(fileId);
+  const clean = { url: publicDlUrl(fileId), driveFileId: String(fileId), runner: 'github', ...(p.o || {}), durationSec: Math.round(Number(durationSec) || 0), at: new Date().toISOString() };
+  await saveClean(funnel, p.d, clean, { name: p.n || '', source: p.s || null });
+  cleanJobs.set(p.d, { state: 'done', clean });
+  log.info({ driveId: p.d, fileId }, 'video cleaned on GitHub Actions');
+  return { ok: true };
+}
+
+export async function cleanHookFail({ ticket, error }) {
+  const p = await hookTicket(ticket);
+  const msg = String(error || 'the GitHub run failed').slice(0, 400);
+  cleanJobs.set(p.d, { state: 'failed', error: `GitHub: ${msg}` });
+  log.warn({ driveId: p.d, error: msg }, 'GitHub clean failed');
+  return { ok: true };
+}
+
+/**
+ * Once every channel has posted, the GitHub-cleaned copy is removed from your
+ * Drive (the posts are live). Returns the steps with that noted.
+ */
+async function dropCleanedCopy(tenantId, steps) {
+  const video = ((steps.find((x) => x.key === 'stitch') || {}).artifacts || {}).video || {};
+  const c = video.clean;
+  if (!c || !c.driveFileId || c.removedAt) return steps;
+  try {
+    const { client } = await driveConnect.drive(tenantId);
+    await client.deleteFile(c.driveFileId);
+    return patchStep(steps, 'stitch', { artifacts: { video: { ...video, clean: { ...c, removedAt: new Date().toISOString() } } } });
+  } catch (err) {
+    log.warn({ err: err.message, fileId: c.driveFileId }, 'could not remove the cleaned copy from Drive');
+    return steps;
+  }
+}
+
 /** Keep the cleaned video on the video's draft instance (made if there's none yet). */
 async function saveClean(funnel, driveId, clean, { name = '', source = null } = {}) {
   const { inst, steps: base } = await ensureInstance({ funnel, driveId, name, title: 'Ready video (cleaned)', source });
@@ -538,6 +672,12 @@ async function saveClean(funnel, driveId, clean, { name = '', source = null } = 
 /** Where a clean job stands (running / done / failed), else the saved cleaned video. */
 export async function cleanStatus({ funnelId, driveId }) {
   const job = cleanJobs.get(String(driveId));
+  // A GitHub run that has gone quiet for 40 min isn't coming back.
+  if (job && job.state === 'running' && job.runner === 'github' && Date.now() - (job.lastAt || job.startedAt) > 40 * 60 * 1000) {
+    const failed = { state: 'failed', error: 'GitHub went quiet for 40 min — check the Actions tab, then press ✂ Clean again' };
+    cleanJobs.set(String(driveId), failed);
+    return failed;
+  }
   if (job) return job;
   const { funnel } = await loadFunnel(funnelId);
   const d = (await loadDrafts(funnel, [String(driveId)]))[String(driveId)];
@@ -807,6 +947,7 @@ export async function refreshScheduled({ tenantId = 'default' } = {}) {
       const retry = pub.retry || { attempts: 0 };
       const nextAt = outcome === 'posted' ? null : nextAutoRetry(channels, retry.attempts);
       steps = patchStep(steps, 'publish', { artifacts: { channels, retry: { ...retry, nextAt } } });
+      if (outcome === 'posted') steps = await dropCleanedCopy(tenantId, steps);
       await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
       const when = postedAt || new Date();
       const failedNote = channels.filter((c) => c.state === 'failed').map((c) => channelText(c)).join('; ');
@@ -980,5 +1121,5 @@ function esc(s) {
 }
 
 export default {
-  refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, postSelections,
+  refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, postSelections,
 };

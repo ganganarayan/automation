@@ -1,0 +1,64 @@
+name: Clean a ready video
+
+# ✂ Clean on GitHub Actions. The content-engine app starts this (workflow_dispatch
+# via the GitHub API, using the token saved under Settings → API Keys → Video
+# clean) when a video's ✂ Clean is set to run on GitHub. Nobody needs to run it
+# by hand, and the repo needs no secrets: the run carries only a signed ticket
+# that expires in a few hours.
+#
+# What it does (content-engine/scripts/gha-clean.mjs): download the video from
+# Drive → ffmpeg with the same zoom / cut / end-card args as the Railway path →
+# upload to the "content-engine clean" folder in your Google Drive → tell the app.
+#
+# GitHub only lets the API start a workflow whose file is on the default branch
+# (main), so this file has to be on main before the first run. The run then
+# uses the code of the branch the app asked for (orbitq from staging).
+
+run-name: "✂ Clean (${{ github.ref_name }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      hook:
+        description: "The app's https address (filled in by the app)"
+        required: true
+      ticket:
+        description: "Signed job ticket (filled in by the app)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Hide the ticket in the logs
+        env:
+          TICKET: ${{ inputs.ticket }}
+        run: echo "::add-mask::$TICKET"
+
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            content-engine/scripts
+            content-engine/src/utils
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install ffmpeg
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          fi
+          ffmpeg -version | head -1
+
+      - name: Clean, upload to Drive, tell the app
+        working-directory: content-engine
+        env:
+          HOOK: ${{ inputs.hook }}
+          TICKET: ${{ inputs.ticket }}
+        run: node scripts/gha-clean.mjs

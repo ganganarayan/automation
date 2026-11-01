@@ -981,6 +981,33 @@ function fieldRow(field, configMap) {
       </div>
       <p class="hint">Save your SMTP settings first, then send a test to confirm delivery (check spam once).</p></div>`;
   }
+  if (field.type === 'drive_connect') {
+    // Status is fetched live (the refresh token itself never reaches the page).
+    return `<div class="field"><label>${esc(field.label)}</label>
+      <div class="row" style="gap:.4rem;align-items:center">
+        <a class="act" href="/api/v1/admin/drive/connect" style="text-decoration:none">🔗 Connect Google Drive</a>
+        <button type="button" class="act" id="drive-dc" style="display:none" onclick="driveDisconnect()">Disconnect</button>
+        <span id="drive-st" class="hint">Checking…</span>
+      </div>
+      <p class="hint">Save the client ID and secret above first. In Google Cloud → Credentials → this OAuth client, add the redirect URI
+        <b id="drive-ru"></b>. Set the OAuth consent screen to <b>In production</b>: in "Testing" Google expires the connection after 7 days.
+        Cleaned videos go to the folder "content-engine clean" in that Drive and are deleted once every channel has posted.</p>
+      <script>
+        document.getElementById('drive-ru').textContent=location.origin+'/api/v1/admin/drive/callback';
+        (async function(){
+          const st=document.getElementById('drive-st');
+          try{
+            const j=await (await fetch('/api/v1/admin/drive/status')).json();
+            st.textContent=j.connected?('🟢 Connected as '+(j.email||'your Google account')):'🟡 Not connected';
+            if(j.connected) document.getElementById('drive-dc').style.display='';
+          }catch(e){ st.textContent='🟡 Could not check: '+e.message; }
+        })();
+        async function driveDisconnect(){
+          if(!confirm('Disconnect Google Drive? GitHub cleans stop until you connect again.')) return;
+          await fetch('/api/v1/admin/drive/disconnect',{method:'POST'}); location.reload();
+        }
+      </script></div>`;
+  }
   if (field.type === 'generated_secret') {
     const fid = `gs-${field.key}`;
     return `<div class="field"><label>${esc(field.label)}</label>

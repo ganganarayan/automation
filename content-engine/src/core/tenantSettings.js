@@ -76,6 +76,15 @@ export async function forTenant(tenantId = 'default') {
       oauthClientId: String(pick('google_oauth_client_id', '') || '').trim(),
       pickerApiKey: String(pick('google_picker_api_key', '') || '').trim(),
       projectNumber: String(pick('google_project_number', '') || '').trim(),
+      // The one-time "Connect Google Drive" (server side) needs the secret too.
+      oauthClientSecret: String(pick('google_oauth_client_secret', '') || '').trim(),
+    },
+    // ✂ Clean: where it runs, and the GitHub Actions runner's settings.
+    clean: {
+      runner: String(pick('clean_runner', 'railway') || 'railway').trim(),
+      githubToken: String(pick('github_actions_token', '') || '').trim(),
+      githubRepo: String(pick('github_repo', '') || '').trim(),
+      githubRef: String(pick('github_ref', '') || '').trim(),
     },
     sheets: {
       gita: pick('gita_sheet_id', settings.sheets.gita),

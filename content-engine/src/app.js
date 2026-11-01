@@ -35,6 +35,7 @@ import * as imageFactory from './modules/imageFactory.js';
 import * as dashboard from './modules/dashboard.js';
 import * as configUi from './modules/configUi.js';
 import * as authModule from './modules/auth.js';
+import * as cleanHooks from './modules/cleanHooks.js';
 import * as admin from './modules/admin.js';
 
 export function createApp() {
@@ -101,6 +102,7 @@ export function createApp() {
     .add({ name: 'image-factory', enabled: settings.modules.imageFactory, register: imageFactory.register })
     .add({ name: 'dashboard', enabled: settings.modules.dashboard, register: dashboard.register })
     .add({ name: 'auth', enabled: settings.modules.admin, register: authModule.register })
+    .add({ name: 'clean-hooks', enabled: settings.modules.admin, register: cleanHooks.register })
     .add({ name: 'config-ui', enabled: settings.modules.admin, register: configUi.register })
     .add({ name: 'admin', enabled: settings.modules.admin, register: admin.register });
 
