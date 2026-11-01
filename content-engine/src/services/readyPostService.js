@@ -556,7 +556,7 @@ async function startCleanGithub({ funnel, providers, id, opts, name, source, bas
   const tenantId = funnel.tenant_id;
   const c = providers.resolved.clean || {};
   if (!(await driveConnect.status(tenantId)).connected) {
-    throw new Error('Google Drive is not connected — Settings → Workspace → Google → Connect Google Drive');
+    throw new Error('Google Drive is not connected — Setup → Settings → Google → Connect Google Drive');
   }
   if (!/^https:\/\//.test(baseUrl || '')) throw new Error("couldn't tell this app's https address for GitHub to call back");
   const ticket = signTicket({ t: tenantId, f: funnel.id, d: id, o: opts, n: String(name || '').slice(0, 200), s: sourceOf(source) }, await driveConnect.hookSecret(tenantId));

@@ -120,7 +120,7 @@ export const CONFIG_MANIFEST = {
   'content-engine': {
     // Only settings shared by every funnel live here. Per-funnel content
     // sources, accounts and schedules are set in each funnel's setup.
-    label: 'Workspace',
+    label: 'Settings',
     blurb: 'Settings shared by every funnel: Google access, email, reports, comment capture, LinkedIn relay.',
     groups: [
       {

@@ -46,7 +46,7 @@ export async function hookSecret(tenantId = 'default') {
 async function client(tenantId) {
   const g = (await tenantSettings.forTenant(tenantId)).google;
   if (!g.oauthClientId || !g.oauthClientSecret) {
-    throw new Error('Set the Google OAuth client ID and client secret first (Settings → Workspace → Google)');
+    throw new Error('Set the Google OAuth client ID and client secret first (Setup → Settings → Google)');
   }
   return { clientId: g.oauthClientId, clientSecret: g.oauthClientSecret };
 }
@@ -99,7 +99,7 @@ export async function accessToken(tenantId = 'default') {
   const hit = tokens.get(tenantId);
   if (hit && hit.until > Date.now()) return hit.token;
   const refresh = await tenantConfig.get(tenantId, K.refresh);
-  if (!refresh) throw new Error('Google Drive is not connected — Settings → Workspace → Google → Connect Google Drive');
+  if (!refresh) throw new Error('Google Drive is not connected — Setup → Settings → Google → Connect Google Drive');
   const tok = await refreshAccess({ ...(await client(tenantId)), refreshToken: refresh });
   tokens.set(tenantId, { token: tok.access_token, until: Date.now() + (Number(tok.expires_in) || 3600) * 1000 - 5 * 60 * 1000 });
   return tok.access_token;

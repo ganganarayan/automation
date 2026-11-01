@@ -27,8 +27,9 @@ export const WORK_ITEMS = [
 ];
 
 /** The settings panels, in the order they appear on the settings page. */
-export function setupItems() {
+export function setupItems({ superAdmin = false } = {}) {
   return [
+    ...(superAdmin ? [{ id: 'tenants', label: 'Tenants' }] : []),
     { id: 'users', label: 'Users' },
     { id: 'funnels', label: 'Funnels' },
     ...APPS.map((a) => ({ id: a, label: CONFIG_MANIFEST[a].label })),
@@ -43,13 +44,14 @@ export function setupItems() {
  * @param {string} [opts.key]     - access key, appended so a fresh tab stays in.
  * @param {boolean} [opts.tabs]   - true on the settings page: SETUP items become
  *                                  buttons wired to its own show() tab switcher.
+ * @param {boolean} [opts.superAdmin] - adds the Tenants panel.
  */
-export function navHtml({ current = '', key = '', tabs = false } = {}) {
+export function navHtml({ current = '', key = '', tabs = false, superAdmin = false } = {}) {
   const work = WORK_ITEMS
     .map((it) => `<a class="nv${current === it.id ? ' on' : ''}" href="${esc(withKey(it.href, key))}"><span class="nvi">${it.icon}</span>${esc(it.label)}</a>`)
     .join('');
 
-  const setup = setupItems()
+  const setup = setupItems({ superAdmin })
     .map((it) => (tabs
       ? `<button type="button" class="nv nav" data-target="${esc(it.id)}" onclick="show('${esc(it.id)}')"><span class="nvi"></span>${esc(it.label)}</button>`
       : `<a class="nv" href="${esc(withKey(SETTINGS_PATH, key))}#${esc(it.id)}"><span class="nvi"></span>${esc(it.label)}</a>`))

@@ -45,4 +45,20 @@ export async function create({ id, name }) {
   return rows[0];
 }
 
-export default { isActive, findById, list, create };
+/** Every tenant with its subscription details (the super admin's Tenants list). */
+export async function listWithSubscription() {
+  const { rows } = await query(
+    `SELECT id, name, status, owner_email, phone, COALESCE(subscribed_at, created_at) AS subscribed_at, expires_at
+       FROM tenants ORDER BY (id = $1) DESC, created_at ASC`,
+    ['default'],
+  );
+  return rows;
+}
+
+/** Set (or clear, with null) a tenant's expiry date. */
+export async function setExpiry(tenantId, expiresAt) {
+  const { rowCount } = await query('UPDATE tenants SET expires_at = $2 WHERE id = $1', [tenantId, expiresAt]);
+  if (!rowCount) throw new Error('tenant not found');
+}
+
+export default { isActive, findById, list, create, listWithSubscription, setExpiry };

@@ -23,6 +23,7 @@
  *   POST /api/v1/admin/tenants               create a tenant
  *   POST /api/v1/admin/users/role            change a user's role (JSON, auto-save)
  *   POST /api/v1/admin/users/plan            change a user's plan end (JSON, auto-save)
+ *   POST /api/v1/admin/tenants/expiry        change a tenant's expiry (super admin, JSON, auto-save)
  *   GET  /api/v1/admin/users/billing         a user's billing history (JSON)
  */
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
@@ -32,6 +33,8 @@ import { WIZARD_STEPS, completeness } from '../services/videoWizardManifest.js';
 import * as imageGateService from '../services/imageGateService.js';
 import * as configService from '../services/configService.js';
 import * as users from '../repositories/usersRepository.js';
+import * as tenantRepo from '../repositories/tenantRepository.js';
+import { formatIst } from '../utils/time.js';
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as tenantSettings from '../core/tenantSettings.js';
 import * as tenantConfigRepo from '../repositories/tenantConfigRepository.js';
@@ -62,8 +65,10 @@ export function register(ctx) {
       ]);
       const funnelConfigs = {};
       for (const f of funnelList) funnelConfigs[f.id] = await funnels.getConfig(f.id).catch(() => ({}));
+      const superAdmin = !!(session && session.role === 'super_admin');
+      const tenantList = superAdmin ? await tenantRepo.listWithSubscription().catch(() => []) : [];
       res.type('html').send(
-        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', key: '', saved: req.query.saved }),
+        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', key: '', saved: req.query.saved, superAdmin, tenantList }),
       );
     } catch (err) {
       next(err);
@@ -304,6 +309,22 @@ export function register(ctx) {
     }
   });
 
+  // Super admin only: extend (or clear) a tenant's expiry; saves on change.
+  router.post('/admin/tenants/expiry', async (req, res) => {
+    try {
+      const session = await currentSession(req);
+      if (!session || session.role !== 'super_admin') return res.status(403).json({ ok: false, error: 'super admin only' });
+      const date = String(req.body?.date || '');
+      if (date && !/^d{4}-d{2}-d{2}$/.test(date)) throw new Error('pick a valid date');
+      // The end of that day in IST, so "expires 30-11-2026" covers all of the 30th.
+      const expiresAt = date ? new Date(`${date}T23:59:59+05:30`) : null;
+      await tenantRepo.setExpiry(String(req.body?.tenant || ''), expiresAt);
+      res.json({ ok: true, expires: expiresAt ? formatIst(expiresAt, { withTime: false }) : '' });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   // Send a test email using the tenant's saved SMTP settings.
   router.post('/admin/test-email', async (req, res, next) => {
     try {
@@ -338,8 +359,8 @@ export function register(ctx) {
 
 // ---- rendering -------------------------------------------------------------
 
-function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, key, saved }) {
-  const menu = navHtml({ key, tabs: true });
+function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, key, saved, superAdmin = false, tenantList = [] }) {
+  const menu = navHtml({ key, tabs: true, superAdmin });
 
   const appSections = APPS
     .map((a) => (hasFlow(a) ? flowSection(a, tenantId, configMap, key) : appSection(a, tenantId, configMap, key)))
@@ -427,6 +448,7 @@ ${NAV_CSS}
     ${saved ? `<div class="flash">Saved <b>${esc(saved)}</b>.</div>` : ''}
     <div id="flash-error" class="flash err" style="display:none"></div>
 
+    ${superAdmin ? tenantsPanel({ tenantList }) : ''}
     ${usersPanel({ userList, me })}
     ${funnelsPanel({ funnelList, funnelConfigs, tenantId, key })}
     ${appSections}
@@ -456,6 +478,21 @@ ${NAV_CSS}
     dt.disabled=forever;
     try{ await post('users/plan',{email,forever,date:dt.value}); flag(i); }
     catch(e){ alert('Could not change plan: '+(e.error||'')); }
+  }
+  async function saveExpiry(i, tenant){
+    const dt=document.getElementById('tx-'+i);
+    try{ await post('tenants/expiry',{tenant,date:dt.value}); flag('t'+i); }
+    catch(e){ alert('Could not change expiry: '+(e.error||'')); }
+  }
+  function extendExpiry(i, tenant, months){
+    const dt=document.getElementById('tx-'+i);
+    const today=new Date(); today.setHours(0,0,0,0);
+    let base=dt.value?new Date(dt.value+'T00:00:00'):today;
+    if(base<today) base=today;
+    base.setMonth(base.getMonth()+months);
+    const p=(n)=>String(n).padStart(2,'0');
+    dt.value=base.getFullYear()+'-'+p(base.getMonth()+1)+'-'+p(base.getDate());
+    saveExpiry(i, tenant);
   }
   async function toggleBilling(i, email){
     const box=document.getElementById('bill-'+i);
@@ -544,6 +581,37 @@ ${NAV_CSS}
 </script>`;
 }
 
+function tenantsPanel({ tenantList }) {
+  const rows = (tenantList || [])
+    .map((t, i) => {
+      // The date input wants YYYY-MM-DD; the expiry is the end of that IST day.
+      const ex = t.expires_at ? new Date(new Date(t.expires_at).getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10) : '';
+      const expired = t.expires_at && new Date(t.expires_at) < new Date();
+      return `<tr>
+        <td>${esc(t.name)}${t.status !== 'active' ? ` <span class="pill">${esc(t.status)}</span>` : ''}</td>
+        <td>${esc(t.owner_email || '—')}</td>
+        <td>${esc(t.phone || '—')}</td>
+        <td>${esc(formatIst(t.subscribed_at, { withTime: false }))}</td>
+        <td><div class="planwrap">
+          <input id="tx-${i}" type="date" value="${ex}" onchange="saveExpiry(${i}, '${escJs(t.id)}')" title="${expired ? 'expired' : ''}">
+          <button class="act" type="button" onclick="extendExpiry(${i}, '${escJs(t.id)}', 1)">+1 month</button>
+          <button class="act" type="button" onclick="extendExpiry(${i}, '${escJs(t.id)}', 12)">+1 year</button>
+          <span id="flag-t${i}" class="saveflag">saved</span>
+        </div>${expired ? '<div class="hint">🔴 expired</div>' : ''}</td>
+      </tr>`;
+    })
+    .join('');
+
+  return `<section class="panel card" id="panel-tenants">
+    <h2>Tenants</h2>
+    <p class="blurb">Every customer account. Change an expiry date, or press +1 month / +1 year, and it saves at once. A blank expiry means it never expires.</p>
+    <fieldset><legend>Tenants</legend>
+      <table><thead><tr><th>Tenant</th><th>Email</th><th>Phone</th><th>Subscribed</th><th>Expires</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="hint">No tenants yet.</td></tr>'}</tbody></table>
+    </fieldset>
+  </section>`;
+}
+
 function usersPanel({ userList, me }) {
   const rows = (userList || [])
     .map((u, i) => {
@@ -553,9 +621,9 @@ function usersPanel({ userList, me }) {
         .join('');
       const forever = !u.plan_ends_at;
       const dateVal = u.plan_ends_at ? new Date(u.plan_ends_at).toISOString().slice(0, 10) : '';
-      const lastLogin = u.last_login_at ? new Date(u.last_login_at).toISOString().slice(0, 16).replace('T', ' ') : '—';
+      const lastLogin = formatIst(u.last_login_at);
       return `<tr>
-        <td>${esc(u.email)}${isSuper ? ' <span class="pill">super</span>' : ''}</td>
+        <td>${esc(u.email)}</td>
         <td><select onchange="saveRole(${i}, '${escJs(u.email)}', this)"${isSuper ? ' disabled title="protected"' : ''}>${roleSel}</select></td>
         <td><div class="planwrap">
           <input id="dt-${i}" type="date" value="${dateVal}"${forever ? ' disabled' : ''} onchange="savePlan(${i}, '${escJs(u.email)}')">
@@ -575,7 +643,7 @@ function usersPanel({ userList, me }) {
     <fieldset><legend>Users</legend>
       <table><thead><tr><th>Email</th><th>Role</th><th>Plan ends</th><th>Last login</th><th></th></tr></thead>
         <tbody>${rows || '<tr><td colspan="5" class="hint">No users yet — they appear here after signing up.</td></tr>'}</tbody></table>
-      <p class="hint">The super admin (${esc(users.SUPER_ADMIN_EMAIL)}) is protected and cannot be demoted or removed.</p>
+      <p class="hint">The super admin is protected: it cannot be demoted or removed.</p>
     </fieldset>
 
     <fieldset><legend>Sign-in</legend>

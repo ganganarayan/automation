@@ -88,7 +88,7 @@ GitHub cron can start 5 to 30 minutes late. That's acceptable for 16:00 and 10:0
 **Fix in this plan:**
 - The Post for Me webhook wakes the app and runs the check at once, with the 08:20 cron as a backup.
 - Every lane goes through the same instance → Post for Me → check → email path. Today AI videos and image posts never get a go-live email.
-- One central notification address in Settings → Workspace is used by every email, so a funnel with a blank approval address no longer goes silent.
+- One central notification address in Setup → Settings is used by every email, so a funnel with a blank approval address no longer goes silent.
 
 ## What's resolved and what's left
 
@@ -127,7 +127,7 @@ GitHub cron can start 5 to 30 minutes late. That's acceptable for 16:00 and 10:0
 
 ## Build order
 
-**Step 1 status (01-11-2026): built, on staging.** The Post for Me webhook and an /api/v1/jobs/check-posts wake-up run the post check (one run at a time). Every boot catches up on what went live while asleep. The heartbeat holds the app awake during Clean, AI-video renders and post checks. The job runner goes idle when its queue is empty; its 5-second database poll used to keep the app from ever sleeping. AI videos go through scheduled → post check → go-live email, and post at once if approved late. There is a central Notification email under Settings → Workspace → Emails. The backup cron is .github/workflows/post-check.yml (08:20 and 20:20 IST). Its secrets still need setting, and it only runs from main. Production still has Serverless (sleep) **off**. Turn it on in Railway once this is on main.
+**Step 1 status (01-11-2026): built, on staging.** The Post for Me webhook and an /api/v1/jobs/check-posts wake-up run the post check (one run at a time). Every boot catches up on what went live while asleep. The heartbeat holds the app awake during Clean, AI-video renders and post checks. The job runner goes idle when its queue is empty; its 5-second database poll used to keep the app from ever sleeping. AI videos go through scheduled → post check → go-live email, and post at once if approved late. There is a central Notification email under Setup → Settings → Emails. The backup cron is .github/workflows/post-check.yml (08:20 and 20:20 IST). Its secrets still need setting, and it only runs from main. Production still has Serverless (sleep) **off**. Turn it on in Railway once this is on main.
 
 1. **Clock + go-live for every lane:**
    - GitHub cron wakes at 16:00, 10:00 and 08:20

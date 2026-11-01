@@ -1,7 +1,7 @@
 /**
  * Module: Google Drive connect + the GitHub Actions ✂ Clean hooks.
  *
- * Purpose:      The one-time "Connect Google Drive" (Settings → Workspace →
+ * Purpose:      The one-time "Connect Google Drive" (Setup → Settings →
  *               Google), and the endpoints the clean-video workflow calls back.
  * Responsibility: HTTP wiring only; logic in driveConnectService / readyPostService.
  * Dependencies: accessService, driveConnectService, readyPostService, cleanHookSpec.

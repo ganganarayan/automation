@@ -54,7 +54,7 @@ export function readTicket(ticket, secret, now = Date.now()) {
 
 /** Google's consent screen for the one-time Drive connect (offline = a refresh token). */
 export function driveAuthUrl({ clientId, redirectUri, state }) {
-  if (!clientId) throw new Error('Set the OAuth client ID first (Settings → Workspace → Google)');
+  if (!clientId) throw new Error('Set the OAuth client ID first (Setup → Settings → Google)');
   const q = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,

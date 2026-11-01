@@ -624,7 +624,7 @@ function folderBar(funnel, { folder = '', saEmail = '', listError = '', totalFil
       function withToken(switchAccount, cb){
         const t = switchAccount ? '' : savedToken();
         if(t) return cb(t);
-        if(!PK.clientId){ alert('Set the Google sign-in client ID, Picker API key and project number under Settings → Workspace → Google first.'); return; }
+        if(!PK.clientId){ alert('Set the Google sign-in client ID, Picker API key and project number under Setup → Settings → Google first.'); return; }
         if(!(window.google && google.accounts && google.accounts.oauth2)){ alert('Google sign-in is still loading — try again in a second.'); return; }
         const tc = google.accounts.oauth2.initTokenClient({ client_id: PK.clientId, scope: 'https://www.googleapis.com/auth/drive.file',
           callback: (r)=>{ if(r.error){ alert('Google sign-in failed: '+r.error); return; } saveToken(r.access_token, r.expires_in); cb(r.access_token); } });
@@ -638,7 +638,7 @@ function folderBar(funnel, { folder = '', saEmail = '', listError = '', totalFil
       }
       function clearPicked(){ const u=new URL(location.href); u.searchParams.delete('picked'); location.href=u.toString(); }
       function pickDrive(switchAccount){
-        if(!(PK.clientId && PK.apiKey && PK.appId)){ alert('Set the Google sign-in client ID, Picker API key and project number under Settings → Workspace → Google first.'); return; }
+        if(!(PK.clientId && PK.apiKey && PK.appId)){ alert('Set the Google sign-in client ID, Picker API key and project number under Setup → Settings → Google first.'); return; }
         withToken(switchAccount, (tok)=>{
           if(!window.gapi){ alert('Google Picker is still loading — try again in a second.'); return; }
           gapi.load('picker', ()=>{

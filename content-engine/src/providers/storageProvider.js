@@ -22,7 +22,7 @@ import { google } from 'googleapis';
 const thumbUrl = (id) => `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
 const dlUrl = (id) => `https://drive.google.com/uc?export=download&id=${id}`;
 
-const NOT_CONNECTED = 'Google Drive is not connected — use 📂 Pick from Drive (Sign in with Google), or paste the service-account JSON under Settings → Workspace → Google (Sheets & Drive access)';
+const NOT_CONNECTED = 'Google Drive is not connected — use 📂 Pick from Drive (Sign in with Google), or paste the service-account JSON under Setup → Settings → Google (Sheets & Drive access)';
 
 export function createGoogleDriveProvider(cfg, log) {
   if (!cfg.serviceAccount && !cfg.accessToken) {
