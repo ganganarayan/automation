@@ -18,6 +18,8 @@ import { ping } from './core/db.js';
 import { createRegistry } from './core/moduleRegistry.js';
 import { requestId, tenantResolver, requestLogger } from './middleware/requestContext.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
+import * as tenantSettings from './core/tenantSettings.js';
+import * as publicPages from './utils/publicPages.js';
 
 import * as approvalService from './services/approvalService.js';
 
@@ -60,8 +62,13 @@ export function createApp() {
   }));
   app.use(express.urlencoded({ extended: true }));
 
-  // Bare domain opens the app (Today, the admin landing page), so the root URL just works.
-  app.get('/', (_req, res) => res.redirect('/api/v1/admin/today'));
+  // Public pages (no sign-in): the bare domain is a home page whose Sign in
+  // button opens the app; /privacy and /terms are the links Google's OAuth
+  // consent screen needs. The contact is the default tenant's notification email.
+  const contactEmail = async () => (await tenantSettings.forTenant('default').catch(() => null))?.emails?.notify || '';
+  app.get('/', (_req, res) => res.type('html').send(publicPages.homePage()));
+  app.get('/privacy', async (_req, res) => res.type('html').send(publicPages.privacyPage({ email: await contactEmail() })));
+  app.get('/terms', async (_req, res) => res.type('html').send(publicPages.termsPage({ email: await contactEmail() })));
   app.get('/health', (_req, res) => res.json({ status: 'ok', service: settings.service }));
   app.get('/live', (_req, res) => res.json({ status: 'alive' }));
   // Running build identity — lets a deploy be verified against the pushed commit.
