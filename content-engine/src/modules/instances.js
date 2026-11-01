@@ -786,12 +786,12 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
             </div>
             <div class="hint" id="tg-${id}">Not transcribed yet: 🎙 Transcribe, or paste the text / SRT. Then type the headline, check the image prompt and approve.</div>
           </div>
+        </div>
+        <div class="aicol">
           <div class="panel"><h4>3 · AI copy + thumbnails <span class="hint">written from the approved transcript, with your headline</span></h4>
             <div class="nowrow"><button class="act" id="sv-${id}" onclick="saveDraft('${id}')">💾 Save draft</button> <button class="act" id="gt-${id}" onclick="genThumb('${id}')" title="Uses the headline, sub-head and image prompt in step 2, your copy is left exactly as it is">🖼 Generate thumbnail</button> <span class="hint" id="gs-${id}"></span></div>
             <div class="thumbs" id="th-${id}"></div>
           </div>
-        </div>
-        <div class="aicol">
           <div class="panel"><h4>4 · Review &amp; schedule</h4>
             <label class="fl">YouTube title<input id="ti-${id}" maxlength="100"></label>
             <label class="fl">Description: YouTube · LinkedIn · Facebook (the CTA link below is added at the end when posting)<textarea id="de-${id}" rows="7"></textarea></label>
