@@ -49,6 +49,7 @@ import {
 } from '../utils/stageSpec.js';
 import { whisperPrompt } from '../utils/laneSpec.js';
 import { childLogger } from '../core/logger.js';
+import * as heartbeat from '../core/heartbeat.js';
 
 const log = childLogger({ module: 'stageRunner' });
 
@@ -274,11 +275,17 @@ export async function postInstance({ instanceId, captionOverride = '' }) {
   await providers.storage.shareAnyone(videoId);
   const caption = (captionOverride && captionOverride.trim())
     || [resolved.audiencePrefix, resolved.ctaLink].filter(Boolean).join('\n') || instance.title || '';
-  const scheduledAt = instance.scheduled_for ? new Date(instance.scheduled_for).toISOString() : undefined;
+  // Approved after its slot: it goes out now rather than waiting a day.
+  const late = !instance.scheduled_for || new Date(instance.scheduled_for) <= new Date();
+  const scheduledAt = late ? undefined : new Date(instance.scheduled_for).toISOString();
 
   const result = await publish.createPost({ accountIds, caption, mediaUrl: dlUrl(videoId), scheduledAt });
+  await firstComment.ensureWebhook(resolved.tenantId, publish).catch(() => false);
   const refs = result && result.id ? [result.id] : (Array.isArray(result) ? result.map((r) => r.id).filter(Boolean) : []);
-  await instanceService.updateStep(instanceId, 'publish', { status: 'done', artifacts: { posts: refs }, finishedAt: new Date().toISOString() });
+  // The channel list lets the post check mark each one ✅/❌ and send the go-live email.
+  const accountMap = resolved.accountMap || {};
+  const channels = accountIds.map((id) => ({ id, platform: (accountMap[id] || {}).platform || '', name: (accountMap[id] || {}).account_name || id, state: 'waiting' }));
+  await instanceService.updateStep(instanceId, 'publish', { status: 'done', artifacts: { posts: refs, channels }, finishedAt: new Date().toISOString() });
   log.info({ instance: instanceId, accounts: accountIds.length, refs: refs.length }, 'instance posted to Post-for-Me');
   // The link goes in each channel's first comment once the post is live.
   if (refs[0]) await firstComment.queue({ tenantId: resolved.tenantId, postformePostId: refs[0], link: resolved.ctaLink, scheduledAt });
@@ -428,9 +435,10 @@ export async function executeManualStage({ instanceId, stepKey, input = {} }) {
 /** Register the pipeline hooks so review decisions drive generation. */
 export function registerPipeline() {
   review.setPipelineHooks({
-    afterScriptApprove: runStages,
-    beforeFinalLock: postInstance,
-    regenerate,
+    // Rendering can sit quiet for minutes (provider waits, ffmpeg): keep the app awake.
+    afterScriptApprove: (a) => heartbeat.during('ai-video', () => runStages(a)),
+    beforeFinalLock: (a) => heartbeat.during('ai-video', () => postInstance(a)),
+    regenerate: (a) => heartbeat.during('ai-video', () => regenerate(a)),
   });
   log.info('stage runner pipeline hooks registered');
 }

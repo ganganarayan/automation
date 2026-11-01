@@ -107,6 +107,8 @@ export async function forTenant(tenantId = 'default') {
       accountMap: parseJson(pick('pfm_account_map', null), settings.postforme.accountMap),
     },
     emails: {
+      // One address for every approval / go-live email a funnel has no own address for.
+      notify: pick('notify_email', ''),
       approvalGita: pick('approval_email_gita', settings.emails.approvalGita),
       approvalVidapulse: pick('approval_email_vidapulse', settings.emails.approvalVidapulse),
       report: pick('report_email', settings.emails.report),

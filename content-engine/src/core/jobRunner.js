@@ -6,7 +6,10 @@
  *               executed by a registered handler, and marked done/failed.
  * Responsibility:
  *               - Handler registry keyed by job type.
- *               - A polling loop that claims due jobs and runs them.
+ *               - A loop that claims due jobs and runs them. It only polls
+ *                 while there is work: when the queue is empty it sleeps until
+ *                 the next job's time, or until enqueueJob wakes it — so an
+ *                 idle app sends no traffic and Railway can put it to sleep.
  *               - Retry with backoff up to a per-type max attempts.
  * Dependencies: jobRepository, logger.
  */
@@ -29,40 +32,73 @@ export function registerHandler(type, handler, opts = {}) {
   });
 }
 
-/** Enqueue a job for later execution. */
-export function enqueueJob({ tenantId, type, payload, runAt }) {
+/** Enqueue a job for later execution (and wake the loop for it). */
+export async function enqueueJob({ tenantId, type, payload, runAt }) {
   if (!handlers.has(type)) {
     logger.warn({ type }, 'enqueuing job with no registered handler');
   }
-  return jobRepo.create({ tenantId, type, payload, runAt });
+  const job = await jobRepo.create({ tenantId, type, payload, runAt });
+  wake(runAt ? new Date(runAt) : new Date());
+  return job;
 }
 
+const MAX_WAIT_MS = 24 * 60 * 60 * 1000; // setTimeout's own limit is ~24 days; re-check daily
 let timer = null;
+let timerAt = 0;
+let running = false;
+let started = false;
+let opts = { intervalMs: 5000, batch: 5 };
 
-/** Start the polling loop. */
-export function start({ intervalMs = 5000, batch = 5 } = {}) {
-  if (timer) return;
+/** Schedule the next tick for `at` unless one is already due sooner. */
+function wake(at = new Date()) {
+  if (!started) return;
+  const when = Math.max(Date.now(), at.getTime());
+  if (timer && timerAt <= when) return;
+  if (timer) clearTimeout(timer);
+  timerAt = when;
+  timer = setTimeout(tick, Math.min(when - Date.now(), MAX_WAIT_MS));
+  timer.unref?.();
+}
+
+async function tick() {
+  timer = null;
+  timerAt = 0;
+  if (running || handlers.size === 0) return;
+  running = true;
   const types = [...handlers.keys()];
-  if (types.length === 0) {
+  try {
+    const jobs = await jobRepo.claimDue({ types, limit: opts.batch });
+    for (const job of jobs) await runOne(job);
+    if (jobs.length) {
+      wake(new Date(Date.now() + opts.intervalMs));
+    } else {
+      const next = await jobRepo.nextDue({ types });
+      if (next) wake(next);
+    }
+  } catch (err) {
+    logger.error({ err: err.message }, 'job runner tick failed');
+    wake(new Date(Date.now() + opts.intervalMs * 6));
+  } finally {
+    running = false;
+  }
+}
+
+/** Start the loop: one check now, then only when there is work. */
+export function start({ intervalMs = 5000, batch = 5 } = {}) {
+  if (started) return;
+  started = true;
+  opts = { intervalMs, batch };
+  if (handlers.size === 0) {
     logger.info('job runner started with no handlers registered');
   }
-  const tick = async () => {
-    try {
-      if (handlers.size === 0) return;
-      const jobs = await jobRepo.claimDue({ types: [...handlers.keys()], limit: batch });
-      for (const job of jobs) await runOne(job);
-    } catch (err) {
-      logger.error({ err: err.message }, 'job runner tick failed');
-    }
-  };
-  timer = setInterval(tick, intervalMs);
-  timer.unref?.();
-  logger.info({ intervalMs, handlers: [...handlers.keys()] }, 'job runner started');
+  wake();
+  logger.info({ intervalMs, handlers: [...handlers.keys()] }, 'job runner started (idle when the queue is empty)');
 }
 
 /** Stop the loop. */
 export function stop() {
-  if (timer) clearInterval(timer);
+  started = false;
+  if (timer) clearTimeout(timer);
   timer = null;
 }
 

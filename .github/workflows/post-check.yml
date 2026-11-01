@@ -1,0 +1,38 @@
+name: Wake content-engine and check posts
+
+# Backup for the Post for Me webhook. The webhook normally wakes the app the
+# moment a post goes live (✅/❌ per channel + the go-live email). If that call
+# hit a cold start and was lost, this ping wakes the app, runs the same check,
+# and the app goes back to sleep. GitHub cron is UTC and may start late.
+#
+# Repo secrets (Settings -> Secrets and variables -> Actions):
+#   CONTENT_ENGINE_URL  e.g. https://content-engine-production-230f.up.railway.app (no trailing slash)
+#   RUN_DUE_KEY         the content-engine ADMIN_KEY (sent as X-Admin-Key)
+
+on:
+  schedule:
+    - cron: '50 2 * * *'    # 08:20 IST, after the 08:02 posts
+    - cron: '50 14 * * *'   # 20:20 IST, catches posts scheduled during the day
+  workflow_dispatch: {}
+
+jobs:
+  check-posts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping check-posts
+        env:
+          URL: ${{ secrets.CONTENT_ENGINE_URL }}
+          KEY: ${{ secrets.RUN_DUE_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "CONTENT_ENGINE_URL / RUN_DUE_KEY secrets are not set; skipping."
+            exit 0
+          fi
+          # The first request may hit a cold start (502): try a few times.
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/api/v1/jobs/check-posts" -H "X-Admin-Key: $KEY")
+            echo "attempt $i: HTTP $code"
+            [ "$code" = "202" ] && exit 0
+            sleep 20
+          done
+          exit 1

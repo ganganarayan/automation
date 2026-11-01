@@ -77,7 +77,7 @@ export async function generateForFunnel({ tenantId = 'default', funnelId, prompt
     images.push(await makeImage(providers, cfg.drive_folder_id, size, finalPrompts[i], buildImageName('img', i, stamp)));
   }
 
-  const approvalEmail = cfg.approval_email || providers.resolved.emails.approvalGita;
+  const approvalEmail = cfg.approval_email || providers.resolved.emails.notify || providers.resolved.emails.approvalGita;
   const payload = { funnelId: funnel.id, funnelName: funnel.name, size, approvalEmail, round: 1, images };
   const { id, reviewUrl } = await approvalService.createRequest({ tenantId, kind: KIND, payload });
   await providers.mail.send({
@@ -115,7 +115,7 @@ export async function regenerate(approval, body) {
     }
   }
 
-  const approvalEmail = p.approvalEmail || cfg.approval_email || providers.resolved.emails.approvalGita;
+  const approvalEmail = p.approvalEmail || cfg.approval_email || providers.resolved.emails.notify || providers.resolved.emails.approvalGita;
   const payload = { ...p, size, approvalEmail, round: (p.round || 1) + 1, images: next };
   const { reviewUrl } = await approvalService.createRequest({ tenantId, kind: KIND, payload });
   await providers.mail.send({

@@ -73,7 +73,7 @@ async function recipientFor(instance, resolved) {
       if (cfg.approvalEmail) return cfg.approvalEmail;
     }
   }
-  return resolved?.emails?.approvalGita || '';
+  return resolved?.emails?.notify || resolved?.emails?.approvalGita || '';
 }
 
 // ---- requesting a review ---------------------------------------------------
@@ -153,12 +153,18 @@ export async function onApprove(approval) {
   } else if (p.checkpoint === 'final') {
     const postedAt = p.scheduledFor ? new Date(p.scheduledFor) : new Date();
     try {
-      // Slice 5 hook: dispatch the reel to Post-for-Me (at scheduled_for) and
-      // return the post refs. Post happens BEFORE the lock. Absent => lock with
-      // empty refs (slice-4 behaviour).
+      // Dispatch the reel to Post-for-Me (at scheduled_for, or now if that has
+      // passed). It stays 'scheduled' until the post check sees it live, marks
+      // each channel ✅/❌, locks it and sends the go-live email.
       const refs = pipeline.beforeFinalLock ? ((await pipeline.beforeFinalLock({ instanceId })) || []) : [];
-      const ok = await instanceRepo.lockAsPosted(instanceId, { postRefs: refs, postedAt });
-      log.info({ instance: instanceId, locked: ok, refs: refs.length, postedAt }, 'final approved — posted + locked');
+      if (!refs.length) {
+        const ok = await instanceRepo.lockAsPosted(instanceId, { postRefs: refs, postedAt });
+        log.info({ instance: instanceId, locked: ok, postedAt }, 'final approved — no post refs, locked');
+        return;
+      }
+      const postNow = !p.scheduledFor || new Date(p.scheduledFor) <= new Date();
+      const ok = await instanceRepo.markScheduled(instanceId, { postRefs: refs, postNow });
+      log.info({ instance: instanceId, scheduled: ok, refs: refs.length, postNow }, 'final approved — handed to Post for Me');
     } catch (err) {
       await instanceRepo.setStatus(instanceId, 'failed', `post failed: ${err.message}`);
       log.error({ err: err.message, instance: instanceId }, 'final post failed — not locked');

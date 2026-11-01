@@ -164,8 +164,9 @@ export const CONFIG_MANIFEST = {
         ],
       },
       {
-        title: 'Reports',
+        title: 'Emails',
         fields: [
+          { key: 'notify_email', label: 'Notification email', help: 'Approvals, "posted" (go-live) emails and alerts go here whenever a funnel has no approval email of its own.' },
           { key: 'report_email', label: 'Report email', help: 'Where the daily delivery reports are sent.' },
         ],
       },

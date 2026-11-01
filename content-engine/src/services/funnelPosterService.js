@@ -130,7 +130,7 @@ export async function runFunnel(funnelRow) {
   });
 
   await providers.mail.send({
-    to: f.approvalEmail,
+    to: f.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita,
     subject: `Approve ${f.name} post${row.matchKey ? ` (${row.matchKey})` : ''}`,
     html: approvalEmail(f.name, upload.thumbnailUrl, full, short, reviewUrl),
   });
@@ -213,7 +213,7 @@ export async function rework(approval, note) {
     payload: { ...p, mediaUrl: upload.downloadUrl, thumbnailUrl: upload.thumbnailUrl },
   });
   await providers.mail.send({
-    to: f.approvalEmail,
+    to: f.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita,
     subject: `Reworked ${f.name} post${p.matchKey ? ` (${p.matchKey})` : ''}`,
     html: approvalEmail(f.name, upload.thumbnailUrl, p.captionFull, p.captionShort, reviewUrl),
   });

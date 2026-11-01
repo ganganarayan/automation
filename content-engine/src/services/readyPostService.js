@@ -28,6 +28,7 @@ import * as instanceService from '../services/instanceService.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
 import * as sourcesRepo from '../repositories/funnelSourcesRepository.js';
 import { buildProviders } from './providerFactory.js';
+import * as heartbeat from '../core/heartbeat.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { createTranscriptProvider } from '../providers/transcriptProvider.js';
 import { createFfmpegProvider } from '../providers/ffmpegProvider.js';
@@ -466,6 +467,20 @@ function videoArt(steps, driveId, durationSec = 0) {
 // In memory only — a restart loses a running job (just press Clean again);
 // a finished one is saved on the video's draft instance.
 const cleanJobs = new Map();
+// GitHub cleans hold the heartbeat until their done/fail callback (capped, in case it never comes).
+const cleanHolds = new Map();
+const CLEAN_HOLD_MAX_MS = 60 * 60 * 1000;
+function holdClean(driveId) {
+  releaseClean(driveId);
+  const release = heartbeat.hold('clean');
+  const cap = setTimeout(() => releaseClean(driveId), CLEAN_HOLD_MAX_MS);
+  cap.unref?.();
+  cleanHolds.set(driveId, () => { clearTimeout(cap); release(); });
+}
+function releaseClean(driveId) {
+  const release = cleanHolds.get(driveId);
+  if (release) { cleanHolds.delete(driveId); release(); }
+}
 
 /**
  * Start cleaning one ready video in the background (zoom from the top so the
@@ -487,7 +502,7 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endTe
   const running = { state: 'running', startedAt: Date.now(), phase: 'starting', pct: 0, ...opts };
   cleanJobs.set(id, running);
   const onPhase = (patch) => { const j = cleanJobs.get(id); if (j && j.state === 'running') Object.assign(j, patch); };
-  runClean({ funnel, providers, driveId: id, opts, name, source, onPhase })
+  heartbeat.during('clean', () => runClean({ funnel, providers, driveId: id, opts, name, source, onPhase }))
     .then((clean) => cleanJobs.set(id, { state: 'done', clean }))
     .catch((err) => {
       log.error({ err: err.message, driveId: id }, 'video clean failed');
@@ -556,6 +571,7 @@ async function startCleanGithub({ funnel, providers, id, opts, name, source, bas
   }
   const running = { state: 'running', runner: 'github', startedAt: Date.now(), lastAt: Date.now(), phase: 'queued', pct: 0, ...opts };
   cleanJobs.set(id, running);
+  holdClean(id);
   log.info({ driveId: id, ref }, 'clean sent to GitHub Actions');
   return running;
 }
@@ -632,6 +648,7 @@ export async function cleanHookDone({ ticket, fileId, durationSec }) {
   const clean = { url: publicDlUrl(fileId), driveFileId: String(fileId), runner: 'github', ...(p.o || {}), durationSec: Math.round(Number(durationSec) || 0), at: new Date().toISOString() };
   await saveClean(funnel, p.d, clean, { name: p.n || '', source: p.s || null });
   cleanJobs.set(p.d, { state: 'done', clean });
+  releaseClean(p.d);
   log.info({ driveId: p.d, fileId }, 'video cleaned on GitHub Actions');
   return { ok: true };
 }
@@ -640,6 +657,7 @@ export async function cleanHookFail({ ticket, error }) {
   const p = await hookTicket(ticket);
   const msg = String(error || 'the GitHub run failed').slice(0, 400);
   cleanJobs.set(p.d, { state: 'failed', error: `GitHub: ${msg}` });
+  releaseClean(p.d);
   log.warn({ driveId: p.d, error: msg }, 'GitHub clean failed');
   return { ok: true };
 }
@@ -914,6 +932,8 @@ export async function refreshScheduled({ tenantId = 'default' } = {}) {
   const providers = await buildProviders(tenantId);
   if (!providers.resolved.postformeKey) return 0;
   const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log);
+  // The webhook is what wakes a sleeping app when a post goes live.
+  await firstComment.ensureWebhook(tenantId, publish).catch(() => false);
   let changed = 0;
   for (const row of rows) {
     try {
@@ -972,8 +992,27 @@ export async function refreshScheduled({ tenantId = 'default' } = {}) {
   return changed;
 }
 
-/** refreshScheduled for every tenant (the timer / run-due ping). */
-export async function refreshAllTenants() {
+/**
+ * refreshScheduled for every tenant (the Post for Me webhook, the wake-up
+ * crons, boot). One run at a time: a channel's webhook arriving mid-run asks
+ * for one more pass instead of a parallel one, so no go-live email goes twice.
+ */
+let refreshing = null;
+let refreshAgain = false;
+export function refreshAllTenants() {
+  if (refreshing) { refreshAgain = true; return refreshing; }
+  refreshing = heartbeat.during('post-check', async () => {
+    let n = 0;
+    do {
+      refreshAgain = false;
+      n += await refreshAllTenantsOnce();
+    } while (refreshAgain);
+    return n;
+  }).finally(() => { refreshing = null; });
+  return refreshing;
+}
+
+async function refreshAllTenantsOnce() {
   const list = await tenantRepo.list().catch(() => [{ id: 'default' }]);
   let n = 0;
   for (const t of list) {
@@ -1053,7 +1092,7 @@ export async function autoRetryDue({ tenantId = 'default' } = {}) {
 async function sendOutcomeEmail({ providers, row, steps, channels, outcome, postedAt, nextAt = null }) {
   const funnel = row.funnel_id ? await funnels.get(row.funnel_id) : null;
   const resolved = funnel ? await funnels.resolve(funnel) : {};
-  const to = resolved.approvalEmail || providers.resolved?.emails?.approvalGita || '';
+  const to = resolved.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
   if (!to) return;
   const art = (k) => ((steps.find((x) => x.key === k) || {}).artifacts) || {};
   const copy = art('script').copy || {};
@@ -1100,7 +1139,7 @@ export async function unscheduleInstance({ instanceId }) {
 }
 
 async function sendPostedEmail({ providers, funnel, resolved, results }) {
-  const to = resolved.approvalEmail || providers.resolved?.emails?.approvalGita || '';
+  const to = resolved.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
   const ok = results.filter((r) => r.ok);
   if (!to || !ok.length) return;
   const rows = ok

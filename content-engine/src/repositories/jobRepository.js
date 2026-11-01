@@ -39,6 +39,15 @@ export async function claimDue({ types, limit = 5 }) {
   return rows;
 }
 
+/** When the next pending job of these types is due (null when there is none). */
+export async function nextDue({ types }) {
+  const { rows } = await query(
+    `SELECT min(next_run) AS at FROM jobs WHERE status = 'pending' AND type = ANY($1)`,
+    [types],
+  );
+  return rows[0] && rows[0].at ? new Date(rows[0].at) : null;
+}
+
 /** Mark a claimed job done. */
 export async function markDone(id) {
   await query(
@@ -85,4 +94,4 @@ export async function recent({ tenantId, limit = 100 }) {
   return rows;
 }
 
-export default { create, claimDue, markDone, markFailed, recent };
+export default { create, claimDue, nextDue, markDone, markFailed, recent };
