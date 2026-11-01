@@ -14,7 +14,18 @@ import { createApp } from './app.js';
 async function main() {
   logger.info({ env: settings.env, tz: settings.tz }, 'starting content-engine');
 
-  await runMigrations();
+  // A sleeping database takes a few seconds to wake with us: retry instead of
+  // crashing the boot (Railway would restart us, but a webhook could be lost).
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await runMigrations();
+      break;
+    } catch (err) {
+      if (attempt >= 8) throw err;
+      logger.warn({ err: err.code || err.message, attempt }, 'database not ready yet, retrying');
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
   logger.info('migrations applied');
 
   // Seed the operator's existing brands as funnels (idempotent).

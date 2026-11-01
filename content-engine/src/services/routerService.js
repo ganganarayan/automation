@@ -2,12 +2,13 @@
  * Daily post router.
  *
  * Purpose:      Posting positive: every active funnel posts something every
- *               day. Each afternoon (16:00 IST, GitHub cron) the router decides
+ *               day. Each afternoon (the tenant's router_check_time, default
+ *               16:00 IST; GitHub wake.yml or the internal cron) the router decides
  *               which lane delivers TOMORROW's post per funnel and records the
  *               decision in router_days (docs/daily-router-plan.md).
  * Responsibility:
  *               - runCheck: one run at a time, inside the heartbeat, over every
- *                 tenant's active funnels. Idempotent: a funnel + post date that
+ *                 tenant's active funnels (or only tenantIds, when given). Idempotent: a funnel + post date that
  *                 already has a router_days row is skipped.
  *               - decideFunnel: a live instance already lined up for that date
  *                 → record its lane ('already scheduled'). Otherwise (Lane 1 and
@@ -92,11 +93,12 @@ export async function decideFunnel({ funnel, now = nowIst(), retryNone = false, 
   }
 }
 
-async function runOnce({ now = nowIst(), retryNone = false, funnelId = null, log = baseLog } = {}) {
+async function runOnce({ now = nowIst(), retryNone = false, funnelId = null, tenantIds = null, log = baseLog } = {}) {
   const active = await funnels.listActive();
   const results = [];
   for (const funnel of active) {
     if (funnelId && Number(funnelId) !== Number(funnel.id)) continue;
+    if (tenantIds && !tenantIds.includes(funnel.tenant_id)) continue;
     try {
       results.push(await decideFunnel({ funnel, now, retryNone, log }));
     } catch (err) {

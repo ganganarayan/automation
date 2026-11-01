@@ -25,6 +25,8 @@
  *   POST /api/v1/admin/users/plan            change a user's plan end (JSON, auto-save)
  *   POST /api/v1/admin/tenants/expiry        change a tenant's expiry (super admin, JSON, auto-save)
  *   GET  /api/v1/admin/users/billing         a user's billing history (JSON)
+ *   GET  /api/v1/admin/wake-schedule         last GitHub wake-up sync + current times (JSON)
+ *   POST /api/v1/admin/wake-schedule/sync    write WAKE_SCHEDULE to GitHub now (JSON)
  */
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
 import { navHtml, NAV_CSS } from '../utils/adminNav.js';
@@ -45,6 +47,7 @@ import { buildProviders } from '../services/providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { listElevenLabsVoices } from '../providers/ttsProvider.js';
 import { keyOk, gateState, currentSession } from '../services/accessService.js';
+import * as wakeSchedule from '../services/wakeScheduleService.js';
 
 export function register(ctx) {
   const { router, log } = ctx;
@@ -81,10 +84,16 @@ export function register(ctx) {
       const body = req.body || {};
       const tenantId = (body.tenant || 'default').toString();
       const submitted = { settings: body.set || {}, modules: body.mod || {} };
+      const before = await configService.load(tenantId).catch(() => ({}));
       const result = await configService.save(tenantId, body.app, submitted);
       const q = new URLSearchParams({ tenant: tenantId });
       if (result.errors.length) q.set('error', result.errors.join('; '));
       else q.set('saved', body.app);
+      // A changed Daily schedule time moves GitHub's wake-up times too.
+      if (!result.errors.length && body.app === 'content-engine') {
+        const after = await configService.load(tenantId).catch(() => ({}));
+        if (wakeSchedule.changed(before, after)) await wakeSchedule.sync();
+      }
       res.redirect(`/api/v1/admin/settings?${q.toString()}#${body.app}`);
     } catch (err) {
       next(err);
@@ -342,6 +351,25 @@ export function register(ctx) {
       res.json({ ok: !!result.ok, to, error: result.ok ? null : 'send failed' });
     } catch (err) {
       res.json({ ok: false, error: err.message });
+    }
+  });
+
+  // GitHub wake-up times (Setup → Settings → Daily schedule).
+  router.get('/admin/wake-schedule', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      res.json(await wakeSchedule.status());
+    } catch (err) {
+      res.json({ ok: false, text: `🟡 ${err.message}` });
+    }
+  });
+
+  router.post('/admin/wake-schedule/sync', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      res.json(await wakeSchedule.sync());
+    } catch (err) {
+      res.json({ ok: false, text: `🟡 ${err.message}` });
     }
   });
 
@@ -962,7 +990,41 @@ function fieldRow(field, configMap) {
   if (field.type === 'time') {
     const val = has ? current : (field.default || '');
     return `<div class="field"><label>${esc(field.label)}</label>
-      <input type="time" name="set[${esc(field.key)}]" value="${esc(val)}" step="60" class="pick"></div>`;
+      <input type="time" name="set[${esc(field.key)}]" value="${esc(val)}" step="60" class="pick">
+      ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
+  }
+  if (field.type === 'time_list') {
+    const val = has ? current : (field.default || '');
+    return `<div class="field"><label>${esc(field.label)}</label>
+      <input type="text" name="set[${esc(field.key)}]" value="${esc(val)}" placeholder="${field.placeholder ? esc(field.placeholder) : ''}">
+      ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
+  }
+  if (field.type === 'wake_sync') {
+    // Status is fetched live; saving a changed time above syncs on its own.
+    return `<div class="field"><label>${esc(field.label)}</label>
+      <div class="row" style="gap:.4rem;align-items:center">
+        <button type="button" class="act" onclick="wakeSync()">↻ Sync wake-up times</button>
+        <span id="wake-st" class="hint">Checking…</span>
+      </div>
+      <p class="hint">GitHub checks every 15 minutes, so a job runs about 15–30 minutes after its time. Saving a changed time syncs too.
+        Uses the GitHub token and repo under Keys and credit → Video clean; the token needs <b>Variables: Read and write</b>.</p>
+      <p id="wake-times" class="hint"></p>
+      <script>
+        function wakeShow(j){
+          document.getElementById('wake-st').textContent=(j.text||'🟡 unknown')+(j.stale?' — times changed since, press Sync':'');
+          const c=j.current||j.schedule; if(!c) return;
+          document.getElementById('wake-times').textContent='Daily check '+(c.router||[]).join(', ')+' · Nudge '+(c.nudge||[]).join(', ')+' · Post checks '+(c.posts||[]).join(', ')+' (IST, all tenants)';
+        }
+        async function wakeSync(){
+          const st=document.getElementById('wake-st'); st.textContent='Syncing…';
+          try{ const j=await (await fetch('/api/v1/admin/wake-schedule/sync',{method:'POST'})).json(); wakeShow(j); }
+          catch(e){ st.textContent='🟡 '+e.message; }
+        }
+        (async function(){
+          try{ wakeShow(await (await fetch('/api/v1/admin/wake-schedule')).json()); }
+          catch(e){ document.getElementById('wake-st').textContent='🟡 Could not check: '+e.message; }
+        })();
+      </script></div>`;
   }
   if (field.type === 'select') {
     const val = has ? current : (field.default || '');

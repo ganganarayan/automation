@@ -12,7 +12,8 @@
  * camelCase module names; they are stored per-app as `module.<app>.<name>` and
  * honored at runtime with the env flag as the default (see moduleGate).
  *
- * Field types: 'text' (default) | 'secret' (masked) | 'json' | 'textarea'.
+ * Field types: 'text' (default) | 'secret' (masked) | 'json' | 'textarea' |
+ * 'time' (HH:MM) | 'time_list' (comma list of HH:MM).
  */
 
 import { DEFAULT_COPY_PROMPT } from '../utils/aiCopySpec.js';
@@ -168,6 +169,18 @@ export const CONFIG_MANIFEST = {
         fields: [
           { key: 'notify_email', label: 'Notification email', help: 'Approvals, "posted" (go-live) emails and alerts go here whenever a funnel has no approval email of its own.' },
           { key: 'report_email', label: 'Report email', help: 'Where the daily delivery reports are sent.' },
+        ],
+      },
+      {
+        // The app sleeps; GitHub Actions (.github/workflows/wake.yml) wakes it
+        // at these times, read from the repo variable WAKE_SCHEDULE that the
+        // Sync button (and saving here) writes. Blank = the default.
+        title: 'Daily schedule (IST)',
+        fields: [
+          { key: 'router_check_time', label: "Daily check: picks tomorrow's post and sends approvals", type: 'time', default: '16:00' },
+          { key: 'nudge_time', label: 'Morning nudge if the video lanes are empty', type: 'time', default: '10:00' },
+          { key: 'post_check_times', label: 'Backup checks that posts went live', type: 'time_list', default: '08:20, 20:20', placeholder: '08:20, 20:20', help: 'HH:MM, 24-hour, comma-separated.' },
+          { key: 'wake_schedule_sync', label: 'GitHub wake-up times', type: 'wake_sync' },
         ],
       },
       {

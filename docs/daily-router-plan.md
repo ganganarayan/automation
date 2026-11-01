@@ -38,6 +38,8 @@ The app is asleep by default. These things wake it with an incoming HTTP request
 
 ⚠ **To verify before building:** Railway's current sleep rule. As far as I know it sleeps a service after about 10 minutes with no outbound traffic, and an active outbound heartbeat keeps it up. Confirm on Railway's docs/settings; don't assume.
 
+**The times are editable** in Setup → Settings → **Daily schedule (IST)**: the daily check (default 16:00), the morning nudge (10:00) and the backup post checks (08:20, 20:20). Saving a changed time, or pressing **Sync wake-up times**, writes them to the GitHub repository variable WAKE_SCHEDULE. One workflow, .github/workflows/wake.yml, runs every 15 minutes and pings each job whose time fell in the last 30 minutes, so a time fires about 15–30 minutes after it is set. A job may be pinged twice in that window; router_days and the one-at-a-time post check make that harmless. On an always-on host (SCHEDULER_MODE=internal) an in-process 15-minute cron runs the daily check from the same settings.
+
 GitHub cron can start 5 to 30 minutes late. That's acceptable for 16:00 and 10:00. The go-live email relies on the Post for Me webhook, not the cron.
 
 ## Daily timeline (IST)
@@ -127,7 +129,7 @@ GitHub cron can start 5 to 30 minutes late. That's acceptable for 16:00 and 10:0
 
 ## Build order
 
-**Step 1 status (01-11-2026): built, on staging.** The Post for Me webhook and an /api/v1/jobs/check-posts wake-up run the post check (one run at a time). Every boot catches up on what went live while asleep. The heartbeat holds the app awake during Clean, AI-video renders and post checks. The job runner goes idle when its queue is empty; its 5-second database poll used to keep the app from ever sleeping. AI videos go through scheduled → post check → go-live email, and post at once if approved late. There is a central Notification email under Setup → Settings → Emails. The backup cron is .github/workflows/post-check.yml (08:20 and 20:20 IST). Its secrets still need setting, and it only runs from main. Production still has Serverless (sleep) **off**. Turn it on in Railway once this is on main.
+**Step 1 status (01-11-2026): built, on staging.** The Post for Me webhook and an /api/v1/jobs/check-posts wake-up run the post check (one run at a time). Every boot catches up on what went live while asleep. The heartbeat holds the app awake during Clean, AI-video renders and post checks. The job runner goes idle when its queue is empty; its 5-second database poll used to keep the app from ever sleeping. AI videos go through scheduled → post check → go-live email, and post at once if approved late. There is a central Notification email under Setup → Settings → Emails. The backup post check (08:20 and 20:20 IST by default) now runs from .github/workflows/wake.yml, which replaced post-check.yml and router-check.yml. Its secrets still need setting, and it only runs from main. Production still has Serverless (sleep) **off**. Turn it on in Railway once this is on main.
 
 1. **Clock + go-live for every lane:**
    - GitHub cron wakes at 16:00, 10:00 and 08:20

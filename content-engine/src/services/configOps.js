@@ -11,9 +11,11 @@
  *   - secret: blank = leave unchanged; non-blank = set.
  *   - normal: blank = delete override; else set.
  *   - json: validated with JSON.parse.
+ *   - time / time_list: HH:MM (24h) checked and normalized; blank = default.
  *   - module: 'true'/'false' = set; 'default' = delete.
  */
 import { CONFIG_MANIFEST, moduleKey } from './configManifest.js';
+import { parseTime, parseTimeList } from '../utils/wakeSchedule.js';
 
 /**
  * @param {string} app
@@ -57,6 +59,20 @@ export function buildSaveOps(app, submitted) {
       }
       if (trimmed === '') {
         dels.push(field.key);
+        continue;
+      }
+      if (field.type === 'time' || field.type === 'time_list') {
+        const one = field.type === 'time' ? parseTime(trimmed) : null;
+        const list = field.type === 'time_list' ? parseTimeList(trimmed) : null;
+        if (field.type === 'time' && !one) {
+          errors.push(`${field.label || field.key}: "${trimmed}" is not a time. Use HH:MM, 24-hour (e.g. 16:00)`);
+          continue;
+        }
+        if (list && (list.bad.length || !list.times.length)) {
+          errors.push(`${field.label || field.key}: ${list.bad.map((b) => `"${b}"`).join(', ')} not a time. Use HH:MM, 24-hour, comma-separated (e.g. 08:20, 20:20)`);
+          continue;
+        }
+        sets.push({ key: field.key, value: one || list.times.join(', ') });
         continue;
       }
       if (field.type === 'json') {
