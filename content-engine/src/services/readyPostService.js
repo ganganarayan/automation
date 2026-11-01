@@ -306,8 +306,11 @@ export function startTranscribe(args) {
   heartbeat.during('transcribe', () => transcribeVideo(args))
     .then((result) => transcribeJobs.set(id, { state: 'done', result }))
     .catch((err) => {
-      log.error({ err: err.message, driveId: id }, 'transcribe failed');
-      transcribeJobs.set(id, { state: 'failed', error: err.message });
+      // Some errors (a refused DB or network connection) carry no message: say what they are instead.
+      const inner = Array.isArray(err && err.errors) ? err.errors.map((e) => e && (e.message || e.code)).filter(Boolean).join('; ') : '';
+      const why = (err && err.message) || inner || (err && (err.code || err.name)) || String(err) || 'unknown error';
+      log.error({ err: why, code: err && err.code, stack: err && err.stack, driveId: id }, 'transcribe failed');
+      transcribeJobs.set(id, { state: 'failed', error: why });
     });
   return running;
 }
