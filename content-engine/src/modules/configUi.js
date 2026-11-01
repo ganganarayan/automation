@@ -402,26 +402,30 @@ export function register(ctx) {
  */
 function creditPanel() {
   return `<fieldset><legend>AI video credit (daily router, Lane 2)</legend>
-    <p class="hint" style="margin:0 0 .4rem">Read live from Runway, Kling and ElevenLabs. Hailuo, OpenAI and Gemini have no balance API: they show OK until one refuses for lack of credit, then stay out for the rest of the day.</p>
+    <p class="hint" style="margin:0 0 .4rem">What the daily router's AI videos can use right now. Runway, Kling and ElevenLabs balances are read live, so a top-up shows when you press Check again. Hailuo, OpenAI and Gemini don't show a balance: they are used until one says "out of credit", then rest for the day. After topping one of those up, press I topped up.</p>
     <div id="creditbox" class="hint">Checking…</div>
     <p style="margin:.5rem 0 0"><button type="button" class="act" onclick="loadCredit()">Check again</button></p>
     <script>
+      async function clearCredit(key){
+        await fetch('/api/v1/admin/credit/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})}).catch(()=>{});
+        loadCredit();
+      }
       async function loadCredit(){
         const box=document.getElementById('creditbox');
         box.textContent='Checking…';
         try{
           const j=await (await fetch('/api/v1/admin/credit-status',{cache:'no-store'})).json();
-          if(!j.ok){box.textContent='🔴 '+(j.error||'could not check');return;}
-          const dot=(x)=>x.ok?'🟢':(x.state==='missing'?'🟡':'🔴');
-          const e=(t)=>String(t==null?'':t).replace(/[&<>]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-          const row=(name,x)=>'<tr><td>'+dot(x)+' '+e(name)+'</td><td>'+e(x.state)+'</td><td>'+e(x.note)+'</td></tr>';
-          let h='<p>'+(j.laneOk?'🟢 Lane 2 can run — using <b>'+e(j.provider)+'</b>':'🟡 Lane 2 is out: '+e((j.missing||[]).join(', ')))+(j.funnel?' <span class="hint">(order from '+e(j.funnel)+')</span>':'')+'</p>';
-          h+='<table><tbody>';
-          for(const p of (j.order||[])) if(j.video&&j.video[p]) h+=row(p[0].toUpperCase()+p.slice(1),j.video[p]);
-          const labels={voice:'ElevenLabs voice',image:'Image API',llm:'LLM',assembly:'GitHub assembly'};
-          for(const k of Object.keys(labels)) if(j.deps&&j.deps[k]) h+=row(labels[k],j.deps[k]);
+          if(!j.ok||!j.view){box.textContent='🟡 Could not check just now: '+(j.error||'no reply')+'. Press Check again.';return;}
+          const v=j.view;
+          const dot={ok:'🟢',todo:'🟡',off:'⚪'};
+          const e=(t)=>String(t==null?'':t).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+          let h='<p>'+(v.ready?'🟢 ':'🟡 ')+e(v.headline)+(j.funnel?' <span class="hint">(checked for '+e(j.funnel)+')</span>':'')+'</p><table><tbody>';
+          for(const r of v.rows){
+            const btn=r.clear?' <button type="button" class="act" onclick="clearCredit(\\''+e(r.clear)+'\\')">I topped up</button>':'';
+            h+='<tr><td>'+(dot[r.tone]||'⚪')+' '+e(r.name)+'</td><td>'+e(r.text)+btn+'</td></tr>';
+          }
           box.innerHTML=h+'</tbody></table>';
-        }catch(err){box.textContent='🔴 '+err.message;}
+        }catch(err){box.textContent='🟡 Could not check just now ('+err.message+'). Press Check again.';}
       }
       loadCredit();
     </script>

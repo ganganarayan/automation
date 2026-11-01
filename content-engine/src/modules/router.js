@@ -22,7 +22,8 @@
  *               - HTTP (signed in): POST /api/v1/admin/router/rerun {funnelId}
  *                 — super admin only: re-run tomorrow's check for one funnel.
  *                 GET /api/v1/admin/credit-status — a live Lane 2 credit check
- *                 (the Keys and credit page reads it).
+ *                 (the Keys and credit page reads it); POST
+ *                 /api/v1/admin/credit/clear {key} — "I topped up".
  *               - Wire the lanes: approve / rework handlers for the image and
  *                 ready-video approval emails, the post check's "went live"
  *                 hook that marks the sheet row Posted, and the stage runner's
@@ -40,6 +41,7 @@ import * as imageLane from '../services/imageLaneService.js';
 import * as readyLane from '../services/readyLaneService.js';
 import * as aiLane from '../services/aiLaneService.js';
 import * as credit from '../services/creditService.js';
+import { creditView } from '../utils/routerSpec.js';
 import * as stageRunner from '../services/stageRunnerService.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import { currentSession, keyOk } from '../services/accessService.js';
@@ -111,7 +113,20 @@ export function register(ctx) {
       const first = (await funnelsRepo.listByTenant(tenantId).catch(() => [])).find((f) => f.active);
       const funnelCfg = first ? await funnelsRepo.getConfig(first.id).catch(() => ({})) : {};
       const result = await credit.check({ tenantId, funnelCfg });
-      res.set('Cache-Control', 'no-store').json({ ...result, ok: true, laneOk: result.ok, funnel: first ? first.name : '' });
+      const funnel = first ? first.name : '';
+      res.set('Cache-Control', 'no-store').json({ ...result, ok: true, laneOk: result.ok, funnel, view: creditView({ ...result, funnel }) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // "I topped up": clear today's out-of-credit mark for one provider.
+  router.post('/admin/credit/clear', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const key = String((req.body || {}).key || '');
+      if (!['kling', 'runway', 'hailuo', 'voice', 'image', 'llm'].includes(key)) return res.status(400).json({ ok: false, error: 'unknown key' });
+      res.json({ ok: true, cleared: await credit.clearExhausted(req.tenantId || 'default', key) });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }

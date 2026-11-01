@@ -20,6 +20,9 @@
  *                 which markExhausted records for the rest of the IST day.
  *               - noteVerdict: the once-per-dry-spell email (resets when Lane 2
  *                 can run again).
+ *               - clearExhausted: "I topped up" on the Keys and credit page.
+ *                 A live positive balance (Runway, Kling, ElevenLabs) clears the
+ *                 mark by itself.
  *               - status: the last check, for the Keys and credit page.
  *               State lives in tenant_config key router_credit (JSON).
  * Dependencies: tenantConfigRepository, driveConnectService, providerFactory,
@@ -117,8 +120,9 @@ export async function check({ tenantId = 'default', funnelCfg = {} } = {}) {
   const balances = { kling, runway, hailuo: null };
   const video = Object.fromEntries(VIDEO_PROVIDERS.map((p) => [p, creditState({ configured: keys[p], balance: balances[p], exhaustedOn: ex[p], today })]));
 
-  const voice = creditState({ configured: !!(r.tts?.elevenlabsApiKey && funnelCfg.voice_id), balance: voiceLeft, exhaustedOn: ex.voice, today });
-  if (r.tts?.elevenlabsApiKey && !funnelCfg.voice_id) voice.note = 'no voice picked on this funnel';
+  // The key's balance shows even before a voice is picked; no voice = something to do.
+  let voice = creditState({ configured: !!r.tts?.elevenlabsApiKey, balance: voiceLeft, exhaustedOn: ex.voice, today });
+  if (voice.ok && !funnelCfg.voice_id) voice = { ...voice, ok: false, state: 'needs_voice', note: 'no voice picked on this funnel' };
   const deps = {
     voice,
     image: creditState({ configured: !!(r.openai?.apiKey || r.gemini?.apiKey), exhaustedOn: ex.image, today }),
@@ -140,6 +144,16 @@ export async function markExhausted(tenantId = 'default', key) {
   state.exhausted = { ...(state.exhausted || {}), [key]: todayKeyIst() };
   await save(tenantId, state);
   log.warn({ tenantId, key }, 'marked out of credit for today');
+}
+
+/** "I topped up": forget today's out-of-credit mark for one key. */
+export async function clearExhausted(tenantId = 'default', key) {
+  const state = await load(tenantId);
+  if (!key || !state.exhausted || !state.exhausted[key]) return false;
+  delete state.exhausted[key];
+  await save(tenantId, state);
+  log.info({ tenantId, key }, 'out-of-credit mark cleared (topped up)');
+  return true;
 }
 
 /**
@@ -176,4 +190,4 @@ export async function status(tenantId = 'default') {
   return state.last ? { ...state.last, dry: state.dry || null } : null;
 }
 
-export default { check, markExhausted, noteVerdict, status };
+export default { check, markExhausted, clearExhausted, noteVerdict, status };

@@ -381,9 +381,78 @@ export function isCreditError(message = '') {
  */
 export function creditState({ configured = false, balance = null, exhaustedOn = '', today = '' } = {}) {
   if (!configured) return { ok: false, state: 'missing', note: 'no key' };
+  const known = balance !== null && balance !== undefined && balance !== '' && !Number.isNaN(Number(balance));
+  // A live positive reading beats an earlier "out of credit" mark (a top-up shows at once).
+  if (known && Number(balance) > 0) return { ok: true, state: 'ok', balance: Number(balance), note: `balance ${balance}` };
   if (exhaustedOn && exhaustedOn === today) return { ok: false, state: 'exhausted', note: 'out of credit today' };
-  if (balance === null || balance === undefined || Number.isNaN(Number(balance))) return { ok: true, state: 'unknown', note: 'no balance reading; assumed OK until it refuses' };
-  return Number(balance) > 0 ? { ok: true, state: 'ok', note: `balance ${balance}` } : { ok: false, state: 'empty', note: 'balance 0' };
+  if (!known) return { ok: true, state: 'unknown', note: 'no balance reading; assumed OK until it refuses' };
+  return { ok: false, state: 'empty', balance: 0, note: 'balance 0' };
+}
+
+const VIDEO_LABEL = { kling: 'Kling', runway: 'Runway', hailuo: 'Hailuo' };
+const fmtNum = (n) => Number(n).toLocaleString('en-IN');
+
+/**
+ * What the Keys and credit page shows: plain, calm rows (it is there to inform,
+ * not to alarm). tone: 'ok' 🟢 · 'todo' 🟡 (something to do) · 'off' ⚪ (not set
+ * up and not needed). → { ready, headline, todo: [text], rows: [{ name, tone, text }] }
+ */
+export function creditView({ provider = null, order = [], video = {}, deps = {}, funnel = '' } = {}) {
+  const rows = [];
+  const todo = [];
+  const anyVideo = order.some((p) => video[p] && video[p].ok);
+  const unit = { voice: 'characters' };
+  const left = (x, u = 'credits') => (x.balance > 0 ? `${fmtNum(x.balance)} ${u} left` : '');
+  for (const p of order) {
+    const x = video[p];
+    if (!x) continue;
+    const name = VIDEO_LABEL[p] || p;
+    if (x.state === 'missing') {
+      rows.push({ name, tone: anyVideo ? 'off' : 'todo', text: anyVideo ? 'not set up (optional)' : 'add its key to use it' });
+    } else if (x.state === 'exhausted' || x.state === 'empty') {
+      const text = x.state === 'empty' ? 'balance 0: top up, then press Check again' : 'said "out of credit" today: top up, then press I topped up';
+      rows.push({ name, tone: anyVideo ? 'off' : 'todo', text, clear: x.state === 'exhausted' ? p : undefined });
+    } else {
+      const role = p === provider ? 'in use' : 'standby';
+      const bal = x.state === 'ok' ? left(x) : 'balance not shown by this provider; used until it says out of credit';
+      rows.push({ name, tone: 'ok', text: `${role} · ${bal}` });
+    }
+  }
+  if (!anyVideo) todo.push('a video provider with credit (Kling, Runway or Hailuo)');
+
+  const v = deps.voice;
+  if (v) {
+    const bal = left(v, unit.voice) || (v.state === 'unknown' ? 'key set' : '');
+    if (v.state === 'missing') {
+      rows.push({ name: 'ElevenLabs voice', tone: 'todo', text: 'add the ElevenLabs API key' });
+      todo.push('the ElevenLabs API key');
+    } else if (v.state === 'needs_voice') {
+      rows.push({ name: 'ElevenLabs voice', tone: 'todo', text: `${bal ? `${bal} · ` : ''}pick a narrator voice${funnel ? ` on ${funnel}` : ''} (Funnels → Video setup → Voice)` });
+      todo.push(`a narrator voice${funnel ? ` on ${funnel}` : ''}`);
+    } else if (!v.ok) {
+      rows.push({ name: 'ElevenLabs voice', tone: 'todo', text: v.state === 'empty' ? 'no characters left: top up, then press Check again' : 'said "out of credit" today: top up, then press I topped up', clear: v.state === 'exhausted' ? 'voice' : undefined });
+      todo.push('ElevenLabs credit');
+    } else {
+      rows.push({ name: 'ElevenLabs voice', tone: 'ok', text: bal || 'ready' });
+    }
+  }
+  for (const [k, name] of [['image', 'Image API'], ['llm', 'LLM']]) {
+    const x = deps[k];
+    if (!x) continue;
+    if (x.state === 'missing') { rows.push({ name, tone: 'todo', text: 'add an OpenAI or Gemini key' }); todo.push(`an ${name === 'LLM' ? 'LLM' : 'image'} key (OpenAI or Gemini)`); }
+    else if (!x.ok) { rows.push({ name, tone: 'todo', text: 'said "out of credit" today: top up, then press I topped up', clear: k }); todo.push(`${name} credit`); }
+    else rows.push({ name, tone: 'ok', text: 'ready · balance not shown by OpenAI/Gemini' });
+  }
+  const a = deps.assembly;
+  if (a) {
+    rows.push({ name: 'Video assembly (GitHub)', tone: a.ok ? 'ok' : 'todo', text: a.ok ? 'ready · Drive connected, GitHub token set' : a.note });
+    if (!a.ok) todo.push(a.note);
+  }
+  const ready = !todo.length;
+  const headline = ready
+    ? `Lane 2 is ready. The next AI video uses ${VIDEO_LABEL[provider] || provider}.`
+    : `Lane 2 needs ${todo.length === 1 ? 'one thing' : `${todo.length} things`} before it can make AI videos: ${todo.join('; ')}. Image posts fill in until then.`;
+  return { ready, headline, todo, rows };
 }
 
 /** The first provider in `order` whose state is ok, or null. */
@@ -484,6 +553,6 @@ export default {
   readyRows, pickReadyRow, nextMatchKeys, htmlToText, historyLines, instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt,
   normalizeRefill, rowsForSheet,
   VIDEO_REVIEW, pickOldestVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, VIDEO_PROVIDERS, providerOrder,
-  isCreditError, creditState, chooseProvider, laneTwoVerdict, dryTransition, researchPrompt, normalizeResearch, briefTopic,
+  isCreditError, creditState, creditView, chooseProvider, laneTwoVerdict, dryTransition, researchPrompt, normalizeResearch, briefTopic,
   rerunAction, nudgeNeeded, NUDGE_TEXT,
 };

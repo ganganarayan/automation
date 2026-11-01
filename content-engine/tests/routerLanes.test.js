@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   pickOldestVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, providerOrder, isCreditError, creditState,
   chooseProvider, laneTwoVerdict, dryTransition, researchPrompt, normalizeResearch, briefTopic, rerunAction,
-  nudgeNeeded, laneForInstance, NUDGE_TEXT,
+  nudgeNeeded, laneForInstance, NUDGE_TEXT, creditView,
 } from '../src/utils/routerSpec.js';
 
 const files = [
@@ -139,5 +139,37 @@ describe('re-run + nudge', () => {
   it('a router ready-video awaiting approval still reads as Lane 1', () => {
     expect(laneForInstance({ status: 'video_review', source_type: 'drive_folder' })).toBe('ready_video');
     expect(laneForInstance({ status: 'script_review', source_type: 'generated' })).toBe('ai_video');
+  });
+});
+
+describe('Keys and credit view: informs, does not alarm', () => {
+  const ok = (balance) => (balance ? { ok: true, state: 'ok', balance } : { ok: true, state: 'unknown' });
+  const missing = { ok: false, state: 'missing' };
+  it('a live top-up beats an earlier out-of-credit mark', () => {
+    expect(creditState({ configured: true, balance: 500, exhaustedOn: '2026-11-01', today: '2026-11-01' })).toMatchObject({ ok: true, state: 'ok', balance: 500 });
+  });
+  it('unused providers are optional, not warnings; voice needs a pick', () => {
+    const v = creditView({
+      provider: 'hailuo', order: ['hailuo', 'kling', 'runway'], funnel: 'Gita',
+      video: { hailuo: ok(), kling: missing, runway: missing },
+      deps: { voice: { ok: false, state: 'needs_voice', balance: 30000 }, image: ok(), llm: ok(), assembly: { ok: true } },
+    });
+    expect(v.ready).toBe(false);
+    expect(v.rows.filter((r) => r.name === 'Kling' || r.name === 'Runway').every((r) => r.tone === 'off')).toBe(true);
+    const voice = v.rows.find((r) => r.name === 'ElevenLabs voice');
+    expect(voice.tone).toBe('todo');
+    expect(voice.text).toContain('30,000 characters left');
+    expect(v.headline).toMatch(/needs one thing.*narrator voice on Gita.*Image posts fill in/);
+  });
+  it('ready reads green with the provider in use', () => {
+    const v = creditView({ provider: 'hailuo', order: ['hailuo'], video: { hailuo: ok() }, deps: { voice: ok(12000), assembly: { ok: true } } });
+    expect(v.ready).toBe(true);
+    expect(v.headline).toContain('Hailuo');
+    expect(v.rows[0].text).toMatch(/^in use/);
+  });
+  it('no provider at all is a to-do; an exhausted one offers "I topped up"', () => {
+    const v = creditView({ order: ['hailuo', 'kling'], video: { hailuo: { ok: false, state: 'exhausted' }, kling: missing }, deps: {} });
+    expect(v.rows.every((r) => r.tone === 'todo')).toBe(true);
+    expect(v.rows[0].clear).toBe('hailuo');
   });
 });
