@@ -291,6 +291,32 @@ export async function transcribeVideo({ tenantId = 'default', funnelId, driveId,
   };
 }
 
+// 🎙 Transcribe jobs by Drive id: { state: running | done | failed, result?, error? }. The
+// result is saved on the instance by transcribeVideo, so a restart only loses the status.
+const transcribeJobs = new Map();
+
+/** Start transcribing in the background (no page needs to stay open). */
+export function startTranscribe(args) {
+  const id = String(args.driveId || '');
+  if (!id) throw new Error('driveId required');
+  const job = transcribeJobs.get(id);
+  if (job && job.state === 'running') return job;
+  const running = { state: 'running', startedAt: Date.now() };
+  transcribeJobs.set(id, running);
+  heartbeat.during('transcribe', () => transcribeVideo(args))
+    .then((result) => transcribeJobs.set(id, { state: 'done', result }))
+    .catch((err) => {
+      log.error({ err: err.message, driveId: id }, 'transcribe failed');
+      transcribeJobs.set(id, { state: 'failed', error: err.message });
+    });
+  return running;
+}
+
+/** Where a transcribe job stands ('none' when there is none in memory). */
+export function transcribeStatus({ driveId }) {
+  return transcribeJobs.get(String(driveId)) || { state: 'none' };
+}
+
 /**
  * Stage 2b: keep the operator's transcript: edited text, or a pasted SRT
  * (cue numbers + timestamps stripped for the LLM, the raw SRT kept for
@@ -1320,5 +1346,5 @@ export async function approveTranscriptAuto({ funnelId, driveId }) {
 }
 
 export default {
-  onPosted, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, generateThumbnail, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, postSelections, folderFiles, approveTranscriptAuto,
+  onPosted, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, startTranscribe, transcribeStatus, saveTranscript, generateCopy, generateThumbnail, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, postSelections, folderFiles, approveTranscriptAuto,
 };

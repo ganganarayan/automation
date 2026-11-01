@@ -133,9 +133,21 @@ export function register(ctx) {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
       const { funnelId, driveId, name, accessToken, source } = req.body || {};
       if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
-      res.json({ ok: true, ...(await readyPost.transcribeVideo({ tenantId: req.tenantId, funnelId, driveId: String(driveId), name: String(name || ''), accessToken: String(accessToken || ''), source })) });
+      // Runs on the server in the background and saves onto the instance; the page only checks in.
+      res.json({ ok: true, ...readyPost.startTranscribe({ tenantId: req.tenantId, funnelId, driveId: String(driveId), name: String(name || ''), accessToken: String(accessToken || ''), source }) });
     } catch (err) {
       log.error({ err: err.message }, 'ready-ai transcribe failed');
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  router.post('/admin/instances/ready-ai/transcribe-status', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const { driveId } = req.body || {};
+      if (!driveId) return res.status(400).json({ ok: false, error: 'driveId required' });
+      res.json({ ok: true, ...readyPost.transcribeStatus({ driveId: String(driveId) }) });
+    } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
   });
@@ -949,8 +961,14 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if($('tx',id).value.trim() && !confirm('Replace the text in the box with a fresh transcription? (Whisper costs a little.)')) return;
       busy[id]=true; gateUi(id); $('tb',id).disabled=true; $('tg',id).textContent='🎙 Transcribing… (about a minute for a long video)';
       try{
-        const j=await post('transcribe', { driveId:id, name:$('nm',id).value, source:SOURCE, accessToken: await driveToken() });
-        if(!j.ok) throw new Error(j.error||'failed');
+        const st=await post('transcribe', { driveId:id, name:$('nm',id).value, source:SOURCE, accessToken: await driveToken() });
+        if(!st.ok) throw new Error(st.error||'failed');
+        // The server transcribes and saves it on the instance; leaving the page doesn't stop it.
+        $('tg',id).textContent='🎙 Transcribing on the server… you can leave this page, the transcript is saved when done';
+        let j=st;
+        while(j.ok && j.state==='running'){ await new Promise(r=>setTimeout(r,4000)); j=await post('transcribe-status', { driveId:id }); }
+        if(!j.ok || j.state!=='done') throw new Error(j.error||'failed');
+        j=j.result;
         $('tx',id).value=j.transcript||''; approved[id]=false; timed[id]=!!j.transcribed; subsNote(id); setStage(id, 'transcript'); setInst(id, j.instanceId);
         costs[id]=(costs[id]||[]).concat(j.costs||[]);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
