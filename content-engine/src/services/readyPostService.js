@@ -371,7 +371,19 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
     log.warn({ err: err.message, driveId }, 'draft save failed (generation still returned)');
     return null;
   });
-  return { copy, transcript, costs, thumbs, sizes, thumbError, instanceId, stage: 'review' };
+  // The copy also writes an image prompt: it fills a blank image prompt, never replaces one you wrote.
+  let imagePrompt = String(tArt.imagePrompt || '');
+  if (!imagePrompt.trim() && copy.thumbPrompt) {
+    imagePrompt = copy.thumbPrompt;
+    try {
+      const { inst, steps: base } = await ensureInstance({ funnel, driveId: String(driveId), name });
+      const steps = patchStep(base, 'transcript', { artifacts: { imagePrompt } });
+      await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
+    } catch (err) {
+      log.warn({ err: err.message, driveId }, 'image prompt not saved (still returned)');
+    }
+  }
+  return { copy, transcript, costs, thumbs, sizes, thumbError, instanceId, imagePrompt, stage: 'review' };
 }
 
 /**

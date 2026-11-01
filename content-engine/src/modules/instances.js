@@ -778,7 +778,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
             <label class="fl">Edit the transcript, or paste an SRT, cue numbers and timestamps are removed before the AI reads it (the SRT itself is kept)<textarea id="tx-${id}" rows="7" oninput="txEdited('${id}')"></textarea></label>
             <label class="fl">Thumbnail headline: big text on the image (you write it)<input id="hl-${id}" maxlength="80" placeholder="e.g. Why STHIRA works"></label>
             <label class="fl">Thumbnail sub-head: smaller line under it (optional)<input id="su-${id}" maxlength="120"></label>
-            <label class="fl">Image prompt: the artwork you want on the thumbnail (blank = the one the AI writes with the copy)<textarea id="ip-${id}" rows="4"></textarea></label>
+            <label class="fl">Image prompt: the artwork you want on the thumbnail (left blank, ✅ Approve + generate copy writes one here; yours is never replaced)<textarea id="ip-${id}" rows="4"></textarea></label>
             <div class="nowrow">
               <button class="act" id="tb-${id}" onclick="transcribe('${id}')">🎙 Transcribe</button>
               <button class="act" id="ts-${id}" onclick="saveTx('${id}', false)">💾 Save</button>
@@ -1098,6 +1098,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         const j=await post('generate', { driveId:id, name:$('nm',id).value, accounts: pickedAccounts(), accessToken: await driveToken() });
         if(!j.ok) throw new Error(j.error||'failed');
         applyGen(id, j); setStage(id, 'review'); setInst(id, j.instanceId);
+        if(!$('ip',id).value.trim() && j.imagePrompt) $('ip',id).value=j.imagePrompt;
         costs[id]=(costs[id]||[]).concat(j.costs||[]);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
         $('gs',id).textContent='✓ Copy written from the approved transcript · $'+usd.toFixed(4);
