@@ -218,11 +218,21 @@ export function clipSrt(raw, keepSec = 0) {
 }
 
 /**
- * Where to look for subtitles already in the picture: 3 frames at a quarter,
- * half and three quarters of the part that is kept.
+ * Where to look for subtitles already in the picture: 3 frames taken while
+ * someone is speaking (the middle of a transcript cue, so any subtitles are on
+ * screen), spread over the kept part — the first, middle and last cues of at
+ * least 1 s. Without cues: a quarter, half and three quarters of the way in.
  */
-export function captionSampleTimes(totalSec, keepSec = 0) {
+export function captionSampleTimes(totalSec, keepSec = 0, cues = []) {
   const len = Number(keepSec) > 0 ? Number(keepSec) : Number(totalSec) || 0;
+  const spoken = (Array.isArray(cues) ? cues : [])
+    .filter((c) => c && c.end - c.start >= 1 && (!(len > 0) || (c.start + c.end) / 2 < len - 0.5))
+    .sort((a, b) => a.start - b.start);
+  if (spoken.length) {
+    const n = spoken.length;
+    const picks = [...new Set([Math.floor(n * 0.15), Math.floor(n / 2), Math.min(n - 1, Math.floor(n * 0.85))])];
+    return picks.map((i) => Math.round(((spoken[i].start + spoken[i].end) / 2) * 10) / 10);
+  }
   if (!(len > 0)) return [2, 6, 10];
   return [0.25, 0.5, 0.75].map((f) => Math.round(len * f * 10) / 10);
 }

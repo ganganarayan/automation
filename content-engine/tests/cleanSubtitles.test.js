@@ -63,6 +63,15 @@ describe('clean subtitles', () => {
     expect(() => subtitlesFilter("C:\\x's.srt")).toThrow();
   });
 
+  it('samples frames mid-speech, inside the kept part', () => {
+    const cues = Array.from({ length: 10 }, (_, i) => ({ start: i * 10, end: i * 10 + 4, text: `c${i}` }));
+    cues.push({ start: 101, end: 101.5, text: 'too short' });
+    expect(captionSampleTimes(110, 75, cues)).toEqual([12, 42, 62]);
+    expect(captionSampleTimes(0, 0, cues)).toEqual([12, 52, 82]);
+    expect(captionSampleTimes(110, 0, [{ start: 3, end: 7, text: 'one' }])).toEqual([5]);
+    expect(captionSampleTimes(100, 80, [{ start: 0, end: 0.5, text: 'x' }])).toEqual([20, 40, 60]);
+  });
+
   it('samples 3 frames across the kept part', () => {
     expect(captionSampleTimes(100, 80)).toEqual([20, 40, 60]);
     expect(captionSampleTimes(41)).toEqual([10.3, 20.5, 30.8]);

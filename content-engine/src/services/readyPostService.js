@@ -45,7 +45,7 @@ import sharp from 'sharp';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, progressPct, transcriptSrt, clipSrt, captionSampleTimes, captionsVerdict } from '../utils/cleanSpec.js';
+import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, progressPct, transcriptSrt, clipSrt, parseSrt, captionSampleTimes, captionsVerdict } from '../utils/cleanSpec.js';
 import { writeFile } from 'node:fs/promises';
 import * as driveConnect from './driveConnectService.js';
 import { signTicket, peekTicket, readTicket, dispatchRequest, normalizeRunner, keepSecFor, DEFAULT_REPO } from '../utils/cleanHookSpec.js';
@@ -568,14 +568,16 @@ const CAPTION_CHECK_SYSTEM = 'You check frames of a short video for subtitles: l
  * subtitles are never doubled. Its small cost is kept on the instance.
  */
 async function subtitlePlan({ funnel, providers, driveId, trimEndSec, name, source }) {
-  if (!(await videoSrt(funnel, driveId))) return { subsNote: 'no subtitles added — the transcript has no timestamps (🎙 Transcribe, or paste an SRT)' };
+  const srt = await videoSrt(funnel, driveId);
+  if (!srt) return { subsNote: 'no subtitles added — the transcript has no timestamps (🎙 Transcribe, or paste an SRT)' };
   const url = publicDlUrl(driveId);
   const ffmpeg = createFfmpegProvider({}, log);
   try {
     if ((await ffmpeg.probeVideo({ url })).hasSubtitles) return { subsNote: 'no subtitles added — the video already has a subtitle track' };
     const total = (await videoDurations([driveId]))[driveId] || 0;
     const frames = [];
-    for (const atSec of captionSampleTimes(total, keepSecFor(total, trimEndSec))) {
+    // Frames taken mid-speech, where any existing subtitles would be on screen.
+    for (const atSec of captionSampleTimes(total, keepSecFor(total, trimEndSec), parseSrt(srt))) {
       const f = await ffmpeg.extractFrame({ url, atSec });
       frames.push(await sharp(f).resize(512, 512, { fit: 'inside' }).jpeg({ quality: 80 }).toBuffer());
     }
