@@ -335,7 +335,7 @@ export async function saveTranscript({ funnelId, driveId, name = '', text = '', 
   const head = String(headline || '').replace(/\s+/g, ' ').trim().slice(0, 80);
   const sub = String(subhead || '').replace(/\s+/g, ' ').trim().slice(0, 120);
   const prompt = String(imagePrompt || '').trim().slice(0, 1500);
-  if (approve && !head) throw new Error('Type the thumbnail headline before approving');
+  if (approve && !next.text) throw new Error('The transcript is empty: transcribe the video, or type / paste the text, first');
   const unchanged = next.text === String(prev.text || '').trim();
   const srt = next.srt || (unchanged ? prev.srt || '' : '');
   const approvedAt = approve ? new Date().toISOString() : (unchanged ? prev.approvedAt || null : null);

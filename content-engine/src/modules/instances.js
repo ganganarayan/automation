@@ -932,9 +932,14 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       const sp=$('sp',id); if(sp) sp.textContent=STAGE_LABEL[k]||k;
     }
     function setInst(id, instanceId){ const o=$('ol',id); if(!SINGLE && o && instanceId) o.innerHTML='<a class="hint" href="/api/v1/admin/instances/'+instanceId+'">Open instance ›</a>'; }
-    // The gate: ✨ Generate is live only for an approved transcript.
-    function gateUi(id){ $('gb',id).disabled = !!busy[id]; }
+    // The gate: the copy is written only from a transcript, so ✅ Approve + generate copy is off while the box is empty.
+    function gateUi(id){
+      const empty=!$('tx',id).value.trim();
+      $('gb',id).disabled = !!busy[id] || empty;
+      $('gb',id).title = empty ? 'Transcribe the video, or type / paste the transcript, first' : '';
+    }
     function txEdited(id){
+      gateUi(id);
       if(!approved[id]) return;
       approved[id]=false; gateUi(id); setStage(id, 'transcript');
       $('tg',id).textContent='🟡 Edited: ✅ Approve again to use it.';
@@ -950,15 +955,14 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         if(j.imagePrompt) $('ip',id).value=j.imagePrompt;
         costs[id]=(costs[id]||[]).concat(j.costs||[]);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
-        $('tg',id).textContent=(j.transcribed?'🟡 Transcribed':'🟡 No speech found. Type a description, or approve empty to write from the file name')+' · $'+usd.toFixed(4)+'. Check the names, type the headline, check the image prompt, then ✅ Approve + generate copy and 🖼 Generate thumbnail.'+(j.promptError?' (Image prompt draft failed: '+j.promptError+', write one.)':'');
+        $('tg',id).textContent=(j.transcribed?'🟡 Transcribed':'🟡 No speech found. Type the text yourself (or paste an SRT) to write the copy from')+' · $'+usd.toFixed(4)+'. Check the names, type the headline, check the image prompt, then ✅ Approve + generate copy and 🖼 Generate thumbnail.'+(j.promptError?' (Image prompt draft failed: '+j.promptError+', write one.)':'');
       }catch(e){ $('tg',id).textContent='⚠ '+e.message; }
       busy[id]=false; $('tb',id).disabled=false; gateUi(id);
     }
     async function saveTx(id, approve){
       if(busy[id] && !approve) return false;
       const text=$('tx',id).value;
-      if(approve && !$('hl',id).value.trim()){ $('tg',id).textContent='🟡 Type the thumbnail headline first.'; $('hl',id).focus(); return false; }
-      if(approve && !text.trim() && !confirm('The transcript is empty, the copy will be written from the file name and the brand brief. Approve anyway?')) return false;
+      if(approve && !text.trim()){ $('tg',id).textContent='🟡 The transcript is empty: 🎙 Transcribe the video, or type / paste the text, first.'; return false; }
       $('ts',id).disabled=true;
       let ok=false;
       try{
@@ -1073,6 +1077,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if(d.copy){ applyGen(id, d); $('gs',id).textContent='💾 Saved draft from '+d.atIst+' · $'+Number(d.costUsd||0).toFixed(4); }
     });
     document.querySelectorAll('.cleansb').forEach(e=>subsNote(e.id.slice(3)));
+    document.querySelectorAll('[id^="gb-"]').forEach(b=>gateUi(b.id.slice(3)));
     // Keep this video's current copy (your edits too) without regenerating.
     async function saveDraft(id){
       if(busy[id]) return;
