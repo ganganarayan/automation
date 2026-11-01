@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, thumbSvg, thumbImagePrompt, thumbMedia } from '../src/utils/thumbSpec.js';
+import { THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbSvg, thumbImagePrompt, thumbMedia } from '../src/utils/thumbSpec.js';
 import { platformConfigsFor } from '../src/utils/aiCopySpec.js';
 
 describe('thumbSpec', () => {
@@ -25,7 +25,8 @@ describe('thumbSpec', () => {
   it('builds an escaped SVG at the spec size', () => {
     const svg = thumbSvg({ ...THUMB_SPECS.youtube, text: 'Fear & <Faith>' });
     expect(svg).toContain('width="1280" height="720"');
-    expect(svg).toContain('Fear &amp; &lt;Faith&gt;');
+    expect(svg).toContain('Fear &amp;');
+    expect(svg).toContain('&lt;Faith&gt;');
   });
   it('image prompt forbids text in the artwork', () => {
     expect(thumbImagePrompt('A lotus at dawn')).toMatch(/^A lotus at dawn[\s\S]*square[\s\S]*no text/i);
@@ -49,5 +50,28 @@ describe('thumbSvg sub-head', () => {
     expect(svg).toContain('The combat engine');
     expect(svg).toContain(`fill="${THUMB_SPECS.youtube.accent}"`);
     expect(thumbSvg({ ...THUMB_SPECS.youtube, text: 'Only headline' })).not.toContain('font-weight="700"');
+  });
+});
+
+describe('thumbSvg fits the whole headline', () => {
+  const long = 'Negative Lead Generation - Less but Qualified Leads Win Every Time';
+  it('never cuts the headline or the sub-head', () => {
+    for (const spec of Object.values(THUMB_SIZES)) {
+      const svg = thumbSvg({ ...spec, accent: '#FFC400', text: long, sub: 'You will never have a disqualified lead problem again' });
+      expect(svg).not.toContain('…');
+      for (const word of long.split(' ')) expect(svg).toContain(word);
+      expect(svg).toContain('problem again');
+    }
+  });
+  it('fitText picks the biggest font that keeps every word in the box', () => {
+    const f = fitText(long, { boxW: 1100, boxH: 300, maxSize: 200 });
+    expect(f.lines.join(' ')).toBe(long);
+    expect(f.size * 1.15 * f.lines.length).toBeLessThanOrEqual(300);
+    expect(fitText('', { boxW: 100, boxH: 100, maxSize: 50 })).toEqual({ lines: [], size: 0 });
+  });
+  it('puts the sub-head on a solid accent box with dark text', () => {
+    const svg = thumbSvg({ ...THUMB_SIZES.landscape, accent: '#FFC400', text: 'Hi', sub: 'Read me' });
+    expect(svg).toMatch(/<rect [^>]*fill="#FFC400"/);
+    expect(svg).toContain('fill="#111111"');
   });
 });

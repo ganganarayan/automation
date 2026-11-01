@@ -357,17 +357,19 @@ export async function saveTranscript({ funnelId, driveId, name = '', text = '', 
 }
 
 /**
- * Stage 3: write one video's copy and thumbnails from its APPROVED
- * transcript (read from the instance, never from the page). Regenerating
- * never re-runs the transcription. Returns { copy, transcript, costs, ... }:
- * costs are the real token / image costs, recorded on the instance.
+ * Stage 3: write one video's copy from its APPROVED transcript (read from the
+ * instance, never from the page). Regenerating never re-runs the
+ * transcription. `withThumbs` also makes the thumbnails (the daily router);
+ * the page makes them with their own button, so there the saved thumbnails
+ * are kept as they are. Returns { copy, transcript, costs, ... }: costs are
+ * the real token / image costs, recorded on the instance.
  */
-export async function generateCopy({ tenantId = 'default', funnelId, driveId, name = '', accessToken = '', accounts: pickedAccounts = null }) {
+export async function generateCopy({ tenantId = 'default', funnelId, driveId, name = '', accessToken = '', accounts: pickedAccounts = null, withThumbs = true }) {
   if (!driveId) throw new Error('driveId required');
   const { funnel, resolved, cfg } = await loadFunnel(funnelId, pickedAccounts);
   const draft = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [String(driveId)]))[String(driveId)];
   const draftSteps = draft ? instanceService.parseSteps(draft) : [];
-  if (!draft || !canGenerateCopy(draftSteps)) throw new Error('Approve the transcript first, copy and thumbnails are written only from an approved transcript');
+  if (!draft || !canGenerateCopy(draftSteps)) throw new Error('Approve the transcript first: the copy is written only from an approved transcript');
   const tArt = ((draftSteps.find((x) => x.key === 'transcript') || {}).artifacts) || {};
   const transcript = String(tArt.text || '');
   const providers = await buildProviders(funnel.tenant_id || tenantId);
@@ -384,12 +386,16 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   if (!copy.title && !copy.description) throw new Error('the model returned empty copy, try again');
   log.info({ funnel: funnel.name, driveId, words: transcript.split(/\s+/).filter(Boolean).length }, 'ready video copy generated');
 
-  // A thumbnail failure never loses the copy, the video's first frame is used instead.
-  const { thumbs, sizes, thumbError } = await makeThumbs({
-    providers, resolved, driveId, ext, accessToken, costs,
-    imagePrompt: tArt.imagePrompt || copy.thumbPrompt || copy.title, text: tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '',
-  });
-  const instanceId = await saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs }).catch((err) => {
+  // Copy only: the thumbnails already on the instance stay as they are.
+  const saved = ((draftSteps.find((x) => x.key === 'images') || {}).artifacts) || {};
+  // A thumbnail failure never loses the copy; the video's first frame is used instead.
+  const { thumbs, sizes, thumbError } = withThumbs
+    ? await makeThumbs({
+      providers, resolved, driveId, ext, accessToken, costs,
+      imagePrompt: tArt.imagePrompt || copy.thumbPrompt || copy.title, text: tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '',
+    })
+    : { thumbs: saved.thumbs || {}, sizes: saved.sizes || [], thumbError: '' };
+  const instanceId = await saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, keepThumbs: !withThumbs }).catch((err) => {
     log.warn({ err: err.message, driveId }, 'draft save failed (generation still returned)');
     return null;
   });
@@ -823,7 +829,7 @@ export async function cleanStatus({ funnelId, driveId }) {
  * transcript and thumbnails as JSON on the steps (all generations kept in
  * script.artifacts.generations), and every generation's real cost added.
  */
-async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, edit = false, ctaLink }) {
+async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, edit = false, ctaLink, keepThumbs = false }) {
   const { inst, steps: base, existing } = await ensureInstance({ funnel, driveId, title: copy.title || 'Ready video' });
   let steps = base;
   const at = new Date().toISOString();
@@ -833,7 +839,7 @@ async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, cos
   const generations = edit ? prev : [...prev, { at, copy, thumbs, sizes, thumbError }].slice(-20);
   // The transcript belongs to its own stage (transcribe / approve): never touched here.
   steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, generations, ...(ctaLink !== undefined ? { ctaLink } : {}) } });
-  if (sizes.length || !edit) steps = patchStep(steps, 'images', { status: sizes.length ? 'done' : 'skipped', artifacts: { thumbs, sizes } });
+  if (!keepThumbs && (sizes.length || !edit)) steps = patchStep(steps, 'images', { status: sizes.length ? 'done' : 'skipped', artifacts: { thumbs, sizes } });
   const durationSec = durationCache.get(driveId) || 0;
   steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
   // An edit save carries a generation's cost only the first time (no draft yet).

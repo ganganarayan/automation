@@ -19,7 +19,8 @@
  *         GET  /api/v1/admin/instances/ready-ai    old link → prepare (so are /ready and /manual → /new)
  *         POST /api/v1/admin/instances/ready-ai/transcribe  Whisper one video → transcript review
  *         POST /api/v1/admin/instances/ready-ai/transcript  save / approve a transcript (text or SRT)
- *         POST /api/v1/admin/instances/ready-ai/generate  copy + thumbnails from the approved transcript
+ *         POST /api/v1/admin/instances/ready-ai/generate  the copy from the approved transcript
+ *         POST /api/v1/admin/instances/ready-ai/thumbnail the thumbnails from the headline (copy untouched)
  *         POST /api/v1/admin/instances/ready-ai/durations video lengths for the listed videos
  *         POST /api/v1/admin/instances/ready/post  post the ticked videos
  */
@@ -165,13 +166,14 @@ export function register(ctx) {
     }
   });
 
-  // Stage 3: copy + thumbnails, only from the approved transcript.
+  // Stage 3: the copy, only from the approved transcript.
   router.post('/admin/instances/ready-ai/generate', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
       const { funnelId, driveId, name, accessToken, accounts } = req.body || {};
       if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
-      const out = await readyPost.generateCopy({ tenantId: req.tenantId, funnelId, driveId: String(driveId), name: String(name || ''), accessToken: String(accessToken || ''), accounts });
+      // Copy only: thumbnails have their own button (🖼 Generate thumbnail).
+      const out = await readyPost.generateCopy({ tenantId: req.tenantId, funnelId, driveId: String(driveId), name: String(name || ''), accessToken: String(accessToken || ''), accounts, withThumbs: false });
       res.json({ ok: true, ...out });
     } catch (err) {
       log.error({ err: err.message }, 'ready-ai generate failed');
@@ -780,12 +782,12 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
             <div class="nowrow">
               <button class="act" id="tb-${id}" onclick="transcribe('${id}')">🎙 Transcribe</button>
               <button class="act" id="ts-${id}" onclick="saveTx('${id}', false)">💾 Save</button>
-              <button class="act primary" id="gb-${id}" onclick="approveGen('${id}')">✅ Approve + generate copy &amp; thumbnails</button>
+              <button class="act primary" id="gb-${id}" onclick="approveGen('${id}')">✅ Approve + generate copy</button>
             </div>
             <div class="hint" id="tg-${id}">Not transcribed yet: 🎙 Transcribe, or paste the text / SRT. Then type the headline, check the image prompt and approve.</div>
           </div>
           <div class="panel"><h4>3 · AI copy + thumbnails <span class="hint">written from the approved transcript, with your headline</span></h4>
-            <div class="nowrow"><button class="act" id="sv-${id}" onclick="saveDraft('${id}')">💾 Save draft</button> <button class="act" id="gt-${id}" onclick="genThumb('${id}')" title="Uses the headline, sub-head and image prompt in step 2, your copy is left exactly as it is">🖼 Generate thumbnail only</button> <span class="hint" id="gs-${id}"></span></div>
+            <div class="nowrow"><button class="act" id="sv-${id}" onclick="saveDraft('${id}')">💾 Save draft</button> <button class="act" id="gt-${id}" onclick="genThumb('${id}')" title="Uses the headline, sub-head and image prompt in step 2, your copy is left exactly as it is">🖼 Generate thumbnail</button> <span class="hint" id="gs-${id}"></span></div>
             <div class="thumbs" id="th-${id}"></div>
           </div>
         </div>
@@ -845,7 +847,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     : `<div class="top">
       <div>
         <h1>Ready videos: ${esc(funnel.name)}</h1>
-        <div class="sub">Tick a video and take it through its stages: ✂ Clean (optional) → 🎙 Transcript (fix the names, or paste an SRT) → ✅ Approve → ✨ Generate copy + thumbnails → schedule. Nothing paid runs on a transcript you haven't approved. Each video is one instance. Posts go out in the order you ticked.</div>
+        <div class="sub">Tick a video and take it through its stages: ✂ Clean (optional) → 🎙 Transcript (fix the names, or paste an SRT) → ✅ Approve + generate copy → 🖼 Generate thumbnail → schedule. Each is its own button. Nothing paid runs on a transcript you haven't approved. Each video is one instance. Posts go out in the order you ticked.</div>
       </div>
       <div class="toprow">
         ${libraryTabs('ready')}
@@ -948,7 +950,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         if(j.imagePrompt) $('ip',id).value=j.imagePrompt;
         costs[id]=(costs[id]||[]).concat(j.costs||[]);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
-        $('tg',id).textContent=(j.transcribed?'🟡 Transcribed':'🟡 No speech found, type a description, or approve empty to write from the file name')+' · $'+usd.toFixed(4)+', check the names, type the headline, check the image prompt, then ✅ Approve + generate.'+(j.promptError?' (Image prompt draft failed: '+j.promptError+', write one.)':'');
+        $('tg',id).textContent=(j.transcribed?'🟡 Transcribed':'🟡 No speech found. Type a description, or approve empty to write from the file name')+' · $'+usd.toFixed(4)+'. Check the names, type the headline, check the image prompt, then ✅ Approve + generate copy and 🖼 Generate thumbnail.'+(j.promptError?' (Image prompt draft failed: '+j.promptError+', write one.)':'');
       }catch(e){ $('tg',id).textContent='⚠ '+e.message; }
       busy[id]=false; $('tb',id).disabled=false; gateUi(id);
     }
@@ -969,7 +971,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       $('ts',id).disabled=false;
       return ok;
     }
-    // One step: save the transcript + your headline / sub-head / image prompt, approve, then write the copy and thumbnails.
+    // One step: save the transcript + your headline / sub-head / image prompt, approve, then write the copy (thumbnails have their own button).
     async function approveGen(id){
       if(busy[id]) return;
       busy[id]=true; gateUi(id);
@@ -980,7 +982,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     // Show one generation (fresh, or a saved draft restored after a reload).
     function applyGen(id, j){
       $('ti',id).value=j.copy.title||''; $('de',id).value=noLink(j.copy.description); if($('ct',id) && j.ctaLink!==undefined) $('ct',id).value=j.ctaLink||''; $('ig',id).value=j.copy.igCaption||''; $('sh',id).value=j.copy.short||''; cnt(id);
-      $('gb',id).textContent='✅ Approve + regenerate copy & thumbnails';
+      $('gb',id).textContent='✅ Approve + regenerate copy';
       showThumbs(id, j);
       done[id]=true;
     }
@@ -1067,7 +1069,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if(d.hasTranscript || d.transcript) $('tx',id).value=d.transcript||'';
       $('hl',id).value=d.headline||''; $('su',id).value=d.subhead||''; $('ip',id).value=d.imagePrompt||'';
       approved[id]=!!d.approved; gateUi(id);
-      if(d.hasTranscript) $('tg',id).textContent=d.approved?('🟢 Approved '+d.approvedIst+(d.srt?' · SRT kept':'')):'🟡 Waiting for you, check the names, type the headline, check the image prompt, then ✅ Approve + generate.';
+      if(d.hasTranscript) $('tg',id).textContent=d.approved?('🟢 Approved '+d.approvedIst+(d.srt?' · SRT kept':'')):'🟡 Waiting for you. Check the names, type the headline, check the image prompt, then ✅ Approve + generate copy and 🖼 Generate thumbnail.';
       if(d.copy){ applyGen(id, d); $('gs',id).textContent='💾 Saved draft from '+d.atIst+' · $'+Number(d.costUsd||0).toFixed(4); }
     });
     document.querySelectorAll('.cleansb').forEach(e=>subsNote(e.id.slice(3)));
@@ -1087,7 +1089,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     async function gen(id){
       if(busy[id]) return;
       if(!approved[id]){ $('gs',id).textContent='✅ Approve the transcript first.'; gateUi(id); return; }
-      busy[id]=true; gateUi(id); $('gs',id).textContent='Writing copy + designing thumbnails… (about a minute)';
+      busy[id]=true; gateUi(id); $('gs',id).textContent='Writing the copy… (under a minute). Your thumbnails are kept.';
       try{
         const j=await post('generate', { driveId:id, name:$('nm',id).value, accounts: pickedAccounts(), accessToken: await driveToken() });
         if(!j.ok) throw new Error(j.error||'failed');
@@ -1105,7 +1107,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if(order.some(id=>busy[id])){ msg('Wait for the transcript / copy to finish.'); return; }
       if(order.some(id=>cleaning[id])){ msg('Wait for ✂ Clean to finish.'); return; }
       const nogen=order.filter(id=>!done[id]);
-      if(nogen.length){ msg('✅ Approve + generate first for '+nogen.map(id=>$('ord',id).textContent||'this video').join(', ')+'.'); return; }
+      if(nogen.length){ msg('✅ Approve + generate copy first for '+nogen.map(id=>$('ord',id).textContent||'this video').join(', ')+'.'); return; }
       const missing=order.filter(id=>!$('ti',id).value.trim()||!$('de',id).value.trim()||!$('ig',id).value.trim()||!$('sh',id).value.trim());
       if(missing.length){ msg('Fill every copy field for '+missing.map(id=>$('ord',id).textContent||'this video').join(', ')+'.'); return; }
       const late=order.filter(id=>!(allNow||$('now',id).checked) && (!$('sch',id).value || $('sch',id).value < istNow()));
@@ -1154,7 +1156,7 @@ function newPage(funnels) {
       <div class="toprow"><a class="act" href="/api/v1/admin/instances">← Library</a></div>
     </div>
     <h3>📥 Ready videos <span class="hint">the everyday lane</span></h3>
-    <p class="ro">Finished videos from a funnel's Drive folder: ✂ Clean → transcript (you approve it) → AI copy + thumbnails → schedule.</p>
+    <p class="ro">Finished videos from a funnel's Drive folder: ✂ Clean → transcript (you approve it) → AI copy → thumbnail → schedule.</p>
     <div class="row">${ready || '<span class="hint">No funnels yet.</span>'}</div>
     <h3>🎛 Generated run <span class="hint">script → images → animate → voice → stitch</span></h3>
     <p class="ro">A hand-stepped run: generate, preview and approve each stage, then post. Set <b>Manual stepper = On</b> in a funnel to also pause its scheduled daily runs for manual stepping; turn it off to go back to automatic.</p>
