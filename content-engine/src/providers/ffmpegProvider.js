@@ -158,7 +158,7 @@ export function createFfmpegProvider(cfg = {}, log) {
         const streams = (JSON.parse(String(stdout)) || {}).streams || [];
         const v = streams.find((x) => x.codec_type === 'video') || {};
         const [n, d] = String(v.r_frame_rate || '').split('/').map(Number);
-        return { width: Number(v.width) || 0, height: Number(v.height) || 0, fps: n > 0 && d > 0 ? n / d : 0, hasAudio: streams.some((x) => x.codec_type === 'audio') };
+        return { width: Number(v.width) || 0, height: Number(v.height) || 0, fps: n > 0 && d > 0 ? n / d : 0, hasAudio: streams.some((x) => x.codec_type === 'audio'), hasSubtitles: streams.some((x) => x.codec_type === 'subtitle') };
       } catch (err) {
         log?.warn?.({ err: err.message }, 'ffprobe video info failed');
         return { width: 0, height: 0, fps: 0, hasAudio: true };

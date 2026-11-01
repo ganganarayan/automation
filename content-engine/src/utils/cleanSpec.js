@@ -218,6 +218,27 @@ export function clipSrt(raw, keepSec = 0) {
 }
 
 /**
+ * Where to look for subtitles already in the picture: 3 frames at a quarter,
+ * half and three quarters of the part that is kept.
+ */
+export function captionSampleTimes(totalSec, keepSec = 0) {
+  const len = Number(keepSec) > 0 ? Number(keepSec) : Number(totalSec) || 0;
+  if (!(len > 0)) return [2, 6, 10];
+  return [0.25, 0.5, 0.75].map((f) => Math.round(len * f * 10) / 10);
+}
+
+/**
+ * The AI's per-frame answers → does the video already show subtitles?
+ * Subtitles of speech are on screen most of the time, so it takes two of the
+ * three frames (a single frame of slide text or a title is not enough).
+ */
+export function captionsVerdict(frames) {
+  const list = Array.isArray(frames) ? frames : [];
+  const yes = list.filter((x) => x === true || (x && x.captions === true)).length;
+  return yes >= Math.min(2, list.length || 1);
+}
+
+/**
  * Seconds of output written so far, from a chunk of `ffmpeg -progress` output
  * (the last out_time_us / out_time_ms in it); -1 when the chunk has none.
  * Both keys are microseconds (out_time_ms is misnamed by ffmpeg).
@@ -233,4 +254,4 @@ export function progressPct(doneSec, totalSec) {
   return Math.min(99, Math.floor((doneSec / totalSec) * 100));
 }
 
-export default { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, subtitlesFilter, parseSrt, splitLongCues, transcriptSrt, clipSrt, progressSeconds, progressPct };
+export default { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, subtitlesFilter, parseSrt, splitLongCues, transcriptSrt, clipSrt, captionSampleTimes, captionsVerdict, progressSeconds, progressPct };

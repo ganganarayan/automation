@@ -45,7 +45,7 @@ import sharp from 'sharp';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, progressPct, transcriptSrt, clipSrt } from '../utils/cleanSpec.js';
+import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, progressPct, transcriptSrt, clipSrt, captionSampleTimes, captionsVerdict } from '../utils/cleanSpec.js';
 import { writeFile } from 'node:fs/promises';
 import * as driveConnect from './driveConnectService.js';
 import { signTicket, peekTicket, readTicket, dispatchRequest, normalizeRunner, keepSecFor, DEFAULT_REPO } from '../utils/cleanHookSpec.js';
@@ -536,9 +536,9 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endTe
   const providers = await buildProviders(funnel.tenant_id);
   const job = cleanJobs.get(id);
   if (job && job.state === 'running') return job;
-  const opts = { ...normalizeCleanOpts({ zoomPct, trimEndSec }), ...normalizeEndCard({ endText, endLink, endSec }), ...(subs ? { subs: true } : {}) };
-  // Burned subtitles need the transcript's timestamps — refuse up front rather than burn nothing.
-  if (opts.subs && !(await videoSrt(funnel, id))) throw new Error(NO_TIMED_SRT);
+  const opts = { ...normalizeCleanOpts({ zoomPct, trimEndSec }), ...normalizeEndCard({ endText, endLink, endSec }) };
+  // Subtitles from the transcript — only when it has timestamps and the video doesn't already show subtitles.
+  if (subs) Object.assign(opts, await subtitlePlan({ funnel, providers, driveId: id, trimEndSec: opts.trimEndSec, name, source }));
   // GitHub Actions runs ffmpeg and keeps the file in your Drive; Railway is the original path.
   const where = normalizeRunner(runner || (providers.resolved.clean || {}).runner);
   if (where === 'github') return startCleanGithub({ funnel, providers, id, opts, name, source, baseUrl });
@@ -556,6 +556,47 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endTe
 }
 
 const NO_TIMED_SRT = "This video's transcript has no timestamps, so there are no subtitles to burn — 🎙 Transcribe it (Whisper keeps the timings) or paste an SRT in step 2, then clean again. Editing the transcribed text drops Whisper's timings.";
+
+const CAPTION_CHECK_SYSTEM = 'You check frames of a short video for subtitles: lines of text at the bottom or middle of the picture that show the words being spoken (burned-in captions). '
+  + 'A title, a slide or chart, a logo, a watermark or a name tag is NOT subtitles. '
+  + 'Return JSON: {"frames":[{"captions":true|false}, ...]} — one entry per image, in order.';
+
+/**
+ * Whether Clean adds subtitles: { subs: true } when the transcript is timed and
+ * the video shows none yet; else { subsNote } saying why not (shown with the
+ * cleaned video). An AI looks at 3 frames — a check that fails adds none, so
+ * subtitles are never doubled. Its small cost is kept on the instance.
+ */
+async function subtitlePlan({ funnel, providers, driveId, trimEndSec, name, source }) {
+  if (!(await videoSrt(funnel, driveId))) return { subsNote: 'no subtitles added — the transcript has no timestamps (🎙 Transcribe, or paste an SRT)' };
+  const url = publicDlUrl(driveId);
+  const ffmpeg = createFfmpegProvider({}, log);
+  try {
+    if ((await ffmpeg.probeVideo({ url })).hasSubtitles) return { subsNote: 'no subtitles added — the video already has a subtitle track' };
+    const total = (await videoDurations([driveId]))[driveId] || 0;
+    const frames = [];
+    for (const atSec of captionSampleTimes(total, keepSecFor(total, trimEndSec))) {
+      const f = await ffmpeg.extractFrame({ url, atSec });
+      frames.push(await sharp(f).resize(512, 512, { fit: 'inside' }).jpeg({ quality: 80 }).toBuffer());
+    }
+    const r = await providers.llm.generateJsonDetailed({ system: CAPTION_CHECK_SYSTEM, user: `${frames.length} frames of the video, in order.`, images: frames, maxTokens: 1500 });
+    const cost = costText({ inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, model: r.model });
+    await recordCost(funnel, driveId, 'stitch', cost, { name, source }).catch((err) => log.warn({ err: err.message, driveId }, 'subtitle check cost not saved'));
+    const has = captionsVerdict((r.data || {}).frames);
+    log.info({ driveId, has, frames: (r.data || {}).frames }, 'on-screen subtitle check');
+    return has ? { subsNote: 'no subtitles added — the video already shows subtitles' } : { subs: true };
+  } catch (err) {
+    log.warn({ err: err.message, driveId }, 'on-screen subtitle check failed (none added)');
+    return { subsNote: `no subtitles added — could not check whether the video already has them (${String(err.message).slice(0, 120)})` };
+  }
+}
+
+/** Add one real cost to a step of the video's instance (made if there's none yet). */
+async function recordCost(funnel, driveId, step, cost, { name = '', source = null } = {}) {
+  const { inst, steps: base } = await ensureInstance({ funnel, driveId, name, source });
+  const steps = addCostToSteps(base, step, { ...cost, costUsd: Number(cost.costUsd) || 0, at: new Date().toISOString() });
+  await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
+}
 
 /** The video's timed subtitles from its transcript step (pasted SRT or Whisper cues); '' when none. */
 async function videoSrt(funnel, driveId) {

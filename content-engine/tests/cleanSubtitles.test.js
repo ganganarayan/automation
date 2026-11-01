@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cleanVideoArgs, cleanWithCardArgs, subtitlesFilter, parseSrt, splitLongCues, transcriptSrt, clipSrt } from '../src/utils/cleanSpec.js';
+import { cleanVideoArgs, cleanWithCardArgs, subtitlesFilter, parseSrt, splitLongCues, transcriptSrt, clipSrt, captionSampleTimes, captionsVerdict } from '../src/utils/cleanSpec.js';
 
 const SRT = `1
 00:00:01,000 --> 00:00:04,000
@@ -61,5 +61,18 @@ describe('clean subtitles', () => {
   it('refuses a subtitle path that would break the filter', () => {
     expect(subtitlesFilter('')).toBe('');
     expect(() => subtitlesFilter("C:\\x's.srt")).toThrow();
+  });
+
+  it('samples 3 frames across the kept part', () => {
+    expect(captionSampleTimes(100, 80)).toEqual([20, 40, 60]);
+    expect(captionSampleTimes(41)).toEqual([10.3, 20.5, 30.8]);
+    expect(captionSampleTimes(0)).toEqual([2, 6, 10]);
+  });
+
+  it('calls subtitles present on 2 of 3 frames, not on one title frame', () => {
+    expect(captionsVerdict([{ captions: true }, { captions: false }, { captions: true }])).toBe(true);
+    expect(captionsVerdict([{ captions: true }, { captions: false }, { captions: false }])).toBe(false);
+    expect(captionsVerdict([true])).toBe(true);
+    expect(captionsVerdict(undefined)).toBe(false);
   });
 });

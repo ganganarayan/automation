@@ -760,7 +760,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
               <label class="nowrow">on <select id="rn-${id}" class="cleanrn"><option value="">default (Settings)</option><option value="railway">Railway</option><option value="github">GitHub</option></select></label>
               <button class="act" id="cl-${id}" onclick="cleanVid('${id}')">✂ Clean video</button>
             </div>
-            <div class="nowrow"><label class="nowrow"><input type="checkbox" id="sb-${id}" onchange="subsNote('${id}')"> Burn subtitles — timed to the audio, from the transcript (step 2); none on the end card</label></div>
+            <div class="nowrow"><label class="nowrow"><input type="checkbox" id="sb-${id}" class="cleansb" onchange="subsNote('${id}')"> Add subtitles from the transcript — timed to the audio; skipped when the video already shows subtitles; none on the end card</label></div>
             <div class="hint" id="sbn-${id}"></div>
             <div class="endcard">
               <label class="fl">End card text — black screen, white text, centred (blank = no end card)<textarea id="ec-${id}" class="endtx" rows="2" placeholder="e.g. Take the free assessment"></textarea></label>
@@ -1009,22 +1009,22 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     let CO = { zoomPct: 10, trimEndSec: 0, endText: '', endLink: '', endSec: 4 };
     try{ CO = Object.assign(CO, JSON.parse(localStorage.getItem('cleanOpts')||'{}')); }catch(e){}
     document.querySelectorAll('.cleanrn').forEach(e=>{ e.value=CO.runner||''; });
+    document.querySelectorAll('.cleansb').forEach(e=>{ e.checked=CO.subs!==false; });
     document.querySelectorAll('.cleanzm').forEach(e=>{ e.value=CO.zoomPct; }); document.querySelectorAll('.cleantr').forEach(e=>{ e.value=CO.trimEndSec; });
     document.querySelectorAll('.endtx').forEach(e=>{ e.value=CO.endText||''; }); document.querySelectorAll('.endln').forEach(e=>{ e.value=CO.endLink||CTA; }); document.querySelectorAll('.endsec').forEach(e=>{ e.value=CO.endSec; });
     const mmss = n=>Math.floor(n/60)+':'+String(Math.round(n)%60).padStart(2,'0');
     function bar(id, pct, on){ const b=$('pb',id); if(!b) return; b.classList.toggle('on', !!on); b.firstElementChild.style.width=Math.max(0,Math.min(100,pct||0))+'%'; b.classList.toggle('busy', on && !(pct>0)); }
     function showClean(id, c){
       bar(id, 0, false);
-      $('cs',id).innerHTML='🟢 Cleaned (zoom '+c.zoomPct+'%, cut last '+c.trimEndSec+' s'+(c.subs?', subtitles burned':'')+(c.endSec?', end card '+c.endSec+' s':'')+' → '+mmss(c.durationSec||0)+(c.runner==='github'?', on GitHub':'')+') · <a href="'+c.url+'" target="_blank" rel="noopener">▶ Preview cleaned video</a> · posting uses this copy'+(c.runner==='github'?(c.removedAt?' (removed from your Drive after posting)':' (kept in your Google Drive until it posts)'):'');
+      $('cs',id).innerHTML='🟢 Cleaned (zoom '+c.zoomPct+'%, cut last '+c.trimEndSec+' s'+(c.subs?', subtitles added':'')+(c.endSec?', end card '+c.endSec+' s':'')+' → '+mmss(c.durationSec||0)+(c.runner==='github'?', on GitHub':'')+') · <a href="'+c.url+'" target="_blank" rel="noopener">▶ Preview cleaned video</a> · posting uses this copy'+(c.runner==='github'?(c.removedAt?' (removed from your Drive after posting)':' (kept in your Google Drive until it posts)'):'')+(c.subsNote?'<br>🟡 '+String(c.subsNote).replace(/</g,'&lt;'):'');
       if($('zm',id)) $('zm',id).value=c.zoomPct; if($('tr',id)) $('tr',id).value=c.trimEndSec;
-      if($('sb',id)) $('sb',id).checked=!!c.subs;
     }
     // Subtitles come from the transcript's timestamps (Whisper, or a pasted SRT) — say so when it has none.
     const timed = {};
     function subsNote(id){
       const on=$('sb',id) && $('sb',id).checked;
-      $('sbn',id).textContent = !on ? '' : timed[id] ? '🟢 Uses the transcript timings, cut at the outro.'
-        : '🟡 This video has no timed transcript yet — 🎙 Transcribe it or paste an SRT in step 2 (editing the transcribed text drops the timings), else the clean is refused.';
+      $('sbn',id).textContent = !on ? '' : timed[id] ? '🟢 Added from the transcript timings, cut at the outro — unless an AI check of 3 frames (about $0.01) finds the video already shows subtitles.'
+        : '🟡 No timed transcript yet, so this clean would add no subtitles — 🎙 Transcribe it or paste an SRT in step 2 first (editing the transcribed text drops the timings).';
     }
     async function pollClean(id){
       try{
@@ -1051,7 +1051,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       const zoomPct=Number($('zm',id).value)||0, trimEndSec=Number($('tr',id).value)||0;
       const endText=$('ec',id).value, endLink=$('el',id).value.trim(), endSec=(endText.trim()||endLink)?(Number($('es',id).value)||0):0;
       const runner=$('rn',id) ? $('rn',id).value : '';
-      try{ localStorage.setItem('cleanOpts', JSON.stringify({ zoomPct, trimEndSec, endText, endLink, endSec:Number($('es',id).value)||0, runner })); }catch(e){}
+      try{ localStorage.setItem('cleanOpts', JSON.stringify({ zoomPct, trimEndSec, endText, endLink, endSec:Number($('es',id).value)||0, runner, subs: !!($('sb',id) && $('sb',id).checked) })); }catch(e){}
       cleaning[id]=true; $('cl',id).disabled=true; bar(id, 0, true); $('cs',id).textContent='✂ Starting…';
       try{
         const j=await post('clean', { driveId:id, zoomPct, trimEndSec, endText, endLink, endSec, subs: !!($('sb',id) && $('sb',id).checked), name:$('nm',id).value, source:SOURCE, runner });
@@ -1063,13 +1063,14 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if(!$('cb',id)) return;
       const d=SAVED[id];
       timed[id]=!!d.timed;
-      if(d.clean){ showClean(id, d.clean); subsNote(id); }
+      if(d.clean) showClean(id, d.clean);
       if(d.hasTranscript || d.transcript) $('tx',id).value=d.transcript||'';
       $('hl',id).value=d.headline||''; $('su',id).value=d.subhead||''; $('ip',id).value=d.imagePrompt||'';
       approved[id]=!!d.approved; gateUi(id);
       if(d.hasTranscript) $('tg',id).textContent=d.approved?('🟢 Approved '+d.approvedIst+(d.srt?' · SRT kept':'')):'🟡 Waiting for you — check the names, type the headline, check the image prompt, then ✅ Approve + generate.';
       if(d.copy){ applyGen(id, d); $('gs',id).textContent='💾 Saved draft from '+d.atIst+' · $'+Number(d.costUsd||0).toFixed(4); }
     });
+    document.querySelectorAll('.cleansb').forEach(e=>subsNote(e.id.slice(3)));
     // Keep this video's current copy (your edits too) without regenerating.
     async function saveDraft(id){
       if(busy[id]) return;

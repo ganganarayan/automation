@@ -6,7 +6,7 @@
  * Responsibility:
  *               - generateText({ system, user }): string
  *               - generateJson({ system, user, maxTokens }): parsed object
- *               - generateJsonDetailed(...): { data, model, usage }
+ *               - generateJsonDetailed(...): { data, model, usage } (optionally with images)
  *               - generateImage({ prompt, size }): PNG Buffer (OpenAI)
  *               - generateImageGemini({ prompt }): PNG Buffer (Gemini)
  * Dependencies: openai, @google/generative-ai, errors, logger.
@@ -65,8 +65,11 @@ export function createLlmProvider(cfg, log) {
       return data;
     },
 
-    /** Like generateJson but also returns the model and real token usage (for cost). */
-    async generateJsonDetailed({ system, user, model, maxTokens = 4000 }) {
+    /**
+     * Like generateJson but also returns the model and real token usage (for cost).
+     * `images` (JPEG Buffers) go with the user message, at low detail.
+     */
+    async generateJsonDetailed({ system, user, model, maxTokens = 4000, images = [] }) {
       const client = requireOpenai();
       const usedModel = model || cfg.openai.textModel;
       const res = await client.chat.completions.create({
@@ -76,7 +79,12 @@ export function createLlmProvider(cfg, log) {
         max_completion_tokens: maxTokens,
         messages: [
           ...(withGlobal(system) ? [{ role: 'system', content: withGlobal(system) }] : []),
-          { role: 'user', content: user },
+          {
+            role: 'user',
+            content: images.length
+              ? [{ type: 'text', text: user }, ...images.map((b) => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${Buffer.from(b).toString('base64')}`, detail: 'low' } }))]
+              : user,
+          },
         ],
       });
       const raw = res.choices?.[0]?.message?.content || '{}';
