@@ -8,7 +8,8 @@
  * Responsibility:
  *               1. GET  hooks/clean/job       → options, Drive download URL, Drive token
  *               2. download (curl) + ffprobe
- *               3. ffmpeg with the SAME args as Railway (src/utils/cleanSpec.js)
+ *               3. ffmpeg with the SAME args as Railway (src/utils/cleanSpec.js),
+ *                  subtitles burned when the job sends the transcript SRT
  *               4. upload to Drive (resumable) with a fresh token
  *               5. POST hooks/clean/done      (or hooks/clean/fail on any error)
  * Dependencies: Node 20 (global fetch), ffmpeg + ffprobe + curl on PATH.
@@ -23,7 +24,7 @@
  */
 import { spawn } from 'node:child_process';
 import { readFile, writeFile, stat } from 'node:fs/promises';
-import { cleanVideoArgs, cleanWithCardArgs, progressSeconds, progressPct } from '../src/utils/cleanSpec.js';
+import { cleanVideoArgs, cleanWithCardArgs, progressSeconds, progressPct, clipSrt } from '../src/utils/cleanSpec.js';
 import { keepSecFor } from '../src/utils/cleanHookSpec.js';
 import { ffmpegConcatArgs } from '../src/utils/stageSpec.js';
 
@@ -115,7 +116,7 @@ async function main() {
   const job = await hook('job');
   console.log(`::add-mask::${job.accessToken}`);
   if (job.kind === 'assemble') return assemble(job);
-  console.log(`Cleaning Drive file ${job.driveId}: zoom ${job.zoomPct}%, cut last ${job.trimEndSec}s, end card ${job.endSec}s`);
+  console.log(`Cleaning Drive file ${job.driveId}: zoom ${job.zoomPct}%, cut last ${job.trimEndSec}s, end card ${job.endSec}s, subtitles ${job.srt ? 'on' : 'off'}`);
 
   await run('curl', ['-fsSL', '--retry', '3', '-o', 'in.mp4', job.downloadUrl]);
   const head = (await readFile('in.mp4')).subarray(0, 200).toString('latin1');
@@ -124,14 +125,24 @@ async function main() {
   const keepSec = keepSecFor(info.durationSec, job.trimEndSec);
   const outSec = (keepSec || info.durationSec) + (job.endSec || 0);
 
+  // Burned subtitles: the transcript's cues up to the cut (the end card gets none).
+  let subPath = '';
+  if (job.srt) {
+    const srt = clipSrt(job.srt, keepSec);
+    if (!srt) throw new Error('the transcript has no subtitles before the cut — nothing to burn');
+    subPath = 'subs.srt';
+    await writeFile(subPath, srt, 'utf8');
+    console.log(`Burning subtitles: ${srt.split('-->').length - 1} cues`);
+  }
+
   let args;
   if (job.endSec > 0) {
     const res = await fetch(`${base}/card.png?w=${info.width}&h=${info.height}`, { headers: { 'X-Clean-Ticket': TICKET } });
     if (!res.ok) throw new Error(`end card ${res.status}`);
     await writeFile('card.png', Buffer.from(await res.arrayBuffer()));
-    args = cleanWithCardArgs({ input: 'in.mp4', card: 'card.png', output: 'out.mp4', zoomPct: job.zoomPct, keepSec, cardSec: job.endSec, w: info.width, h: info.height, fps: info.fps, hasAudio: info.hasAudio });
+    args = cleanWithCardArgs({ input: 'in.mp4', card: 'card.png', output: 'out.mp4', zoomPct: job.zoomPct, keepSec, cardSec: job.endSec, w: info.width, h: info.height, fps: info.fps, hasAudio: info.hasAudio, subPath });
   } else {
-    args = cleanVideoArgs({ input: 'in.mp4', output: 'out.mp4', zoomPct: job.zoomPct, keepSec });
+    args = cleanVideoArgs({ input: 'in.mp4', output: 'out.mp4', zoomPct: job.zoomPct, keepSec, subPath });
   }
 
   await progress({ phase: 'encoding', pct: 0, totalSec: Math.round(outSec) });

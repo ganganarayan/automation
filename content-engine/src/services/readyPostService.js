@@ -45,7 +45,7 @@ import sharp from 'sharp';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanWithCardArgs, progressPct } from '../utils/cleanSpec.js';
+import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, progressPct, transcriptSrt, clipSrt } from '../utils/cleanSpec.js';
 import { writeFile } from 'node:fs/promises';
 import * as driveConnect from './driveConnectService.js';
 import { signTicket, peekTicket, readTicket, dispatchRequest, normalizeRunner, keepSecFor, DEFAULT_REPO } from '../utils/cleanHookSpec.js';
@@ -351,7 +351,7 @@ export async function saveTranscript({ funnelId, driveId, name = '', text = '', 
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   await instanceRepo.setStatus(inst.id, status);
   return {
-    instanceId: inst.id, transcript: next.text, srt: !!srt, approved: !!approvedAt,
+    instanceId: inst.id, transcript: next.text, srt: !!srt, timed: !!transcriptSrt({ srt, cues: unchanged ? prev.cues : [] }), approved: !!approvedAt,
     approvedIst: approvedAt ? formatIst(approvedAt) : '', stage: readyStage({ status }, steps),
   };
 }
@@ -373,9 +373,6 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   const providers = await buildProviders(funnel.tenant_id || tenantId);
   const costs = [];
   const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
-  const ffmpeg = createFfmpegProvider({}, log);
-  let video = null; // downloaded only when a non-public file needs it for the frame
-  const getVideo = async () => video || (video = await driveFor(providers, accessToken).download(driveId));
 
   const { data, model, usage } = await providers.llm.generateJsonDetailed({
     system: copySystemPrompt({ brief: cfg && cfg.direct_copy_brief, audience: resolved.audiencePrefix, keyword: resolved.captureKeyword, base: providers.resolved.prompts.copy }),
@@ -387,9 +384,27 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   if (!copy.title && !copy.description) throw new Error('the model returned empty copy — try again');
   log.info({ funnel: funnel.name, driveId, words: transcript.split(/\s+/).filter(Boolean).length }, 'ready video copy generated');
 
-  // Thumbnails: one AI artwork, rendered in three sizes with the hook as the
-  // headline. A failure here never loses the copy — the video's first frame is
-  // used instead.
+  // A thumbnail failure never loses the copy — the video's first frame is used instead.
+  const { thumbs, sizes, thumbError } = await makeThumbs({
+    providers, resolved, driveId, ext, accessToken, costs,
+    imagePrompt: tArt.imagePrompt || copy.thumbPrompt || copy.title, text: tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '',
+  });
+  const instanceId = await saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs }).catch((err) => {
+    log.warn({ err: err.message, driveId }, 'draft save failed (generation still returned)');
+    return null;
+  });
+  return { copy, transcript, costs, thumbs, sizes, thumbError, instanceId, stage: 'review' };
+}
+
+/**
+ * Thumbnails: one AI artwork (else a frame of the video), rendered in each size
+ * the funnel's platforms need with the operator's headline. Never throws — a
+ * failure comes back as thumbError. Image costs are pushed onto `costs`.
+ */
+async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessToken = '', costs, imagePrompt, text, sub = '' }) {
+  const ffmpeg = createFfmpegProvider({}, log);
+  let video = null; // downloaded only when a non-public file needs it for the frame
+  const getVideo = async () => video || (video = await driveFor(providers, accessToken).download(driveId));
   let thumbs = {};
   let sizes = [];
   let thumbError = '';
@@ -398,7 +413,7 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
     const imageModel = /^gpt-image/.test(String(providers.resolved.openai?.imageModel || '')) ? providers.resolved.openai.imageModel : 'gpt-image-1';
     let base = null;
     try {
-      base = await providers.llm.generateImage({ prompt: thumbImagePrompt(tArt.imagePrompt || copy.thumbPrompt || copy.title), size: '1024x1024', model: imageModel });
+      base = await providers.llm.generateImage({ prompt: thumbImagePrompt(imagePrompt), size: '1024x1024', model: imageModel });
       costs.push({ step: 'images', ...costImages({ count: 1, size: '1024x1024', model: imageModel }) });
     } catch (err) {
       log.warn({ err: err.message }, 'thumbnail artwork failed (using a video frame)');
@@ -410,16 +425,43 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
         : await ffmpeg.extractFrame({ url: publicDlUrl(driveId) }).catch(async () => ffmpeg.extractFrame({ videoBuffer: await getVideo(), ext }));
     }
     // The operator's headline + sub-head (typed at the transcript stage) go on the image.
-    ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text: tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '' }));
+    ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text, sub }));
   } catch (err) {
     thumbError = err.message;
     log.warn({ err: err.message, driveId }, 'thumbnail generation failed (first frame will be used)');
   }
-  const instanceId = await saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs }).catch((err) => {
-    log.warn({ err: err.message, driveId }, 'draft save failed (generation still returned)');
-    return null;
-  });
-  return { copy, transcript, costs, thumbs, sizes, thumbError, instanceId, stage: 'review' };
+  return { thumbs, sizes, thumbError };
+}
+
+/**
+ * 🖼 Thumbnail only: render the thumbnails from the operator's headline,
+ * sub-head and image prompt WITHOUT writing or touching any copy — for a video
+ * whose copy was written by hand. Needs no approved transcript, only a
+ * headline. The headline / sub-head / prompt used are kept on the transcript
+ * step (its text and approval untouched); the thumbnails on the images step.
+ */
+export async function generateThumbnail({ tenantId = 'default', funnelId, driveId, name = '', accessToken = '', accounts: pickedAccounts = null, headline, subhead, imagePrompt, source = null }) {
+  if (!driveId) throw new Error('driveId required');
+  const id = String(driveId);
+  const { funnel, resolved } = await loadFunnel(funnelId, pickedAccounts);
+  const { inst, steps: base } = await ensureInstance({ funnel, driveId: id, name, source });
+  const tArt = ((base.find((x) => x.key === 'transcript') || {}).artifacts) || {};
+  const copy = ((base.find((x) => x.key === 'script') || {}).artifacts || {}).copy || {};
+  const head = String(headline ?? tArt.headline ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const sub = String(subhead ?? tArt.subhead ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const prompt = String(imagePrompt ?? tArt.imagePrompt ?? '').trim().slice(0, 1500);
+  if (!head) throw new Error('Type the thumbnail headline first');
+  const providers = await buildProviders(funnel.tenant_id || tenantId);
+  const costs = [];
+  const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
+  const { thumbs, sizes, thumbError } = await makeThumbs({ providers, resolved, driveId: id, ext, accessToken, costs, imagePrompt: prompt || copy.thumbPrompt || copy.title || head, text: head, sub });
+  let steps = patchStep(base, 'transcript', { artifacts: { headline: head, subhead: sub, imagePrompt: prompt } });
+  if (sizes.length) steps = patchStep(steps, 'images', { status: 'done', artifacts: { thumbs, sizes } });
+  const at = new Date().toISOString();
+  for (const { step, ...c } of costs) steps = addCostToSteps(steps, 'images', { ...c, costUsd: Number(c.costUsd) || 0, at });
+  await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
+  log.info({ funnel: funnel.name, driveId: id, sizes: sizes.length }, 'ready video thumbnail generated (copy untouched)');
+  return { thumbs, sizes, thumbError, costs, instanceId: inst.id };
 }
 
 /**
@@ -487,14 +529,16 @@ function releaseClean(driveId) {
  * corner watermark leaves the frame, cut the outro), then upload it to Post for
  * Me. The page polls cleanStatus.
  */
-export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endText = '', endLink = '', endSec = 0, name = '', source = null, runner = '', baseUrl = '' }) {
+export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endText = '', endLink = '', endSec = 0, subs = false, name = '', source = null, runner = '', baseUrl = '' }) {
   if (!driveId) throw new Error('driveId required');
   const id = String(driveId);
   const { funnel } = await loadFunnel(funnelId);
   const providers = await buildProviders(funnel.tenant_id);
   const job = cleanJobs.get(id);
   if (job && job.state === 'running') return job;
-  const opts = { ...normalizeCleanOpts({ zoomPct, trimEndSec }), ...normalizeEndCard({ endText, endLink, endSec }) };
+  const opts = { ...normalizeCleanOpts({ zoomPct, trimEndSec }), ...normalizeEndCard({ endText, endLink, endSec }), ...(subs ? { subs: true } : {}) };
+  // Burned subtitles need the transcript's timestamps — refuse up front rather than burn nothing.
+  if (opts.subs && !(await videoSrt(funnel, id))) throw new Error(NO_TIMED_SRT);
   // GitHub Actions runs ffmpeg and keeps the file in your Drive; Railway is the original path.
   const where = normalizeRunner(runner || (providers.resolved.clean || {}).runner);
   if (where === 'github') return startCleanGithub({ funnel, providers, id, opts, name, source, baseUrl });
@@ -511,6 +555,15 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endTe
   return running;
 }
 
+const NO_TIMED_SRT = "This video's transcript has no timestamps, so there are no subtitles to burn — 🎙 Transcribe it (Whisper keeps the timings) or paste an SRT in step 2, then clean again. Editing the transcribed text drops Whisper's timings.";
+
+/** The video's timed subtitles from its transcript step (pasted SRT or Whisper cues); '' when none. */
+async function videoSrt(funnel, driveId) {
+  const draft = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [String(driveId)]).catch(() => ({})))[String(driveId)];
+  const steps = draft ? instanceService.parseSteps(draft) : [];
+  return transcriptSrt(((steps.find((x) => x.key === 'transcript') || {}).artifacts) || {});
+}
+
 async function runClean({ funnel, providers, driveId, opts, name, source, onPhase = () => {} }) {
   const total = (await videoDurations([driveId]))[driveId] || 0;
   const keepSec = keepSecFor(total, opts.trimEndSec);
@@ -520,6 +573,14 @@ async function runClean({ funnel, providers, driveId, opts, name, source, onPhas
     const t0 = Date.now();
     const ffmpeg = createFfmpegProvider({}, log);
     const url0 = publicDlUrl(driveId);
+    // Subtitles: the transcript's cues up to the cut, burned on the video part only.
+    let subPath = '';
+    if (opts.subs) {
+      const srt = clipSrt(await videoSrt(funnel, driveId), keepSec);
+      if (!srt) throw new Error(NO_TIMED_SRT);
+      subPath = join(dir, 'subs.srt');
+      await writeFile(subPath, srt, 'utf8');
+    }
     // End card: black screen + the operator's text and link, after the video.
     let args = null;
     if (opts.endSec > 0) {
@@ -528,7 +589,9 @@ async function runClean({ funnel, providers, driveId, opts, name, source, onPhas
       const h = info.height || 1920;
       const card = join(dir, 'card.png');
       await writeFile(card, await sharp(Buffer.from(endCardSvg({ w, h, text: opts.endText, link: opts.endLink }))).png().toBuffer());
-      args = cleanWithCardArgs({ input: url0, card, output: outPath, zoomPct: opts.zoomPct, keepSec, cardSec: opts.endSec, w, h, fps: info.fps || 30, hasAudio: info.hasAudio });
+      args = cleanWithCardArgs({ input: url0, card, output: outPath, zoomPct: opts.zoomPct, keepSec, cardSec: opts.endSec, w, h, fps: info.fps || 30, hasAudio: info.hasAudio, subPath });
+    } else if (subPath) {
+      args = cleanVideoArgs({ input: url0, output: outPath, zoomPct: opts.zoomPct, keepSec, subPath });
     }
     const outSec = (keepSec || total) + (opts.endSec || 0);
     onPhase({ phase: 'encoding', pct: 0, totalSec: outSec });
@@ -602,12 +665,20 @@ export async function cleanHookJob({ ticket }) {
   const { token, folderId } = await driveConnect.drive(p.t);
   hookPhase(p.d, { phase: 'downloading', pct: 0 });
   const o = p.o || {};
+  // The full timed SRT — the runner cuts it to the kept part once it knows the video's length.
+  let srt = '';
+  if (o.subs) {
+    const { funnel } = await loadFunnel(p.f);
+    srt = await videoSrt(funnel, p.d);
+    if (!srt) throw new Error(NO_TIMED_SRT);
+  }
   return {
     driveId: p.d,
     downloadUrl: publicDlUrl(p.d),
     zoomPct: o.zoomPct || 0,
     trimEndSec: o.trimEndSec || 0,
     endSec: o.endSec || 0,
+    srt,
     accessToken: token,
     folderId,
     fileName: `${safeFileName(p.n || p.d)} (clean).mp4`,
@@ -781,7 +852,7 @@ function draftView(row) {
   const t = art('transcript');
   return {
     instanceId: row.id, stage: readyStage(row, steps), clean, copy: art('script').copy || null, ctaLink: art('script').ctaLink || '',
-    transcript: t.text || '', headline: t.headline || '', subhead: t.subhead || '', imagePrompt: t.imagePrompt || '', hasTranscript, srt: !!t.srt, approved: !!t.approvedAt, approvedIst: t.approvedAt ? formatIst(t.approvedAt) : '',
+    transcript: t.text || '', headline: t.headline || '', subhead: t.subhead || '', imagePrompt: t.imagePrompt || '', hasTranscript, srt: !!t.srt, timed: !!transcriptSrt(t), approved: !!t.approvedAt, approvedIst: t.approvedAt ? formatIst(t.approvedAt) : '',
     thumbs: art('images').thumbs || {}, sizes: art('images').sizes || [], costUsd, atIst: formatIst(row.updated_at),
   };
 }
@@ -1216,5 +1287,5 @@ export async function approveTranscriptAuto({ funnelId, driveId }) {
 }
 
 export default {
-  onPosted, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, postSelections, folderFiles, approveTranscriptAuto,
+  onPosted, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, generateThumbnail, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, postSelections, folderFiles, approveTranscriptAuto,
 };

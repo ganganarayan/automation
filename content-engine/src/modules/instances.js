@@ -179,6 +179,22 @@ export function register(ctx) {
     }
   });
 
+  // 🖼 Thumbnail only: from the headline / sub-head / image prompt; the copy is never touched.
+  router.post('/admin/instances/ready-ai/thumbnail', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const { funnelId, driveId, name, accessToken, accounts, headline, subhead, imagePrompt, source } = req.body || {};
+      if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
+      res.json({ ok: true, ...(await readyPost.generateThumbnail({
+        tenantId: req.tenantId, funnelId, driveId: String(driveId), name: String(name || ''), accessToken: String(accessToken || ''), accounts,
+        headline: String(headline || ''), subhead: String(subhead || ''), imagePrompt: String(imagePrompt || ''), source,
+      })) });
+    } catch (err) {
+      log.error({ err: err.message }, 'ready-ai thumbnail failed');
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   // 💾 Save draft: keep the page's current copy / thumbnails for one video.
   router.post('/admin/instances/ready-ai/save', async (req, res) => {
     try {
@@ -195,10 +211,10 @@ export function register(ctx) {
   router.post('/admin/instances/ready-ai/clean', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      const { funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, name, source, runner } = req.body || {};
+      const { funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, subs, name, source, runner } = req.body || {};
       if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
       const baseUrl = `${req.protocol}://${req.get('host')}`;
-      res.json({ ok: true, ...(await readyPost.startClean({ funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, name: String(name || ''), source, runner: String(runner || ''), baseUrl })) });
+      res.json({ ok: true, ...(await readyPost.startClean({ funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, subs: subs === true, name: String(name || ''), source, runner: String(runner || ''), baseUrl })) });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -744,6 +760,8 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
               <label class="nowrow">on <select id="rn-${id}" class="cleanrn"><option value="">default (Settings)</option><option value="railway">Railway</option><option value="github">GitHub</option></select></label>
               <button class="act" id="cl-${id}" onclick="cleanVid('${id}')">✂ Clean video</button>
             </div>
+            <div class="nowrow"><label class="nowrow"><input type="checkbox" id="sb-${id}" onchange="subsNote('${id}')"> Burn subtitles — timed to the audio, from the transcript (step 2); none on the end card</label></div>
+            <div class="hint" id="sbn-${id}"></div>
             <div class="endcard">
               <label class="fl">End card text — black screen, white text, centred (blank = no end card)<textarea id="ec-${id}" class="endtx" rows="2" placeholder="e.g. Take the free assessment"></textarea></label>
               <div class="nowrow">
@@ -767,7 +785,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
             <div class="hint" id="tg-${id}">Not transcribed yet — 🎙 Transcribe, or paste the text / SRT. Then type the headline, check the image prompt and approve.</div>
           </div>
           <div class="panel"><h4>3 · AI copy + thumbnails <span class="hint">written from the approved transcript, with your headline</span></h4>
-            <div class="nowrow"><button class="act" id="sv-${id}" onclick="saveDraft('${id}')">💾 Save draft</button> <span class="hint" id="gs-${id}"></span></div>
+            <div class="nowrow"><button class="act" id="sv-${id}" onclick="saveDraft('${id}')">💾 Save draft</button> <button class="act" id="gt-${id}" onclick="genThumb('${id}')" title="Uses the headline, sub-head and image prompt in step 2 — your copy is left exactly as it is">🖼 Generate thumbnail only</button> <span class="hint" id="gs-${id}"></span></div>
             <div class="thumbs" id="th-${id}"></div>
           </div>
         </div>
@@ -926,7 +944,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       try{
         const j=await post('transcribe', { driveId:id, name:$('nm',id).value, source:SOURCE, accessToken: await driveToken() });
         if(!j.ok) throw new Error(j.error||'failed');
-        $('tx',id).value=j.transcript||''; approved[id]=false; setStage(id, 'transcript'); setInst(id, j.instanceId);
+        $('tx',id).value=j.transcript||''; approved[id]=false; timed[id]=!!j.transcribed; subsNote(id); setStage(id, 'transcript'); setInst(id, j.instanceId);
         if(j.imagePrompt) $('ip',id).value=j.imagePrompt;
         costs[id]=(costs[id]||[]).concat(j.costs||[]);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
@@ -944,7 +962,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       try{
         const j=await post('transcript', { driveId:id, name:$('nm',id).value, source:SOURCE, text, approve, headline:$('hl',id).value, subhead:$('su',id).value, imagePrompt:$('ip',id).value });
         if(!j.ok) throw new Error(j.error||'failed');
-        $('tx',id).value=j.transcript||''; approved[id]=!!j.approved; setStage(id, j.stage); setInst(id, j.instanceId);
+        $('tx',id).value=j.transcript||''; approved[id]=!!j.approved; timed[id]=!!j.timed; subsNote(id); setStage(id, j.stage); setInst(id, j.instanceId);
         $('tg',id).textContent=(j.approved?'🟢 Approved '+j.approvedIst+'.':'💾 Saved — not approved yet.')+(j.srt?' SRT timestamps removed for the AI; the SRT is kept.':'');
         ok=true;
       }catch(e){ $('tg',id).textContent='⚠ '+e.message; }
@@ -963,10 +981,27 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     function applyGen(id, j){
       $('ti',id).value=j.copy.title||''; $('de',id).value=noLink(j.copy.description); if($('ct',id) && j.ctaLink!==undefined) $('ct',id).value=j.ctaLink||''; $('ig',id).value=j.copy.igCaption||''; $('sh',id).value=j.copy.short||''; cnt(id);
       $('gb',id).textContent='✅ Approve + regenerate copy & thumbnails';
+      showThumbs(id, j);
+      done[id]=true;
+    }
+    function showThumbs(id, j){
       thumbs[id]=j.thumbs||{};
       $('th',id).innerHTML=(j.sizes||[]).map(z=>'<a class="'+(z.size==='landscape'?'wide':'tall')+'" href="'+z.url+'" target="_blank" rel="noopener" title="Open full size"><img src="'+z.url+'"><span>'+z.label+' · '+z.platforms.join(', ')+'</span></a>').join('')
         +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':' — the first frame will be used')+'</div>':'');
-      done[id]=true;
+    }
+    // 🖼 Thumbnail only — from step 2's headline / sub-head / image prompt; the copy on the page and on the instance is left alone.
+    async function genThumb(id){
+      if(busy[id]) return;
+      if(!$('hl',id).value.trim()){ $('gs',id).textContent='🟡 Type the thumbnail headline in step 2 first.'; $('hl',id).focus(); return; }
+      busy[id]=true; gateUi(id); $('gt',id).disabled=true; $('gs',id).textContent='🖼 Designing the thumbnail… (under a minute) — your copy is not touched';
+      try{
+        const j=await post('thumbnail', { driveId:id, name:$('nm',id).value, source:SOURCE, accounts: pickedAccounts(), accessToken: await driveToken(), headline:$('hl',id).value, subhead:$('su',id).value, imagePrompt:$('ip',id).value });
+        if(!j.ok) throw new Error(j.error||'failed');
+        showThumbs(id, j); setInst(id, j.instanceId);
+        const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
+        $('gs',id).textContent=((j.sizes||[]).length?'🟢 Thumbnail saved to the instance':'🟡 No thumbnail made')+' · $'+usd.toFixed(4)+' · copy unchanged';
+      }catch(e){ $('gs',id).textContent='⚠ '+e.message; }
+      busy[id]=false; $('gt',id).disabled=false; gateUi(id);
     }
     const SAVED = ${JSON.stringify(drafts).replace(/</g, '\\u003c')};
     // ✂ Clean: the last zoom / cut used in this browser is the default for the next video.
@@ -980,8 +1015,16 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     function bar(id, pct, on){ const b=$('pb',id); if(!b) return; b.classList.toggle('on', !!on); b.firstElementChild.style.width=Math.max(0,Math.min(100,pct||0))+'%'; b.classList.toggle('busy', on && !(pct>0)); }
     function showClean(id, c){
       bar(id, 0, false);
-      $('cs',id).innerHTML='🟢 Cleaned (zoom '+c.zoomPct+'%, cut last '+c.trimEndSec+' s'+(c.endSec?', end card '+c.endSec+' s':'')+' → '+mmss(c.durationSec||0)+(c.runner==='github'?', on GitHub':'')+') · <a href="'+c.url+'" target="_blank" rel="noopener">▶ Preview cleaned video</a> · posting uses this copy'+(c.runner==='github'?(c.removedAt?' (removed from your Drive after posting)':' (kept in your Google Drive until it posts)'):'');
+      $('cs',id).innerHTML='🟢 Cleaned (zoom '+c.zoomPct+'%, cut last '+c.trimEndSec+' s'+(c.subs?', subtitles burned':'')+(c.endSec?', end card '+c.endSec+' s':'')+' → '+mmss(c.durationSec||0)+(c.runner==='github'?', on GitHub':'')+') · <a href="'+c.url+'" target="_blank" rel="noopener">▶ Preview cleaned video</a> · posting uses this copy'+(c.runner==='github'?(c.removedAt?' (removed from your Drive after posting)':' (kept in your Google Drive until it posts)'):'');
       if($('zm',id)) $('zm',id).value=c.zoomPct; if($('tr',id)) $('tr',id).value=c.trimEndSec;
+      if($('sb',id)) $('sb',id).checked=!!c.subs;
+    }
+    // Subtitles come from the transcript's timestamps (Whisper, or a pasted SRT) — say so when it has none.
+    const timed = {};
+    function subsNote(id){
+      const on=$('sb',id) && $('sb',id).checked;
+      $('sbn',id).textContent = !on ? '' : timed[id] ? '🟢 Uses the transcript timings, cut at the outro.'
+        : '🟡 This video has no timed transcript yet — 🎙 Transcribe it or paste an SRT in step 2 (editing the transcribed text drops the timings), else the clean is refused.';
     }
     async function pollClean(id){
       try{
@@ -1011,7 +1054,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       try{ localStorage.setItem('cleanOpts', JSON.stringify({ zoomPct, trimEndSec, endText, endLink, endSec:Number($('es',id).value)||0, runner })); }catch(e){}
       cleaning[id]=true; $('cl',id).disabled=true; bar(id, 0, true); $('cs',id).textContent='✂ Starting…';
       try{
-        const j=await post('clean', { driveId:id, zoomPct, trimEndSec, endText, endLink, endSec, name:$('nm',id).value, source:SOURCE, runner });
+        const j=await post('clean', { driveId:id, zoomPct, trimEndSec, endText, endLink, endSec, subs: !!($('sb',id) && $('sb',id).checked), name:$('nm',id).value, source:SOURCE, runner });
         if(!j.ok) throw new Error(j.error||'failed');
         pollClean(id);
       }catch(e){ cleaning[id]=false; $('cl',id).disabled=false; bar(id, 0, false); $('cs',id).textContent='⚠ '+e.message; }
@@ -1019,7 +1062,8 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     Object.keys(SAVED).forEach(id=>{
       if(!$('cb',id)) return;
       const d=SAVED[id];
-      if(d.clean) showClean(id, d.clean);
+      timed[id]=!!d.timed;
+      if(d.clean){ showClean(id, d.clean); subsNote(id); }
       if(d.hasTranscript || d.transcript) $('tx',id).value=d.transcript||'';
       $('hl',id).value=d.headline||''; $('su',id).value=d.subhead||''; $('ip',id).value=d.imagePrompt||'';
       approved[id]=!!d.approved; gateUi(id);

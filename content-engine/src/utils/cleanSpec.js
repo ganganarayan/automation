@@ -7,9 +7,12 @@
  *               the picture, then cut the last few seconds.
  * Responsibility:
  *               - normalizeCleanOpts({ zoomPct, trimEndSec }): clamped options
- *               - cleanVideoArgs({ input, output, zoomPct, keepSec }): ffmpeg args
- * Dependencies: none.
+ *               - cleanVideoArgs({ input, output, zoomPct, keepSec, subPath }): ffmpeg args
+ *               - transcriptSrt / clipSrt: the transcript's timed subtitles,
+ *                 cut to the kept part, for burning in (subPath)
+ * Dependencies: stageSpec (buildSrt — pure).
  */
+import { buildSrt } from './stageSpec.js';
 
 /** Clamp the operator's options: zoom 0–30 %, trim 0–60 s. */
 export function normalizeCleanOpts({ zoomPct = 10, trimEndSec = 0 } = {}) {
@@ -25,12 +28,12 @@ export function normalizeCleanOpts({ zoomPct = 10, trimEndSec = 0 } = {}) {
  * ffmpeg args: scale up by zoomPct, crop back to the original size anchored at
  * the top (centred left/right), keep the first `keepSec` seconds (0 = all).
  */
-export function cleanVideoArgs({ input, output, zoomPct = 10, keepSec = 0 }) {
+export function cleanVideoArgs({ input, output, zoomPct = 10, keepSec = 0, subPath = '' }) {
   if (!input || !output) throw new Error('cleanVideoArgs needs input and output');
   const f = 1 + (Number(zoomPct) || 0) / 100;
-  const vf = f > 1
+  const vf = (f > 1
     ? `scale=trunc(iw*${f}/2)*2:trunc(ih*${f}/2)*2,crop=trunc(iw/${f}/2)*2:trunc(ih/${f}/2)*2:(iw-ow)/2:0,setsar=1`
-    : 'setsar=1';
+    : 'setsar=1') + subtitlesFilter(subPath);
   return [
     '-y', '-i', input,
     ...(keepSec > 0 ? ['-t', String(keepSec)] : []),
@@ -105,7 +108,7 @@ export function endCardSvg({ w = 1080, h = 1920, text = '', link = '' }) {
  * image held for `cardSec` seconds (with silence when the video has sound),
  * joined into one file at the video's own size and frame rate.
  */
-export function cleanWithCardArgs({ input, card, output, zoomPct = 10, keepSec = 0, cardSec = 4, w, h, fps = 30, hasAudio = true }) {
+export function cleanWithCardArgs({ input, card, output, zoomPct = 10, keepSec = 0, cardSec = 4, w, h, fps = 30, hasAudio = true, subPath = '' }) {
   if (!input || !card || !output) throw new Error('cleanWithCardArgs needs input, card and output');
   const W = evenDim(w, 1080);
   const H = evenDim(h, 1920);
@@ -114,7 +117,7 @@ export function cleanWithCardArgs({ input, card, output, zoomPct = 10, keepSec =
   const zoom = f > 1 ? `scale=trunc(iw*${f}/2)*2:trunc(ih*${f}/2)*2,crop=trunc(iw/${f}/2)*2:trunc(ih/${f}/2)*2:(iw-ow)/2:0,` : '';
   const norm = `scale=${W}:${H},setsar=1,fps=${r},format=yuv420p`;
   const graph = [
-    `[0:v]${zoom}${norm}[v0]`,
+    `[0:v]${zoom}${norm}${subtitlesFilter(subPath)}[v0]`,
     `[1:v]${norm}[v1]`,
     ...(hasAudio
       ? ['[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a0]', '[2:a]aformat=sample_fmts=fltp:channel_layouts=stereo[a1]', '[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]']
@@ -135,6 +138,86 @@ export function cleanWithCardArgs({ input, card, output, zoomPct = 10, keepSec =
 }
 
 /**
+ * Burned subtitles (after the zoom, so none are cropped): white with a dark
+ * outline, bottom-centre, lifted clear of the phone apps' buttons. '' = none.
+ */
+export function subtitlesFilter(subPath) {
+  const p = String(subPath || '');
+  if (!p) return '';
+  if (/[:'\\,;[\]]/.test(p)) throw new Error('subtitle path must be a plain file path');
+  return `,subtitles=${p}:force_style='Fontsize=12,Bold=1,Outline=2,Shadow=0,Alignment=2,MarginV=60'`;
+}
+
+const srtSec = (t) => {
+  const m = String(t).trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{1,2})[,.](\d{1,3})$/);
+  return m ? (Number(m[1] || 0) * 3600) + Number(m[2]) * 60 + Number(m[3]) + Number(m[4].padEnd(3, '0')) / 1000 : NaN;
+};
+
+/** SRT / WebVTT text → [{ start, end, text }] (seconds); cues it can't read are skipped. */
+export function parseSrt(raw) {
+  const cues = [];
+  const blocks = String(raw || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split(/\n\s*\n/);
+  for (const b of blocks) {
+    const lines = b.split('\n').map((l) => l.trim()).filter(Boolean);
+    const i = lines.findIndex((l) => l.includes('-->'));
+    if (i < 0) continue;
+    const [a, z] = lines[i].split('-->');
+    const start = srtSec(a);
+    const end = srtSec(String(z).trim().split(/\s+/)[0]);
+    const text = lines.slice(i + 1).join('\n').replace(/<[^>]+>/g, '').replace(/\{\\[^}]*\}/g, '').trim();
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start && text) cues.push({ start, end, text });
+  }
+  return cues;
+}
+
+/**
+ * Long cues (Whisper segments run to a few sentences) split into short ones
+ * of at most `maxChars`, their time shared out by length — easier to read on
+ * a phone.
+ */
+export function splitLongCues(cues, maxChars = 64) {
+  const out = [];
+  for (const c of cues || []) {
+    const words = String(c.text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+    const chunks = [];
+    let cur = '';
+    for (const w of words) {
+      if (cur && (`${cur} ${w}`).length > maxChars) { chunks.push(cur); cur = w; } else cur = cur ? `${cur} ${w}` : w;
+    }
+    if (cur) chunks.push(cur);
+    const total = chunks.reduce((t, x) => t + x.length, 0) || 1;
+    let t = c.start;
+    chunks.forEach((x, i) => {
+      const end = i === chunks.length - 1 ? c.end : t + ((c.end - c.start) * x.length) / total;
+      out.push({ start: t, end, text: x });
+      t = end;
+    });
+  }
+  return out;
+}
+
+/** The transcript's timed subtitles: a pasted SRT, else Whisper's cues; '' when it has no timestamps. */
+export function transcriptSrt(art = {}) {
+  const a = art || {};
+  if (String(a.srt || '').trim() && parseSrt(a.srt).length) return String(a.srt);
+  const cues = (Array.isArray(a.cues) ? a.cues : []).filter((c) => c && Number(c.end) > Number(c.start) && String(c.text || '').trim());
+  return cues.length ? buildSrt(cues) : '';
+}
+
+/**
+ * The subtitles for the cleaned video: only the first `keepSec` seconds (the
+ * outro is cut; 0 = keep all) — cues past the cut dropped, one across it
+ * ends at it — long cues split. The end card comes after and gets none.
+ */
+export function clipSrt(raw, keepSec = 0) {
+  const k = Number(keepSec) > 0 ? Number(keepSec) : Infinity;
+  const kept = parseSrt(raw)
+    .filter((c) => c.start < k - 0.05)
+    .map((c) => ({ ...c, end: Math.min(c.end, k) }));
+  return kept.length ? buildSrt(splitLongCues(kept)) : '';
+}
+
+/**
  * Seconds of output written so far, from a chunk of `ffmpeg -progress` output
  * (the last out_time_us / out_time_ms in it); -1 when the chunk has none.
  * Both keys are microseconds (out_time_ms is misnamed by ffmpeg).
@@ -150,4 +233,4 @@ export function progressPct(doneSec, totalSec) {
   return Math.min(99, Math.floor((doneSec / totalSec) * 100));
 }
 
-export default { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, progressSeconds, progressPct };
+export default { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, subtitlesFilter, parseSrt, splitLongCues, transcriptSrt, clipSrt, progressSeconds, progressPct };
