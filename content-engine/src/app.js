@@ -29,6 +29,7 @@ import * as imageGate from './modules/imageGate.js';
 import * as instances from './modules/instances.js';
 import * as capture from './modules/capture.js';
 import * as firstComments from './modules/firstComments.js';
+import * as leadVisits from './modules/leadVisits.js';
 import * as linkedinRelay from './modules/linkedinRelay.js';
 import * as videoScheduler from './modules/videoScheduler.js';
 import * as dailyRouter from './modules/router.js';
@@ -100,6 +101,7 @@ export function createApp() {
     .add({ name: 'instances', enabled: true, register: instances.register })
     .add({ name: 'capture', enabled: true, register: capture.register })
     .add({ name: 'first-comments', enabled: true, register: firstComments.register })
+    .add({ name: 'lead-visits', enabled: true, register: leadVisits.register })
     .add({ name: 'linkedin-relay', enabled: true, register: linkedinRelay.register })
     .add({ name: 'video-scheduler', enabled: true, register: videoScheduler.register })
     .add({ name: 'router', enabled: true, register: dailyRouter.register })

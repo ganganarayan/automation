@@ -24,13 +24,14 @@ import { firstMatchingRule, detectAbuse, isOlderThan7Days, pickVariant } from '.
  *   - now: Date (default new Date())
  *   - selfIds: string[] of our own account ids
  *   - abuseWords: extra blocklist words
- * @param {object} deps - { rules, leads, senders, log, rng, tokenFor, captureCfg }
+ * @param {object} deps - { rules, leads, senders, log, rng, tokenFor, captureCfg, trackLink }
+ *                 trackLink(lead, url) → the lead's personal link (marks the visit), else url
  *   senders may be null (step 3) -> a matched, fresh, clean comment is captured
  *   as dm_status 'pending' and left for the real senders (step 4).
  * @returns {Promise<{outcome, leadId?}>}
  */
 export async function processCommentEvent({ tenantId = 'default', event, now = new Date(), selfIds = [], abuseWords = [] }, deps) {
-  const { rules, leads, senders = null, log = console, rng, tokenFor, captureCfg } = deps;
+  const { rules, leads, senders = null, log = console, rng, tokenFor, captureCfg, trackLink = null } = deps;
   const e = event || {};
 
   // (2) Ignore edits/removals and our own comments.
@@ -132,7 +133,7 @@ export async function processCommentEvent({ tenantId = 'default', event, now = n
       recipientCommentId: e.commentId,
       commenterId: e.commenterId,
       text: rule.dm_text,
-      link: rule.dm_link,
+      link: await personalLink(trackLink, lead, rule.dm_link, log),
     });
     await leads.updateStatus(lead.id, { dmStatus: 'sent', dmSentAt: new Date() });
   } catch (err) {
@@ -174,7 +175,7 @@ export async function processCommentEvent({ tenantId = 'default', event, now = n
  * Facebook is never gated (Graph API removed the page-follow check in v2.2).
  */
 export async function processMessageEvent({ tenantId = 'default', event, selfIds = [] }, deps) {
-  const { rules, leads, senders = null, log = console, tokenFor, captureCfg } = deps;
+  const { rules, leads, senders = null, log = console, tokenFor, captureCfg, trackLink = null } = deps;
   const e = event || {};
   if (e.senderId && selfIds.map(String).includes(String(e.senderId))) return { outcome: 'self' };
 
@@ -213,7 +214,7 @@ export async function processMessageEvent({ tenantId = 'default', event, selfIds
   const text = deliver
     ? (rule?.followup_text || rule?.dm_text || '')
     : (rule?.not_following_text || 'Follow the account and reply here — I will send it straight over.');
-  const link = deliver ? (rule?.dm_link || null) : null;
+  const link = deliver ? await personalLink(trackLink, lead, rule?.dm_link || null, log) : null;
 
   try {
     await senders.sendMessage({ accountId: e.accountId, pageToken, recipientId: e.senderId, text, link });
@@ -228,6 +229,17 @@ export async function processMessageEvent({ tenantId = 'default', event, selfIds
     }
     await leads.setFollowup(lead.id, { status: 'failed', follows, repliedAt: e.at, error: `followup: ${err.message}` });
     return { outcome: 'followup_failed', leadId: lead.id };
+  }
+}
+
+/** The lead's own tracked link for url; the plain url if tracking is off or fails. */
+async function personalLink(trackLink, lead, url, log) {
+  if (!trackLink || !url) return url;
+  try {
+    return (await trackLink(lead, url)) || url;
+  } catch (err) {
+    log.warn?.({ err: err.message, leadId: lead && lead.id }, 'capture: personal link failed, sending the plain link');
+    return url;
   }
 }
 

@@ -19,6 +19,7 @@ import * as jobRunner from '../core/jobRunner.js';
 import * as captureService from '../services/captureService.js';
 import * as captureConfig from '../services/captureConfig.js';
 import { captureSenders } from '../services/captureSenders.js';
+import * as leadVisits from '../services/leadVisitService.js';
 import { verifyMetaSignature, parseCommentEvents, parseMessageEvents } from '../utils/captureSpec.js';
 import { keyOk, currentSession } from '../services/accessService.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
@@ -156,7 +157,7 @@ export function register(ctx) {
       const cfg = await captureConfig.forTenant(tenantId);
       await captureService.processCommentEvent(
         { tenantId, event, selfIds: cfg.selfIds, abuseWords: cfg.abuseWords },
-        { rules, leads, senders: captureSenders, tokenFor: captureConfig.tokenFor, captureCfg: cfg, log },
+        { rules, leads, senders: captureSenders, tokenFor: captureConfig.tokenFor, captureCfg: cfg, trackLink: leadVisits.trackLink, log },
       );
     },
     { maxAttempts: 5, backoffSeconds: 60 },
@@ -172,7 +173,7 @@ export function register(ctx) {
       const cfg = await captureConfig.forTenant(tenantId);
       await captureService.processMessageEvent(
         { tenantId, event, selfIds: cfg.selfIds },
-        { rules, leads, senders: captureSenders, tokenFor: captureConfig.tokenFor, captureCfg: cfg, log },
+        { rules, leads, senders: captureSenders, tokenFor: captureConfig.tokenFor, captureCfg: cfg, trackLink: leadVisits.trackLink, log },
       );
     },
     { maxAttempts: 5, backoffSeconds: 60 },
@@ -277,7 +278,7 @@ function capturePage(ruleRows, leadRows, session = null) {
 
     <h2>Leads</h2>
     <div class="card"><table>
-      <thead><tr><th>Platform</th><th>Keyword</th><th>Lane</th><th>Username</th><th>Comment time</th><th>DM status</th><th>Follow-up</th><th></th></tr></thead>
+      <thead><tr><th>Platform</th><th>Keyword</th><th>Lane</th><th>Username</th><th>Comment time</th><th>DM status</th><th>Follow-up</th><th>Landing page</th><th></th></tr></thead>
       <tbody>${leadsHtml}</tbody>
     </table></div>
 
@@ -329,11 +330,30 @@ function leadRow(l) {
     <td>${esc(formatIst(l.comment_created_at))}</td>
     <td>${dmStatusDot(l.dm_status)}${l.error ? `<br><span class="muted">${esc(truncate(l.error, 80))}</span>` : ''}</td>
     <td>${followupCell(l)}</td>
+    <td>${visitCell(l)}</td>
     <td><form class="inline" method="post" action="/api/v1/admin/capture/leads/${l.id}/delete"
           onsubmit="return confirm('Delete this lead${''}? (removes the log row)')">
       <button class="btn-del" type="submit">Delete</button>
     </form></td>
   </tr>`;
+}
+
+/** Did this DM'd lead open their link / the landing page / submit its form? */
+function visitCell(l) {
+  if (!l.clicked_at && !l.visited_at) return l.visit_target ? '<span class="muted">⚪ not opened yet</span>' : '<span class="muted">—</span>';
+  const lines = [];
+  if (l.clicked_at) lines.push(`🟢 opened ${esc(formatIst(l.clicked_at))}${l.click_count > 1 ? ` (×${l.click_count})` : ''}`);
+  if (l.visited_at) lines.push(`🟢 on the page ${esc(formatIst(l.last_seen_at || l.visited_at))}`);
+  if (l.form_at) {
+    const f = l.form_data && typeof l.form_data === 'object' ? Object.entries(l.form_data).slice(0, 4).map(([k, v]) => `${k}: ${v}`).join(' · ') : '';
+    lines.push(`🟢 <b>form sent</b> ${esc(formatIst(l.form_at))}${f ? `<br><span class="muted">${esc(truncate(f, 120))}</span>` : ''}`);
+  }
+  if (l.ig_label_status) {
+    lines.push(l.ig_label_status === 'ok'
+      ? '<span class="muted">🟢 labelled in the inbox</span>'
+      : `<span class="muted">🟡 inbox label: ${esc(truncate(l.ig_label_status, 80))}</span>`);
+  }
+  return lines.join('<br>');
 }
 
 function truncate(s, n) {

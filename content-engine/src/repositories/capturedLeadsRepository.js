@@ -117,6 +117,41 @@ export async function setFollowup(id, { status, follows, repliedAt, error } = {}
 }
 
 /** Leads for the admin table, newest first. */
+/** Remember where this lead's personal link goes (set when the DM goes out). */
+export async function setVisitTarget(id, url) {
+  await query('UPDATE captured_leads SET visit_target = $2, updated_at = now() WHERE id = $1', [id, url]);
+}
+
+/** Their DM link was opened: count it; first_click tells the caller it is the first one. */
+export async function markClicked(code) {
+  const { rows } = await query(
+    `UPDATE captured_leads
+        SET click_count = click_count + 1, clicked_at = COALESCE(clicked_at, now()), last_seen_at = now(), updated_at = now()
+      WHERE visit_code = $1
+      RETURNING *, (click_count = 1) AS first_click`,
+    [code],
+  );
+  return rows[0] || null;
+}
+
+/** The landing-page script saw them: a page view, or a form submit with its fields. */
+export async function markVisit(code, { form = null } = {}) {
+  const { rows } = await query(
+    `UPDATE captured_leads
+        SET visited_at = COALESCE(visited_at, now()), last_seen_at = now(),
+            form_at = CASE WHEN $2::jsonb IS NULL THEN form_at ELSE now() END,
+            form_data = COALESCE($2::jsonb, form_data), updated_at = now()
+      WHERE visit_code = $1
+      RETURNING id`,
+    [code, form ? JSON.stringify(form) : null],
+  );
+  return rows[0] || null;
+}
+
+export async function setLabelStatus(id, status) {
+  await query('UPDATE captured_leads SET ig_label_status = $2, updated_at = now() WHERE id = $1', [id, String(status).slice(0, 300)]);
+}
+
 export async function listByTenant({ tenantId = 'default', limit = 200 } = {}) {
   const { rows } = await query(
     `SELECT * FROM captured_leads WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2`,
