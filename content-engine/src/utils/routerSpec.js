@@ -427,7 +427,7 @@ export function creditView({ provider = null, order = [], video = {}, deps = {},
       rows.push({ name: 'ElevenLabs voice', tone: 'todo', text: 'add the ElevenLabs API key' });
       todo.push('the ElevenLabs API key');
     } else if (v.state === 'needs_voice') {
-      rows.push({ name: 'ElevenLabs voice', tone: 'todo', text: `${bal ? `${bal} · ` : ''}pick a narrator voice${funnel ? ` on ${funnel}` : ''} (Funnels → Video setup → Voice)` });
+      rows.push({ name: 'ElevenLabs voice', tone: 'todo', text: `${bal ? `${bal} · ` : ''}pick a narrator voice${funnel ? ` on ${funnel}` : ''} (Setup → Funnels → Set up → Voiceover step → Voice)` });
       todo.push(`a narrator voice${funnel ? ` on ${funnel}` : ''}`);
     } else if (!v.ok) {
       rows.push({ name: 'ElevenLabs voice', tone: 'todo', text: v.state === 'empty' ? 'no characters left: top up, then press Check again' : 'said "out of credit" today: top up, then press I topped up', clear: v.state === 'exhausted' ? 'voice' : undefined });
