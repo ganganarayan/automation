@@ -8,7 +8,9 @@ than Railway's; after GitHub runs ffmpeg it uploads to Google Drive, and the app
 Since the logo sits in almost the same place every time, trimming from the bottom should be enough.
 If not, zoom in, keep the frame top matched, and let the bottom (with the logo) move below the margin.
 
-Status on 01-11-2026: proposed as a card (task_773de0a2, expires about 06-11-2026). It has **not been started**.
+Status on 01-11-2026: **built** and live on staging (eac574a), not tested end to end yet. Railway clean is kept until the GitHub run is proven.
+The GitHub API only starts a workflow whose file is on main, so clean-video.yml must reach main before the first GitHub run.
+Not built: automatic detection of where the outro starts (optional; trimming a fixed number of seconds covers it).
 
 ## 1. One-time Google Drive connect (one for the whole workspace, not per funnel)
 - OAuth web flow, scope drive.file. A "Connect Google Drive" button on Settings → API Keys, a callback route,
