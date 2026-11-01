@@ -145,6 +145,10 @@ export const WIZARD_STEPS = [
         ],
       },
       {
+        // The daily router's AI video uses the first of these with credit.
+        key: 'video_provider_order', label: 'Daily router: provider order (first with credit is used)', placeholder: 'e.g. kling, runway, hailuo (blank = the provider above first)',
+      },
+      {
         key: 'clip_length', label: 'Clip length', type: 'select', default: '5',
         options: [
           { value: '5', label: '5 seconds' },

@@ -304,9 +304,186 @@ export function rowsForSheet(rawHeader = [], posts = [], keys = []) {
   });
 }
 
+// ---- Lane 1: ready video ---------------------------------------------------
+
+/** Instance status while a router Lane 1 video's generated copy waits for approval. */
+export const VIDEO_REVIEW = 'video_review';
+
+const baseName = (name) => String(name || '').replace(/\.[a-z0-9]{2,5}$/i, '').trim().toLowerCase();
+const isVideoFile = (f) => String((f && f.mimeType) || '').startsWith('video') || /\.(mp4|mov|m4v|webm|mkv)$/i.test(String((f && f.name) || ''));
+
+/**
+ * D3: the OLDEST video in the folder that is not posted (by name or by the
+ * app's record) and not held by an open job. Returns the file or null.
+ */
+export function pickOldestVideo(files = [], skipIds = []) {
+  const skip = new Set((skipIds || []).map(String));
+  return (Array.isArray(files) ? files : [])
+    .filter((f) => f && f.id && isVideoFile(f) && !/posted/i.test(String(f.name || '')) && !skip.has(String(f.id)))
+    .sort((a, b) => new Date(a.createdTime || 0) - new Date(b.createdTime || 0) || String(a.name).localeCompare(String(b.name)))[0] || null;
+}
+
+/**
+ * Same-name thumbnail + caption next to a video (my-video.mp4 → my-video.jpg
+ * and my-video.txt). Returns { thumb, caption } (files or null each).
+ */
+export function sidecarsFor(files = [], video = {}) {
+  const want = baseName(video.name);
+  const same = (Array.isArray(files) ? files : []).filter((f) => f && f.id !== video.id && baseName(f.name) === want);
+  return {
+    thumb: same.find((f) => /\.(jpe?g|png)$/i.test(String(f.name || ''))) || null,
+    caption: same.find((f) => /\.txt$/i.test(String(f.name || ''))) || null,
+  };
+}
+
+/** A sidecar caption file → copy for every platform (first line is the title). */
+export function copyFromCaption(text = '') {
+  const body = String(text || '').replace(/^﻿/, '').replace(/\r\n/g, '\n').trim();
+  const first = (body.split('\n').find((l) => l.trim()) || '').trim();
+  return { title: first.slice(0, 100), description: body, igCaption: body, short: body, thumbText: '', thumbPrompt: '' };
+}
+
+/** The same thumbnail URL for every platform that takes one. */
+export function thumbsForAll(url, platforms = []) {
+  return url ? Object.fromEntries(platforms.map((k) => [k, url])) : {};
+}
+
+/** "dd-MM-yyyy HH:mm" IST for a post time, or '' when it has passed (D2: post now). */
+export function istSlot(scheduledFor, now = new Date()) {
+  if (!scheduledFor) return '';
+  const at = new Date(scheduledFor);
+  if (Number.isNaN(at.getTime()) || at.getTime() <= new Date(now).getTime()) return '';
+  return DateTime.fromJSDate(at).setZone(ZONE).toFormat('dd-MM-yyyy HH:mm');
+}
+
+// ---- Lane 2: researched AI video ------------------------------------------
+
+export const VIDEO_PROVIDERS = ['kling', 'runway', 'hailuo'];
+
+/** A funnel's video-provider order ("runway, kling") → all three, preferred first. */
+export function providerOrder(order = '', fallback = 'kling') {
+  const picked = String(order || '').toLowerCase().split(/[\s,>]+/).filter((p) => VIDEO_PROVIDERS.includes(p));
+  const first = VIDEO_PROVIDERS.includes(String(fallback)) ? [String(fallback)] : [];
+  return [...new Set([...picked, ...first, ...VIDEO_PROVIDERS])];
+}
+
+/** True when a provider error means "out of credit / quota / balance". */
+export function isCreditError(message = '') {
+  return /insufficient|not enough (credit|balance|quota)|balance|quota|credits?\b|payment required|billing|\b402\b|account.{0,20}(arrears|overdue)|resource pack/i.test(String(message || ''));
+}
+
+/**
+ * One provider's credit state from what we know:
+ *   configured (key set), balance (number, or null when the provider has no
+ *   balance API / it could not be read), exhaustedOn (IST date it last said
+ *   "out of credit"), today (IST date).
+ * → { ok, state: 'ok' | 'unknown' | 'empty' | 'exhausted' | 'missing', note }
+ */
+export function creditState({ configured = false, balance = null, exhaustedOn = '', today = '' } = {}) {
+  if (!configured) return { ok: false, state: 'missing', note: 'no key' };
+  if (exhaustedOn && exhaustedOn === today) return { ok: false, state: 'exhausted', note: 'out of credit today' };
+  if (balance === null || balance === undefined || Number.isNaN(Number(balance))) return { ok: true, state: 'unknown', note: 'no balance reading; assumed OK until it refuses' };
+  return Number(balance) > 0 ? { ok: true, state: 'ok', note: `balance ${balance}` } : { ok: false, state: 'empty', note: 'balance 0' };
+}
+
+/** The first provider in `order` whose state is ok, or null. */
+export function chooseProvider(order = [], states = {}) {
+  return order.find((p) => states[p] && states[p].ok) || null;
+}
+
+/**
+ * Lane 2 can run when a video provider is free AND voice, images, the LLM and
+ * the GitHub assembly are. Returns { ok, provider, missing: [labels] }.
+ */
+export function laneTwoVerdict({ order = [], video = {}, deps = {} } = {}) {
+  const provider = chooseProvider(order, video);
+  const missing = [];
+  if (!provider) missing.push('video (Kling / Runway / Hailuo)');
+  for (const [k, label] of [['voice', 'ElevenLabs voice'], ['image', 'image API'], ['llm', 'LLM'], ['assembly', 'GitHub assembly (Drive connected + GitHub token)']]) {
+    if (deps[k] && !deps[k].ok) missing.push(label);
+  }
+  return { ok: !missing.length, provider, missing };
+}
+
+/**
+ * The once-per-dry-spell email: send when lane 2 just went dry; reset when it
+ * runs again. prev = { dry, since } → { send, next }.
+ */
+export function dryTransition(prev = {}, ok, nowIso = new Date().toISOString()) {
+  if (ok) return { send: false, next: { dry: false, since: null } };
+  if (prev && prev.dry) return { send: false, next: prev };
+  return { send: true, next: { dry: true, since: nowIso } };
+}
+
+/**
+ * The research prompt: ONE new narrated short-video topic for this funnel,
+ * from its landing page + post history. Returns { system, user }.
+ */
+export function researchPrompt({ funnelName = '', landingUrl = '', landingText = '', history = [] } = {}) {
+  const system = [
+    `You plan one short narrated social video (about 30-45 seconds) for the brand/funnel "${funnelName}".`,
+    'It must be NEW: a topic, angle and format that differ from every past post listed (no repeats or near-duplicates). Vary the format (a story, a myth vs fact, a tip, a question, a list, a before/after).',
+    'Stay true to what the landing page offers and who it is for. Never invent prices, guarantees or facts that are not on it.',
+    'A third-person narrator speaks over animated images; nobody talks on screen.',
+    'Return ONLY a JSON object: {"topic": "...", "angle": "...", "format": "...", "title": "a short title", "caption": "the post caption (hook first, call to action last, no links)"}',
+  ].join('\n');
+  const user = [
+    landingUrl ? `Landing page: ${landingUrl}` : 'Landing page: (none set)',
+    landingText ? `Landing page text:\n${landingText}` : '',
+    history.length ? `Past posts (do NOT repeat these topics or angles):\n${history.map((e) => `- ${e}`).join('\n')}` : 'Past posts: none yet.',
+    'Pick the next video.',
+  ].filter(Boolean).join('\n\n');
+  return { system, user };
+}
+
+/** The LLM's research reply → { topic, angle, format, title, caption } (topic required). */
+export function normalizeResearch(data) {
+  const o = data && typeof data === 'object' ? data : {};
+  const s = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const out = {
+    topic: s(o.topic, 300), angle: s(o.angle, 300), format: s(o.format, 120), title: s(o.title, 120),
+    caption: String(o.caption ?? '').trim().slice(0, 2000),
+  };
+  if (!out.topic) throw new Error('the research step returned no topic');
+  return out;
+}
+
+/** The script brief the stage runner writes from (topic + angle + format). */
+export function briefTopic(brief = {}) {
+  return [brief.topic, brief.angle && `Angle: ${brief.angle}`, brief.format && `Format: ${brief.format}`].filter(Boolean).join('. ');
+}
+
+// ---- Re-run + nudge -------------------------------------------------------
+
+/** Statuses after the operator approved (a re-run leaves these alone). */
+const APPROVED = ['approved', 'scheduled', 'posted', 'partial'];
+
+/**
+ * What a re-run does to the instance a day was recorded with:
+ *   'keep' (approved / posted / dead: it stays as it is), 'release' (a ready
+ *   video's draft: unlinked from the day, the video stays in the folder),
+ *   'supersede' (an unapproved image / AI video: replaced, its sheet row freed).
+ */
+export function rerunAction(row = null) {
+  if (!row) return 'none';
+  if (APPROVED.includes(row.status) || ['failed', 'superseded'].includes(row.status)) return 'keep';
+  if (row.source_type === 'drive_folder' || row.source_type === 'drive_pick') return 'release';
+  return 'supersede';
+}
+
+/** The 10:00 nudge goes out when some funnel has neither video lane for tomorrow. */
+export function nudgeNeeded(funnelsState = []) {
+  return (funnelsState || []).some((f) => !f.readyVideo && !f.aiVideo);
+}
+
+export const NUDGE_TEXT = 'Video lanes are empty. Upload ready videos or top up the video APIs so I can create videos and auto-post.';
+
 export default {
   LANES, IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, SOURCE_COL, AUTO_SOURCE, SHEET_STATUS,
   routerTarget, runsOn, laneForInstance, existingReason, postAtFor, colLetter, planHeader, colIndex, rowKey,
   readyRows, pickReadyRow, nextMatchKeys, htmlToText, historyLines, instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt,
   normalizeRefill, rowsForSheet,
+  VIDEO_REVIEW, pickOldestVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, VIDEO_PROVIDERS, providerOrder,
+  isCreditError, creditState, chooseProvider, laneTwoVerdict, dryTransition, researchPrompt, normalizeResearch, briefTopic,
+  rerunAction, nudgeNeeded, NUDGE_TEXT,
 };

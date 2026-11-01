@@ -137,6 +137,12 @@ export async function onApprove(approval) {
   const p = approval.payload || {};
   const instanceId = p.instanceId;
   if (!instanceId) return;
+  // A replaced (router re-run) or failed instance ignores an old email's link.
+  const current = await instanceService.get(instanceId).catch(() => null);
+  if (!current || ['superseded', 'failed'].includes(current.status)) {
+    log.info({ instance: instanceId, status: current && current.status }, 'approval for a replaced or failed instance; ignored');
+    return;
+  }
 
   if (p.checkpoint === 'script') {
     await instanceService.updateStep(instanceId, 'script', { status: 'done' });
@@ -178,6 +184,8 @@ export async function onRework(approval, note) {
   const p = approval.payload || {};
   const instanceId = p.instanceId;
   if (!instanceId) return;
+  const current = await instanceService.get(instanceId).catch(() => null);
+  if (!current || ['superseded', 'failed'].includes(current.status)) return;
 
   const correction = normalizeNote(note);
   const { status } = rejectTransition(p.checkpoint);

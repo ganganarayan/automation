@@ -5,7 +5,8 @@
  *               sign-in: what needs you, what is live, and what the router
  *               decided for tomorrow. Calendar lays the next 14 days out by IST
  *               day; Log and cost lists the last runs with their real cost and
- *               delivery result.
+ *               delivery result. A super admin gets "Re-run tomorrow's check"
+ *               per funnel on Today (POST /api/v1/admin/router/rerun).
  * Responsibility: HTTP + auth + HTML rendering. Reads come from
  *               workViewRepository (DB only — no Drive / Post for Me calls, so
  *               page load stays fast).
@@ -32,7 +33,8 @@ import { DateTime } from 'luxon';
 // The daily router checks tomorrow's plan at this IST time.
 const ROUTER_CHECK = '16:00';
 
-const LANE_LABEL = { ready_video: 'Ready video', ai_video: 'AI video', image: 'Image post', none: 'Nothing posts' };
+// Router lanes, in the order it tries them (1 → 2 → 3).
+const LANE_LABEL = { ready_video: 'Lane 1 · Ready video', ai_video: 'Lane 2 · AI video', image: 'Lane 3 · Image post', none: 'Nothing posts' };
 
 export function register(ctx) {
   const { router, log } = ctx;
@@ -132,6 +134,7 @@ function todayPage({ now, tomorrow, session, waiting, images, live, readyLeft, f
   ].join('');
 
   const active = (funnels || []).filter((f) => f.active);
+  const superAdmin = !!(session && session.role === 'super_admin');
   const byFunnel = new Map((decisions || []).map((d) => [String(d.funnel_id), d]));
   const plan = active
     .map((f) => {
@@ -140,7 +143,8 @@ function todayPage({ now, tomorrow, session, waiting, images, live, readyLeft, f
         ? `${d.lane === 'none' ? '🟡' : '🟢'} ${esc(LANE_LABEL[d.lane] || d.lane)}${d.reason ? `<div class="hint">${esc(d.reason)}</div>` : ''}`
         : `<span class="hint">not checked yet (${ROUTER_CHECK})</span>`;
       const link = d && d.instance_id ? `<a class="act" href="/api/v1/admin/instances/${esc(d.instance_id)}">Open</a>` : '';
-      return `<tr><td>${esc(f.name)}</td><td>${what}</td><td>${link}</td></tr>`;
+      const rerun = superAdmin ? ` <button type="button" class="act" onclick="rerun(${Number(f.id)}, this)">Re-run tomorrow's check</button>` : '';
+      return `<tr><td>${esc(f.name)}</td><td>${what}</td><td class="acts">${link}${rerun}</td></tr>`;
     })
     .join('');
 
@@ -159,6 +163,20 @@ function todayPage({ now, tomorrow, session, waiting, images, live, readyLeft, f
       <thead><tr><th>Funnel</th><th>Plan</th><th></th></tr></thead>
       <tbody>${plan || '<tr><td colspan="3" class="hint">No active funnels. Activate one under Setup → Funnels.</td></tr>'}</tbody>
     </table>
+    <p class="hint">The router tries Lane 1 (the oldest ready video), then Lane 2 (an AI video, when there is credit), then Lane 3 (an image post).</p>
+    ${superAdmin ? `<script>
+      async function rerun(id, btn){
+        if(!confirm("Re-run tomorrow's check for this funnel? What it lined up and you have not approved yet is replaced.")) return;
+        btn.disabled=true; btn.textContent='Re-running…';
+        try{
+          const r=await fetch('/api/v1/admin/router/rerun',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({funnelId:id})});
+          const j=await r.json();
+          if(!j.ok) throw new Error(j.error||('HTTP '+r.status));
+          btn.textContent='Running — reloading in 45 s';
+          setTimeout(()=>location.reload(),45000);
+        }catch(err){ btn.disabled=false; btn.textContent="Re-run tomorrow's check"; alert('Re-run failed: '+err.message); }
+      }
+    </script>` : ''}
   `, { current: 'today', session });
 }
 
@@ -256,6 +274,7 @@ const RAW_LABEL = {
   review: 'To check',
   manual: 'Manual run — next stage is yours',
   image_review: 'Image post to approve',
+  video_review: 'Ready video to approve',
 };
 
 // No router row for that day: infer the lane from the instance itself.
@@ -300,6 +319,7 @@ ${NAV_CSS}
  .tile{background:#12121b;border:1px solid #24243a;border-radius:12px;padding:.9rem 1rem}
  .tt{color:#9a9ab0;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}
  .tv{font-size:1.6rem;font-weight:700;margin:.2rem 0}
+ td.acts{white-space:nowrap}td.acts .act{margin-left:.3rem}
  table{width:100%;border-collapse:collapse;font-size:.88rem;background:#12121b;border:1px solid #24243a;border-radius:12px;overflow:hidden}
  th,td{text-align:left;padding:.6rem .7rem;border-bottom:1px solid #1e1e2c;vertical-align:middle}
  th{color:#9a9ab0;font-size:.74rem;text-transform:uppercase;letter-spacing:.04em}

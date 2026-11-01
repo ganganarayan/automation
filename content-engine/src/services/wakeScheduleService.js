@@ -44,10 +44,13 @@ export async function schedule() {
   return buildWakeSchedule((await tenantConfigs()).map((x) => x.cfg));
 }
 
-/** Tenant ids whose router_check_time fell within the last 40 minutes (IST; 30 + cold-start slack). */
-export async function dueTenants({ now = nowIst() } = {}) {
+/**
+ * Tenant ids whose time for `job` (router = router_check_time, nudge =
+ * nudge_time) fell within the last 40 minutes (IST; 30 + cold-start slack).
+ */
+export async function dueTenants({ now = nowIst(), job = 'router' } = {}) {
   return (await tenantConfigs())
-    .filter(({ cfg }) => tenantTimes(cfg).router.some((t) => isDue(t, now, SERVER_WINDOW_MIN)))
+    .filter(({ cfg }) => (tenantTimes(cfg)[job] || []).some((t) => isDue(t, now, SERVER_WINDOW_MIN)))
     .map((x) => x.tenantId);
 }
 

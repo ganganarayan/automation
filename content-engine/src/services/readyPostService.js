@@ -1183,6 +1183,38 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// ---- daily router Lane 1 helpers -------------------------------------------
+
+/**
+ * Every file in the funnel's ready-video folder (videos and their same-name
+ * .jpg / .txt), the Drive client that read it, and the ids already posted.
+ * { funnel, resolved, providers, folder, files, posted: [driveId], drive }.
+ */
+export async function folderFiles({ funnelId }) {
+  const { funnel, resolved, cfg } = await loadFunnel(funnelId);
+  const providers = await buildProviders(funnel.tenant_id);
+  const sources = await sourcesRepo.listByFunnel(funnel.id).catch(() => []);
+  const folder = readyFolder(cfg, resolved) || (sources.find((x) => x.type === 'drive_folder') || {}).ref || '';
+  const drive = driveFor(providers, '');
+  const files = folder ? await drive.listFiles(folder) : [];
+  const posted = await instanceRepo.postedDriveIds(funnel.id, funnel.tenant_id).catch(() => []);
+  return { funnel, resolved, providers, folder, files, posted, drive };
+}
+
+/**
+ * The router's unattended path through the transcript gate: the Whisper text
+ * is kept as it is and approved (the operator approves the finished copy
+ * instead, in one email). The thumbnail headline comes from the AI copy.
+ */
+export async function approveTranscriptAuto({ funnelId, driveId }) {
+  const { funnel } = await loadFunnel(funnelId);
+  const { inst, steps: base } = await ensureInstance({ funnel, driveId: String(driveId) });
+  const steps = patchStep(base, 'transcript', { artifacts: { approvedAt: new Date().toISOString(), approvedBy: 'router' } });
+  await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
+  await instanceRepo.setStatus(inst.id, 'draft');
+  return inst.id;
+}
+
 export default {
-  onPosted, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, postSelections,
+  onPosted, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, saveTranscript, generateCopy, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, postSelections, folderFiles, approveTranscriptAuto,
 };

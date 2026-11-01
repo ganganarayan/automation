@@ -395,6 +395,39 @@ export function register(ctx) {
 
 // ---- rendering -------------------------------------------------------------
 
+/**
+ * Keys and credit → AI video credit: a live check of what the daily router's
+ * Lane 2 needs (video providers in the first active funnel's order, ElevenLabs,
+ * image API, LLM, GitHub assembly). Filled by GET /api/v1/admin/credit-status.
+ */
+function creditPanel() {
+  return `<fieldset><legend>AI video credit (daily router, Lane 2)</legend>
+    <p class="hint" style="margin:0 0 .4rem">Read live from Runway, Kling and ElevenLabs. Hailuo, OpenAI and Gemini have no balance API: they show OK until one refuses for lack of credit, then stay out for the rest of the day.</p>
+    <div id="creditbox" class="hint">Checking…</div>
+    <p style="margin:.5rem 0 0"><button type="button" class="act" onclick="loadCredit()">Check again</button></p>
+    <script>
+      async function loadCredit(){
+        const box=document.getElementById('creditbox');
+        box.textContent='Checking…';
+        try{
+          const j=await (await fetch('/api/v1/admin/credit-status',{cache:'no-store'})).json();
+          if(!j.ok){box.textContent='🔴 '+(j.error||'could not check');return;}
+          const dot=(x)=>x.ok?'🟢':(x.state==='missing'?'🟡':'🔴');
+          const e=(t)=>String(t==null?'':t).replace(/[&<>]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+          const row=(name,x)=>'<tr><td>'+dot(x)+' '+e(name)+'</td><td>'+e(x.state)+'</td><td>'+e(x.note)+'</td></tr>';
+          let h='<p>'+(j.laneOk?'🟢 Lane 2 can run — using <b>'+e(j.provider)+'</b>':'🟡 Lane 2 is out: '+e((j.missing||[]).join(', ')))+(j.funnel?' <span class="hint">(order from '+e(j.funnel)+')</span>':'')+'</p>';
+          h+='<table><tbody>';
+          for(const p of (j.order||[])) if(j.video&&j.video[p]) h+=row(p[0].toUpperCase()+p.slice(1),j.video[p]);
+          const labels={voice:'ElevenLabs voice',image:'Image API',llm:'LLM',assembly:'GitHub assembly'};
+          for(const k of Object.keys(labels)) if(j.deps&&j.deps[k]) h+=row(labels[k],j.deps[k]);
+          box.innerHTML=h+'</tbody></table>';
+        }catch(err){box.textContent='🔴 '+err.message;}
+      }
+      loadCredit();
+    </script>
+  </fieldset>`;
+}
+
 function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, session = null, key, saved, superAdmin = false, tenantList = [] }) {
   const menu = navHtml({ key, tabs: true, superAdmin, session });
 
@@ -402,7 +435,7 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, se
   const fallbackHint = '<p class="hint">Blank config fields fall back to a platform default where one exists. Secrets are never shown — leave blank to keep the current value. Changes apply within ~1 minute.</p>';
   // tracking-bridge is no longer a menu entry; it is reached from Settings.
   const extras = {
-    'api-keys': fallbackHint,
+    'api-keys': `${fallbackHint}${creditPanel()}`,
     'content-engine': `${fallbackHint}
       <fieldset><legend>More</legend>
         <p class="hint" style="margin:0"><a href="#tracking-bridge" onclick="show('tracking-bridge');return false">Tracking bridge →</a> Razorpay → Meta CAPI purchases and daily ad insights.</p>

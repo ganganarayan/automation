@@ -131,6 +131,18 @@ GitHub cron can start 5 to 30 minutes late. That's acceptable for 16:00 and 10:0
 
 **Step 1 status (01-11-2026): built, on staging.** The Post for Me webhook and an /api/v1/jobs/check-posts wake-up run the post check (one run at a time). Every boot catches up on what went live while asleep. The heartbeat holds the app awake during Clean, AI-video renders and post checks. The job runner goes idle when its queue is empty; its 5-second database poll used to keep the app from ever sleeping. AI videos go through scheduled → post check → go-live email, and post at once if approved late. There is a central Notification email under Setup → Settings → Emails. The backup post check (08:20 and 20:20 IST by default) now runs from .github/workflows/wake.yml, which replaced post-check.yml and router-check.yml. Its secrets still need setting, and it only runs from main. Production still has Serverless (sleep) **off**. Turn it on in Railway once this is on main.
 
+**Steps 3–5 status (01-11-2026): built, on staging.** The router now tries Lane 1 → Lane 2 → Lane 3 per funnel and keeps each lane's reason for passing on router_days.reason.
+- **Lane 1:** the oldest unposted video in the funnel's ready-video folder. When the same-name .jpg/.png and .txt files are there, it is scheduled with no approval. Otherwise the router transcribes it, writes the AI copy and thumbnail, and sends one approval email (the transcript gate is passed by the router; you approve the finished copy). The instance status is video_review.
+- **Lane 2:** a credit check, then research, the script and approval 1, then images, animation with no lip sync, the ElevenLabs narrator and **ffmpeg on GitHub Actions**, then approval 2.
+  - The assembly reuses clean-video.yml with a ticket of kind 'assemble'.
+  - The provider order is a per-funnel setting: Video setup → Image → video → Daily router provider order.
+  - Balances read live: Runway's /v1/organization creditBalance, Kling's /account/costs resource packs (field names unconfirmed, parsed leniently), ElevenLabs' /v1/user/subscription. Hailuo, OpenAI and Gemini have no balance API: an "out of credit" error marks them out for the rest of the IST day.
+  - One email per dry spell. Status is on Keys and credit.
+  - A failure mid-render drops that funnel to Lane 3, with an email.
+- **Nudge:** POST /api/v1/jobs/nudge, at most one email a day per tenant.
+- **Re-run:** a super admin gets "Re-run tomorrow's check" per funnel on Today. It replaces what was not approved yet (an image row is freed; a ready video is only unlinked) and decides again.
+- 🟡 **Not switched off yet:** the old schedulers in item 8 above.
+
 1. **Clock + go-live for every lane:**
    - GitHub cron wakes at 16:00, 10:00 and 08:20
    - Post for Me webhook triggers the post check

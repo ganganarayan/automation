@@ -50,6 +50,9 @@ import {
 import { whisperPrompt } from '../utils/laneSpec.js';
 import { childLogger } from '../core/logger.js';
 import * as heartbeat from '../core/heartbeat.js';
+import * as assemble from './assembleService.js';
+import { briefTopic } from '../utils/routerSpec.js';
+import { settings } from '../settings/index.js';
 
 const log = childLogger({ module: 'stageRunner' });
 
@@ -104,6 +107,26 @@ async function genImage(providers, cfg, prompt, size) {
   return providers.llm.generateImage({ prompt, size });
 }
 
+/**
+ * The daily router's marks on a Lane 2 instance (script artifacts): the
+ * researched brief and { lane, provider, postDate }. Nulls for other instances.
+ */
+export function routerInfo(instance) {
+  const s = instanceService.parseSteps(instance).find((x) => x.key === 'script');
+  const a = (s && s.artifacts) || {};
+  return { brief: a.brief || null, router: a.router || null };
+}
+
+// The router's AI videos are narrated: nobody talks on screen.
+const NO_LIP_SYNC = 'No talking, no lip or mouth movement, no speech; only natural ambient motion.';
+
+// Stage failure listeners: fn(instanceId, stepKey, err). The router uses this
+// to drop a funnel to the image lane when its AI video fails mid-render.
+const failHooks = [];
+export function onStageFailed(fn) {
+  if (typeof fn === 'function') failHooks.push(fn);
+}
+
 function scriptTextOf(instance) {
   const steps = instanceService.parseSteps(instance);
   const s = steps.find((x) => x.key === 'script');
@@ -118,6 +141,9 @@ async function markFailed(instanceId, stepKey, err) {
   } catch (e) {
     log.error({ err: e.message, instance: instanceId }, 'failed to mark instance failed');
   }
+  for (const fn of failHooks) {
+    await Promise.resolve(fn(instanceId, stepKey, err)).catch((e) => log.warn({ err: e.message, instance: instanceId }, 'stage-failed hook failed'));
+  }
 }
 
 // ---- individual stages -----------------------------------------------------
@@ -126,9 +152,11 @@ async function markFailed(instanceId, stepKey, err) {
 export async function generateScript({ instanceId, correction = '' }) {
   const { instance, funnel, cfg, resolved, providers } = await loadContext(instanceId);
   await instanceService.updateStep(instanceId, 'script', { status: 'running', startedAt: new Date().toISOString() });
+  // A router AI video writes from its researched brief (topic, angle, format).
+  const { brief } = routerInfo(instance);
   const { text, model, usage } = await providers.llm.generateTextDetailed({
     system: scriptSystemPrompt(cfg.script_tone, providers.resolved.prompts.script),
-    user: scriptUserPrompt({ topic: funnel?.name || instance.title || '', audience: resolved.audiencePrefix || '', correction }),
+    user: scriptUserPrompt({ topic: (brief && briefTopic(brief)) || funnel?.name || instance.title || '', audience: resolved.audiencePrefix || '', correction }),
   });
   if (!text) throw new Error('empty script from model');
   await instanceService.updateStep(instanceId, 'script', { status: 'done', artifacts: { text }, finishedAt: new Date().toISOString() });
@@ -162,13 +190,17 @@ async function runImages(ctx) {
 async function runAnimate(ctx, images) {
   const { instance, cfg, resolved, providers } = ctx;
   const folder = cfg.drive_folder_id || resolved.driveFolder || '';
-  const anim = createAnimationProvider(resolveAnimationConfig(withAnimationKeys(cfg, providers.resolved)), log);
+  // The router picked the provider with credit (in the funnel's order).
+  const { router } = routerInfo(instance);
+  const animCfg = router && router.provider ? { ...cfg, animation_provider: router.provider } : cfg;
+  const anim = createAnimationProvider(resolveAnimationConfig(withAnimationKeys(animCfg, providers.resolved)), log);
   const stamp = Date.now().toString(36);
 
-  await instanceService.updateStep(instance.id, 'animate', { status: 'running', startedAt: new Date().toISOString() });
+  await instanceService.updateStep(instance.id, 'animate', { status: 'running', startedAt: new Date().toISOString(), artifacts: { provider: anim.provider } });
   const clips = [];
   for (let i = 0; i < images.length; i += 1) {
-    const clipUrl = await anim.animateAndWait({ imageUrl: images[i].url, prompt: images[i].prompt });
+    const prompt = router ? `${images[i].prompt}\n${NO_LIP_SYNC}` : images[i].prompt;
+    const clipUrl = await anim.animateAndWait({ imageUrl: images[i].url, prompt });
     const buf = await fetchBuffer(clipUrl);
     const up = await providers.storage.uploadMedia(folder, buildMediaName('clip', stamp, i, 'mp4'), 'video/mp4', buf);
     clips.push({ driveId: up.id, url: up.downloadUrl, sourceImageId: images[i].driveId });
@@ -207,6 +239,21 @@ async function runTranscript(ctx, audioBuffer, audioDriveId) {
     await instanceService.updateStep(instance.id, 'voiceover', { artifacts: { audio: { driveId: audioDriveId, durationSec: Math.round(durationSeconds) } } });
   }
   return { cues, durationSeconds };
+}
+
+/**
+ * A router AI video is stitched on GitHub Actions (assembleService); its done
+ * hook opens the final review. Returns true when the run was sent there.
+ */
+async function runStitchGithub(ctx, clips, audioDriveId, cues) {
+  const { instance, cfg, providers } = ctx;
+  if (!routerInfo(instance).router) return false;
+  const { width, height } = aspectToSize(cfg.aspect);
+  await assemble.start({
+    instance, providers, clips, audioDriveId, cues, burnCaptions: String(cfg.burn_captions || 'on') !== 'off',
+    width, height, baseUrl: settings.app.publicBaseUrl,
+  });
+  return true;
 }
 
 /** Stitch clips + voiceover (+ captions) into the final reel (local ffmpeg). */
@@ -253,6 +300,7 @@ export async function runStages({ instanceId }) {
     step = 'transcript';
     const { cues } = await runTranscript(ctx, audioBuffer, audioDriveId);
     step = 'stitch';
+    if (await runStitchGithub(ctx, clips, audioDriveId, cues)) return; // its done hook opens the final review
     await runStitch(ctx, clips, audioBuffer, cues);
     await review.requestReview({ instanceId, checkpoint: 'final' });
   } catch (err) {
@@ -272,8 +320,11 @@ export async function postInstance({ instanceId, captionOverride = '' }) {
   const postformeKey = providers.resolved.postformeKey || '';
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
 
-  await providers.storage.shareAnyone(videoId);
+  // A GitHub-assembled reel is already public (and not the service account's to share).
+  await providers.storage.shareAnyone(videoId).catch((err) => log.warn({ err: err.message, videoId }, 'share failed (assumed already public)'));
+  const { brief } = routerInfo(instance);
   const caption = (captionOverride && captionOverride.trim())
+    || (brief && brief.caption ? [brief.caption, resolved.ctaLink].filter(Boolean).join('\n\n') : '')
     || [resolved.audiencePrefix, resolved.ctaLink].filter(Boolean).join('\n') || instance.title || '';
   // Approved after its slot: it goes out now rather than waiting a day.
   const late = !instance.scheduled_for || new Date(instance.scheduled_for) <= new Date();
@@ -434,6 +485,7 @@ export async function executeManualStage({ instanceId, stepKey, input = {} }) {
 
 /** Register the pipeline hooks so review decisions drive generation. */
 export function registerPipeline() {
+  assemble.setFailHandler((instanceId, stepKey, err) => markFailed(instanceId, stepKey, err));
   review.setPipelineHooks({
     // Rendering can sit quiet for minutes (provider waits, ffmpeg): keep the app awake.
     afterScriptApprove: (a) => heartbeat.during('ai-video', () => runStages(a)),
@@ -444,6 +496,8 @@ export function registerPipeline() {
 }
 
 export default {
+  routerInfo,
+  onStageFailed,
   generateScript,
   runScriptAndReview,
   runStages,

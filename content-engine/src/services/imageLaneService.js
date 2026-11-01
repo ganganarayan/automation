@@ -57,8 +57,8 @@ export class LaneError extends Error {}
 const recipient = (f, providers) => f.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
 const art = (steps, k) => ((steps.find((s) => s.key === k) || {}).artifacts) || {};
 
-/** The funnel's landing page as plain text ('' when unset or unreachable). */
-async function landingText(url, log) {
+/** The funnel's landing page as plain text ('' when unset or unreachable). Lane 2 research uses it too. */
+export async function landingText(url, log) {
   if (!url) return '';
   try {
     const res = await request(url, { label: 'landing.page', log, retries: 0, timeoutMs: 15000, headers: { Accept: 'text/html' } });
@@ -298,4 +298,4 @@ export async function onPosted(row, { refs = [] } = {}) {
   }, baseLog);
 }
 
-export default { KIND, LaneError, prepare, approve, rework, onPosted };
+export default { KIND, LaneError, landingText, prepare, approve, rework, onPosted };

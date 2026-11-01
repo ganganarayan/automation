@@ -4,7 +4,8 @@
  * Purpose:      The one-time "Connect Google Drive" (Setup → Settings →
  *               Google), and the endpoints the clean-video workflow calls back.
  * Responsibility: HTTP wiring only; logic in driveConnectService / readyPostService.
- * Dependencies: accessService, driveConnectService, readyPostService, cleanHookSpec.
+ * Dependencies: accessService, driveConnectService, readyPostService,
+ *               assembleService (AI-video assembly tickets), cleanHookSpec.
  *
  * Routes (signed in):
  *   GET  /api/v1/admin/drive/status       { connected, email }
@@ -23,6 +24,7 @@
 import { keyOk, gateState } from '../services/accessService.js';
 import * as driveConnect from '../services/driveConnectService.js';
 import * as readyPost from '../services/readyPostService.js';
+import * as assemble from '../services/assembleService.js';
 import { peekTicket } from '../utils/cleanHookSpec.js';
 
 const baseUrlOf = (req) => `${req.protocol}://${req.get('host')}`;
@@ -99,12 +101,17 @@ export function register(ctx) {
       res.status(bad ? 403 : 400).json({ ok: false, error: err.message });
     }
   };
-  router.get('/hooks/clean/job', hook((ticket) => readyPost.cleanHookJob({ ticket })));
-  router.get('/hooks/clean/token', hook((ticket) => readyPost.cleanHookToken({ ticket })));
+  // An 'assemble' ticket is an AI video's final stitch (assembleService); any other is a ✂ Clean.
+  const asm = assemble.isAssembleTicket;
+  router.get('/hooks/clean/job', hook((ticket) => (asm(ticket) ? assemble.hookJob({ ticket }) : readyPost.cleanHookJob({ ticket }))));
+  router.get('/hooks/clean/token', hook((ticket) => (asm(ticket) ? assemble.hookToken({ ticket }) : readyPost.cleanHookToken({ ticket }))));
   router.get('/hooks/clean/card.png', hook((ticket, req) => readyPost.cleanHookCard({ ticket, w: req.query.w, h: req.query.h })));
-  router.post('/hooks/clean/progress', hook((ticket, req) => readyPost.cleanHookProgress({ ticket, ...(req.body || {}) })));
-  router.post('/hooks/clean/done', hook((ticket, req) => readyPost.cleanHookDone({ ticket, fileId: (req.body || {}).fileId, durationSec: (req.body || {}).durationSec })));
-  router.post('/hooks/clean/fail', hook((ticket, req) => readyPost.cleanHookFail({ ticket, error: (req.body || {}).error })));
+  router.post('/hooks/clean/progress', hook((ticket, req) => (asm(ticket) ? assemble.hookProgress({ ticket, ...(req.body || {}) }) : readyPost.cleanHookProgress({ ticket, ...(req.body || {}) }))));
+  router.post('/hooks/clean/done', hook((ticket, req) => {
+    const b = req.body || {};
+    return asm(ticket) ? assemble.hookDone({ ticket, fileId: b.fileId, durationSec: b.durationSec }) : readyPost.cleanHookDone({ ticket, fileId: b.fileId, durationSec: b.durationSec });
+  }));
+  router.post('/hooks/clean/fail', hook((ticket, req) => (asm(ticket) ? assemble.hookFail({ ticket, error: (req.body || {}).error }) : readyPost.cleanHookFail({ ticket, error: (req.body || {}).error }))));
 }
 
 export default { register };

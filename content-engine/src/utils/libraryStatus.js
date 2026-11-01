@@ -32,6 +32,7 @@ const STATUS_TO_LABEL = {
   transcript_review: 'needs_you',
   final_review: 'needs_you',
   image_review: 'needs_you', // router lane 3: sheet image waiting for approval
+  video_review: 'needs_you', // router lane 1: generated copy waiting for approval
   review: 'needs_you',
   manual: 'needs_you',
   approved: 'ready',

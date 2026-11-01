@@ -11,7 +11,8 @@ name: Wake content-engine for its daily jobs
 #            and the app runs only the tenants whose time is due)
 #   posts  → /api/v1/jobs/check-posts   (one run at a time; each channel's
 #            ✅/❌ and the go-live email are recorded once)
-#   nudge  → not built yet; logged and skipped.
+#   nudge  → /api/v1/jobs/nudge         (one email a day at most; the app
+#            runs only the tenants whose nudge time is due)
 # Empty or unreadable variable → the defaults above.
 #
 # Repo secrets (Settings -> Secrets and variables -> Actions):
@@ -102,7 +103,9 @@ jobs:
                 path="/api/v1/jobs/router-check?retry=$RETRY"
                 if [ -n "$FORCE" ]; then path="$path&all=1"; fi ;;
               posts) path="/api/v1/jobs/check-posts" ;;
-              nudge) echo "nudge: the nudge job isn't built yet; skipping."; continue ;;
+              nudge)
+                path="/api/v1/jobs/nudge"
+                if [ -n "$FORCE" ]; then path="$path?all=1"; fi ;;
             esac
             ping "$path" || failed=1
           done

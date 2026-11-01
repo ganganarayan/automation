@@ -50,6 +50,15 @@ export async function releaseNone(funnelId, postDate) {
   return rowCount > 0;
 }
 
+/** Drop a funnel's day whatever its lane (the super-admin re-run). Returns the removed row or null. */
+export async function release(funnelId, postDate) {
+  const { rows } = await query(
+    'DELETE FROM router_days WHERE funnel_id = $1 AND post_date = $2::date RETURNING *',
+    [funnelId, postDate],
+  );
+  return rows[0] || null;
+}
+
 /** A tenant's decisions for a date range (inclusive, IST dates), by funnel. */
 export async function listByDates(tenantId = 'default', fromDate, toDate) {
   const { rows } = await query(
@@ -60,4 +69,4 @@ export async function listByDates(tenantId = 'default', fromDate, toDate) {
   return rows;
 }
 
-export default { get, claim, update, releaseNone, listByDates };
+export default { get, claim, update, releaseNone, release, listByDates };

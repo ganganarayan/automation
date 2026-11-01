@@ -2,8 +2,9 @@
  * Module: daily post router (wake/sleep).
  *
  * Purpose:      The wake entry point for the daily router: decide tomorrow's
- *               lane per active funnel and line up what is needed (today:
- *               Lane 3 image posts with their approval emails). Each tenant
+ *               lane per active funnel and line up what is needed (Lane 1
+ *               ready video → Lane 2 AI video → Lane 3 image post, with
+ *               their approval emails). Each tenant
  *               sets the time in Setup → Settings → Daily schedule (IST),
  *               default 16:00. GitHub Actions (.github/workflows/wake.yml)
  *               pings it; the app does the work under the heartbeat, then may
@@ -16,18 +17,32 @@
  *                 last 30 minutes, IST). ?all=1 runs every tenant; ?retry=1
  *                 re-decides days recorded as 'none' (every tenant); ?funnel=ID
  *                 limits the run to one funnel.
- *               - Wire the image lane: approve / rework handlers for its
- *                 approval emails, and the post check's "went live" hook that
- *                 marks the sheet row Posted.
- * Dependencies: routerService, imageLaneService, approvalService,
- *               readyPostService, wakeScheduleService, settings, node-cron,
- *               auth middleware.
+ *               - HTTP: POST /api/v1/jobs/nudge (admin-guarded, 202): the 10:00
+ *                 nudge for the tenants whose nudge time is due (?all=1 = all).
+ *               - HTTP (signed in): POST /api/v1/admin/router/rerun {funnelId}
+ *                 — super admin only: re-run tomorrow's check for one funnel.
+ *                 GET /api/v1/admin/credit-status — a live Lane 2 credit check
+ *                 (the Keys and credit page reads it).
+ *               - Wire the lanes: approve / rework handlers for the image and
+ *                 ready-video approval emails, the post check's "went live"
+ *                 hook that marks the sheet row Posted, and the stage runner's
+ *                 failure hook that drops a failed AI video to the image lane.
+ * Dependencies: routerService, imageLaneService, readyLaneService,
+ *               aiLaneService, creditService, stageRunnerService,
+ *               approvalService, readyPostService, wakeScheduleService,
+ *               accessService, funnelsRepository, settings, node-cron, auth middleware.
  */
 import cron from 'node-cron';
 import * as routerService from '../services/routerService.js';
 import * as wakeSchedule from '../services/wakeScheduleService.js';
 import { settings } from '../settings/index.js';
 import * as imageLane from '../services/imageLaneService.js';
+import * as readyLane from '../services/readyLaneService.js';
+import * as aiLane from '../services/aiLaneService.js';
+import * as credit from '../services/creditService.js';
+import * as stageRunner from '../services/stageRunnerService.js';
+import * as funnelsRepo from '../repositories/funnelsRepository.js';
+import { currentSession, keyOk } from '../services/accessService.js';
 import * as approvalService from '../services/approvalService.js';
 import * as readyPost from '../services/readyPostService.js';
 import { requireAdminKey } from '../middleware/auth.js';
@@ -39,11 +54,16 @@ export function register(ctx) {
     onApprove: (a) => imageLane.approve(a),
     onRework: (a, note) => imageLane.rework(a, note),
   });
+  approvalService.onKind(readyLane.KIND, {
+    onApprove: (a) => readyLane.approve(a),
+    onRework: (a) => readyLane.rework(a),
+  });
   readyPost.onPosted((row, info) => imageLane.onPosted(row, info));
+  stageRunner.onStageFailed((id, step, err) => aiLane.onStageFailed(id, step, err));
+  const yes = (v) => ['1', 'true', 'yes'].includes(String(v || '').toLowerCase());
 
   router.post('/jobs/router-check', requireAdminKey, async (req, res, next) => {
     try {
-      const yes = (v) => ['1', 'true', 'yes'].includes(String(v || '').toLowerCase());
       const retryNone = yes(req.query.retry);
       const funnelId = req.query.funnel ? Number(req.query.funnel) : null;
       // A plain wake ping: only the tenants whose daily check time is due.
@@ -56,6 +76,47 @@ export function register(ctx) {
     }
   });
 
+  router.post('/jobs/nudge', requireAdminKey, async (req, res, next) => {
+    try {
+      const tenantIds = yes(req.query.all) ? null : await wakeSchedule.dueTenants({ job: 'nudge' });
+      res.status(202).json({ accepted: true, tenants: tenantIds || 'all' });
+      if (tenantIds && !tenantIds.length) return log.info('nudge: no tenant due now');
+      routerService.runNudge({ tenantIds, log }).catch((e) => log.error({ err: e.message }, 'nudge failed'));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Super admin: re-run tomorrow's check for one funnel (Today page button).
+  router.post('/admin/router/rerun', async (req, res) => {
+    try {
+      const session = await currentSession(req);
+      if (!session || session.role !== 'super_admin') return res.status(403).json({ ok: false, error: 'super admin only' });
+      const funnelId = Number((req.body || {}).funnelId || req.query.funnel);
+      const funnel = funnelId ? await funnelsRepo.get(funnelId) : null;
+      if (!funnel) return res.status(404).json({ ok: false, error: 'funnel not found' });
+      const out = await routerService.rerun({ funnelId, log });
+      log.info({ by: session.email, ...out }, 'router re-run requested');
+      res.json({ ok: true, ...out });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // A live Lane 2 credit check for the Keys and credit page.
+  router.get('/admin/credit-status', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const tenantId = req.tenantId || 'default';
+      const first = (await funnelsRepo.listByTenant(tenantId).catch(() => [])).find((f) => f.active);
+      const funnelCfg = first ? await funnelsRepo.getConfig(first.id).catch(() => ({})) : {};
+      const result = await credit.check({ tenantId, funnelCfg });
+      res.set('Cache-Control', 'no-store').json({ ...result, ok: true, laneOk: result.ok, funnel: first ? first.name : '' });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   // Always-on host: the same due test every 15 minutes (router_days de-dupes
   // a second hit inside the 30-minute window).
   if (settings.schedulerInternal) {
@@ -63,13 +124,15 @@ export function register(ctx) {
       try {
         const tenantIds = await wakeSchedule.dueTenants();
         if (tenantIds.length) await routerService.runCheck({ tenantIds, log });
+        const nudgeIds = await wakeSchedule.dueTenants({ job: 'nudge' });
+        if (nudgeIds.length) await routerService.runNudge({ tenantIds: nudgeIds, log });
       } catch (err) {
         log.warn({ err: err.message }, 'scheduled router check failed');
       }
     });
   }
 
-  log.info('daily router routes registered (POST /jobs/router-check)');
+  log.info('daily router routes registered (POST /jobs/router-check, /jobs/nudge, /admin/router/rerun)');
 }
 
 export default { register };

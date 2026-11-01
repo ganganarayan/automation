@@ -290,7 +290,7 @@ export async function draftsByDriveIds(funnelId, tenantId = 'default', driveIds 
   const { rows } = await query(
     `SELECT DISTINCT ON (s->'artifacts'->'video'->>'driveId') s->'artifacts'->'video'->>'driveId' AS drive_id, i.*
        FROM instances i, jsonb_array_elements(i.steps) s
-      WHERE i.tenant_id = $1 AND i.funnel_id = $2 AND i.status IN ('draft', 'transcript_review') AND i.locked = false
+      WHERE i.tenant_id = $1 AND i.funnel_id = $2 AND i.status IN ('draft', 'transcript_review', 'video_review') AND i.locked = false
         AND s->>'key' = 'stitch' AND s->'artifacts'->'video'->>'driveId' = ANY($3)
       ORDER BY s->'artifacts'->'video'->>'driveId', i.updated_at DESC`,
     [tenantId, funnelId, driveIds],
@@ -330,6 +330,42 @@ export async function openSheetRefs(funnelId, tenantId = 'default') {
   return rows.map((r) => r.source_ref);
 }
 
+/**
+ * Drive file ids of this funnel's ready videos the router has already lined up
+ * for a day (a draft or a copy awaiting approval, with a slot): Lane 1 skips them.
+ */
+export async function routerHeldDriveIds(funnelId, tenantId = 'default') {
+  if (!funnelId) return [];
+  const { rows } = await query(
+    `SELECT DISTINCT source_ref FROM instances
+      WHERE tenant_id = $1 AND funnel_id = $2 AND source_type IN ('drive_folder', 'drive_pick')
+        AND source_ref IS NOT NULL AND scheduled_for IS NOT NULL
+        AND status IN ('draft', 'transcript_review', 'video_review')`,
+    [tenantId, funnelId],
+  );
+  return rows.map((r) => r.source_ref);
+}
+
+/** Router re-run: unlink a not-yet-approved ready-video draft from its day (it stays a draft). */
+export async function releaseSlot(id) {
+  const { rowCount } = await query(
+    `UPDATE instances SET scheduled_for = NULL, status = 'draft', updated_at = now()
+      WHERE id = $1 AND locked = false AND status IN ('draft', 'transcript_review', 'video_review')`,
+    [id],
+  );
+  return rowCount > 0;
+}
+
+/** Router re-run: replace a not-yet-approved instance (frees its sheet row; old links do nothing). */
+export async function supersede(id, note = 'replaced by a router re-run') {
+  const { rowCount } = await query(
+    `UPDATE instances SET status = 'superseded', note = $2, updated_at = now()
+      WHERE id = $1 AND locked = false AND status NOT IN ('approved', 'scheduled', 'posted', 'partial')`,
+    [id, note],
+  );
+  return rowCount > 0;
+}
+
 /** This funnel's most recent instances (any lane), for the router's post history. */
 export async function recentForFunnel(funnelId, tenantId = 'default', limit = 40) {
   if (!funnelId) return [];
@@ -345,4 +381,5 @@ export async function recentForFunnel(funnelId, tenantId = 'default', limit = 40
 export default {
   create, get, list, logRows, saveSteps, setStatus, transition, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, moveFunnel, unschedule, scheduledDue, retryDue, setPostStatus, remove,
   existsForFunnelOnDate, videoOnDate, postedDriveIds, draftsByDriveIds, liveOnDate, openSheetRefs, recentForFunnel,
+  routerHeldDriveIds, releaseSlot, supersede,
 };

@@ -13,6 +13,11 @@
  *               5. POST hooks/clean/done      (or hooks/clean/fail on any error)
  * Dependencies: Node 20 (global fetch), ffmpeg + ffprobe + curl on PATH.
  *
+ * A ticket of kind 'assemble' is an AI video's final stitch instead (daily
+ * router Lane 2): download the animated clips + the narrator voice-over, stitch
+ * them with the SAME args as Railway (src/utils/stageSpec.js ffmpegConcatArgs,
+ * captions burned when the job has them), upload, tell the app.
+ *
  * Env: HOOK (the app's https address), TICKET (signed job ticket — the only
  * credential this run holds; it expires in a few hours).
  */
@@ -20,6 +25,7 @@ import { spawn } from 'node:child_process';
 import { readFile, writeFile, stat } from 'node:fs/promises';
 import { cleanVideoArgs, cleanWithCardArgs, progressSeconds, progressPct } from '../src/utils/cleanSpec.js';
 import { keepSecFor } from '../src/utils/cleanHookSpec.js';
+import { ffmpegConcatArgs } from '../src/utils/stageSpec.js';
 
 const HOOK = String(process.env.HOOK || '').replace(/\/+$/, '');
 const TICKET = String(process.env.TICKET || '');
@@ -78,10 +84,37 @@ async function uploadToDrive({ file, name, folderId, token }) {
   return (await put.json()).id;
 }
 
+/** An AI video's final stitch: clips + voice-over (+ captions) → one reel. */
+async function assemble(job) {
+  console.log(`Assembling an AI video: ${job.clipUrls.length} clips, ${job.width}x${job.height}, captions ${job.srt ? 'on' : 'off'}`);
+  const clipPaths = [];
+  for (let i = 0; i < job.clipUrls.length; i += 1) {
+    const p = `clip${i}.mp4`;
+    await run('curl', ['-fsSL', '--retry', '3', '-o', p, job.clipUrls[i]]);
+    clipPaths.push(p);
+  }
+  await run('curl', ['-fsSL', '--retry', '3', '-o', 'voice.mp3', job.audioUrl]);
+  let subPath = '';
+  if (job.srt && job.srt.trim()) {
+    subPath = 'captions.srt';
+    await writeFile(subPath, job.srt, 'utf8');
+  }
+  await progress({ phase: 'encoding', pct: 0 });
+  await run('ffmpeg', ffmpegConcatArgs({ clipPaths, audioPath: 'voice.mp3', outPath: 'out.mp4', width: job.width, height: job.height, subPath }));
+  const done = await probe('out.mp4');
+  await progress({ phase: 'uploading', pct: 100 });
+  const fresh = await hook('token');
+  console.log(`::add-mask::${fresh.accessToken}`);
+  const fileId = await uploadToDrive({ file: 'out.mp4', name: job.fileName, folderId: fresh.folderId || job.folderId, token: fresh.accessToken });
+  await hook('done', { fileId, durationSec: Math.round(done.durationSec) });
+  console.log(`Done: Drive file ${fileId}, ${Math.round(done.durationSec)} s`);
+}
+
 async function main() {
   if (!/^https:\/\//.test(HOOK) || !TICKET) throw new Error('HOOK (https) and TICKET are required');
   const job = await hook('job');
   console.log(`::add-mask::${job.accessToken}`);
+  if (job.kind === 'assemble') return assemble(job);
   console.log(`Cleaning Drive file ${job.driveId}: zoom ${job.zoomPct}%, cut last ${job.trimEndSec}s, end card ${job.endSec}s`);
 
   await run('curl', ['-fsSL', '--retry', '3', '-o', 'in.mp4', job.downloadUrl]);
