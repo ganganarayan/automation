@@ -8,6 +8,7 @@
  * Dependencies: settings, tenantConfigRepository.
  */
 import { settings } from '../settings/index.js';
+import { DEFAULT_MAIL_PROVIDER } from '../utils/mailApis.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 
 const CACHE_TTL_MS = 60_000;
@@ -167,6 +168,13 @@ export async function forTenant(tenantId = 'default') {
       user: pick('smtp_user', settings.smtp.user),
       pass: pick('smtp_pass', settings.smtp.pass),
       from: pick('smtp_from', settings.smtp.from),
+    },
+    // How email goes out. Railway blocks outbound SMTP, so the default is an
+    // HTTP email API; From falls back to the SMTP From/user already entered.
+    mail: {
+      provider: String(pick('mail_provider', DEFAULT_MAIL_PROVIDER)).trim(),
+      apiKey: String(pick('mail_api_key', '') || '').trim(),
+      from: String(pick('mail_from', pick('smtp_from', settings.smtp.from) || pick('smtp_user', settings.smtp.user)) || '').trim(),
     },
   };
 }

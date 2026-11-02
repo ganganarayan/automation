@@ -1,12 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DateTime } from 'luxon';
-import { smtpMissing, recipientDomain, sendRecord, parseRecord, healthLines } from '../src/utils/emailHealth.js';
-import { createSmtpMailProvider } from '../src/providers/mailProvider.js';
+import { smtpMissing, mailMissing, recipientDomain, sendRecord, parseRecord, healthLines } from '../src/utils/emailHealth.js';
+import { parseFrom, buildMailRequest, readMailResponse, messageIdOf } from '../src/utils/mailApis.js';
+import { createMailProvider } from '../src/providers/mailProvider.js';
 
 // Same output as formatIst (utils/time), which needs the app env to import.
 const fmt = (iso) => DateTime.fromISO(iso).setZone('Asia/Kolkata').toFormat('dd-MM-yyyy HH:mm');
 const full = { host: 'smtp.gmail.com', port: 587, user: 'me@gmail.com', pass: 'app-pass' };
 const log = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() });
+const smtpMail = (smtp) => ({ provider: 'smtp', smtp });
+const resend = { provider: 'resend', apiKey: 're_123', from: 'Gita <hello@x.com>', smtp: {} };
 
 describe('smtpMissing', () => {
   it('names each empty setting by its Settings label', () => {
@@ -14,6 +17,18 @@ describe('smtpMissing', () => {
     expect(smtpMissing({ ...full, pass: '' })).toEqual(['SMTP password (app password)']);
     expect(smtpMissing({})).toEqual(['SMTP host', 'SMTP user', 'SMTP password (app password)']);
     expect(smtpMissing({ ...full, host: '  ' })).toEqual(['SMTP host']);
+  });
+});
+
+describe('mailMissing', () => {
+  it('asks an HTTP provider for its key and a From address', () => {
+    expect(mailMissing(resend)).toEqual([]);
+    expect(mailMissing({ ...resend, apiKey: '' })).toEqual(['Resend API key']);
+    expect(mailMissing({ provider: 'brevo' })).toEqual(['Brevo API key', 'From address']);
+    expect(mailMissing({ provider: 'nope' })[0]).toContain('unknown');
+  });
+  it('asks SMTP for host, user and password', () => {
+    expect(mailMissing(smtpMail({ ...full, pass: '' }))).toEqual(['SMTP password (app password)']);
   });
 });
 
@@ -37,43 +52,93 @@ describe('sendRecord / parseRecord', () => {
 });
 
 describe('healthLines', () => {
-  it('flags missing SMTP fields and no attempts yet', () => {
-    const lines = healthLines({ smtp: { ...full, pass: '' }, last: null, lastError: null, fmt });
-    expect(lines[0].dot).toBe('🔴');
-    expect(lines[0].text).toContain('SMTP password (app password)');
+  it('flags a missing key and no attempts yet', () => {
+    const lines = healthLines({ mail: { ...resend, apiKey: '' }, last: null, lastError: null, fmt });
+    expect(lines[0]).toEqual({ dot: '🔴', text: 'Resend incomplete: set Resend API key, Save, then Send test' });
     expect(lines[1].dot).toBe('🟡');
+  });
+  it('warns that Railway blocks SMTP', () => {
+    const lines = healthLines({ mail: smtpMail(full), last: null, lastError: null, fmt });
+    expect(lines[0].dot).toBe('🟢');
+    expect(lines[1].text).toContain('Railway blocks outbound SMTP');
   });
   it('shows the last send in DD-MM-YYYY HH:MM IST', () => {
     const last = sendRecord({ ok: true, subject: 'Approve', to: 'a@x.com', at: new Date('2026-11-02T10:30:00Z') });
-    const lines = healthLines({ smtp: full, last, lastError: null, fmt });
+    const lines = healthLines({ mail: resend, last, lastError: null, fmt });
+    expect(lines[0]).toEqual({ dot: '🟢', text: 'Resend is set up (sends over HTTPS)' });
     expect(lines[1]).toEqual({ dot: '🟢', text: 'Last send 02-11-2026 16:00 IST: sent "Approve" to @x.com' });
   });
   it('shows an older error separately, not twice when it is the last send', () => {
     const err = sendRecord({ ok: false, subject: 'A', to: 'a@x.com', error: 'auth', at: new Date('2026-11-01T10:30:00Z') });
     const ok = sendRecord({ ok: true, subject: 'B', to: 'a@x.com', at: new Date('2026-11-02T10:30:00Z') });
-    expect(healthLines({ smtp: full, last: ok, lastError: err, fmt })[2].text).toBe('Last error 01-11-2026 16:00 IST: auth');
-    expect(healthLines({ smtp: full, last: err, lastError: err, fmt })).toHaveLength(2);
+    expect(healthLines({ mail: resend, last: ok, lastError: err, fmt })[2].text).toBe('Last error 01-11-2026 16:00 IST: auth');
+    expect(healthLines({ mail: resend, last: err, lastError: err, fmt })).toHaveLength(2);
   });
 });
 
-describe('createSmtpMailProvider', () => {
-  it('skips with a warning naming the missing setting when host/user are empty', async () => {
+describe('mailApis', () => {
+  it('parses a From with or without a name', () => {
+    expect(parseFrom('Gita <hello@x.com>')).toEqual({ email: 'hello@x.com', name: 'Gita' });
+    expect(parseFrom('hello@x.com')).toEqual({ email: 'hello@x.com', name: '' });
+  });
+  it('builds each provider request with its own auth header', () => {
+    const msg = { apiKey: 'K', from: 'Gita <hello@x.com>', to: 'a@y.com', subject: 'S', text: 'hi' };
+    const r = buildMailRequest('resend', msg);
+    expect(r.url).toBe('https://api.resend.com/emails');
+    expect(r.init.headers.Authorization).toBe('Bearer K');
+    expect(JSON.parse(r.init.body)).toMatchObject({ from: 'Gita <hello@x.com>', to: ['a@y.com'], subject: 'S', text: 'hi' });
+    const b = buildMailRequest('brevo', { ...msg, attachments: [{ filename: 'a.xlsx', content: Buffer.from('xy') }] });
+    expect(b.init.headers['api-key']).toBe('K');
+    expect(JSON.parse(b.init.body)).toMatchObject({ sender: { email: 'hello@x.com', name: 'Gita' }, to: [{ email: 'a@y.com' }], attachment: [{ name: 'a.xlsx', content: 'eHk=' }] });
+    expect(buildMailRequest('sendgrid', msg).init.headers.Authorization).toBe('Bearer K');
+    expect(buildMailRequest('postmark', msg).init.headers['X-Postmark-Server-Token']).toBe('K');
+    expect(buildMailRequest('smtp2go', msg).init.headers['X-Smtp2go-Api-Key']).toBe('K');
+    expect(() => buildMailRequest('smtp', msg)).toThrow();
+  });
+  it('reads failures, including the ones inside a 200', () => {
+    expect(readMailResponse('resend', 200, '{"id":"m1"}')).toBeNull();
+    expect(readMailResponse('resend', 403, '{"message":"domain not verified"}')).toBe('Resend said 403: domain not verified');
+    expect(readMailResponse('postmark', 200, '{"ErrorCode":400,"Message":"Sender not confirmed"}')).toBe('Postmark error 400: Sender not confirmed');
+    expect(readMailResponse('smtp2go', 200, '{"data":{"succeeded":0}}')).toContain('sent nothing');
+    expect(messageIdOf('{"id":"m1"}')).toBe('m1');
+  });
+});
+
+describe('createMailProvider', () => {
+  const answer = (status, body) => vi.fn(async () => ({ status, text: async () => JSON.stringify(body) }));
+  it('sends over HTTP and records the success', async () => {
+    const l = log(); const onResult = vi.fn(); const request = answer(200, { id: 'm1' });
+    const r = await createMailProvider(resend, l, onResult, request).send({ to: 'a@y.com', subject: 'S', text: 'hi' });
+    expect(r).toEqual({ ok: true, id: 'm1' });
+    expect(request.mock.calls[0][0]).toBe('https://api.resend.com/emails');
+    expect(l.info.mock.calls[0][0]).toMatchObject({ via: 'Resend', to_domain: 'y.com' });
+    expect(onResult.mock.calls[0][0]).toMatchObject({ ok: true, domain: 'y.com' });
+  });
+  it('logs, records and throws a provider error', async () => {
     const l = log(); const onResult = vi.fn();
-    const r = await createSmtpMailProvider({}, l, onResult).send({ to: 'a@x.com', subject: 'S' });
+    await expect(createMailProvider(resend, l, onResult, answer(401, { message: 'API key is invalid' })).send({ to: 'a@y.com', subject: 'S' }))
+      .rejects.toThrow('Resend said 401: API key is invalid');
+    expect(l.error).toHaveBeenCalled();
+    expect(onResult.mock.calls[0][0]).toMatchObject({ ok: false, error: 'Resend said 401: API key is invalid' });
+  });
+  it('throws a plain reason when the key is missing but a From is set', async () => {
+    await expect(createMailProvider({ ...resend, apiKey: '' }, log(), vi.fn()).send({ to: 'a@y.com', subject: 'S' }))
+      .rejects.toThrow('Resend not configured: set Resend API key on Settings');
+  });
+  it('skips with a warning when nothing is set at all', async () => {
+    const l = log(); const onResult = vi.fn();
+    const r = await createMailProvider({ provider: 'resend', smtp: {} }, l, onResult).send({ to: 'a@x.com', subject: 'S' });
     expect(r.ok).toBe(false);
-    expect(l.warn.mock.calls[0][1]).toContain('SMTP host');
+    expect(l.warn.mock.calls[0][1]).toContain('Resend API key');
     expect(onResult.mock.calls[0][0]).toMatchObject({ ok: false, skipped: true, domain: 'x.com' });
   });
-  it('throws a plain reason when only the password is missing', async () => {
-    const l = log(); const onResult = vi.fn();
-    await expect(createSmtpMailProvider({ ...full, pass: '' }, l, onResult).send({ to: 'a@x.com', subject: 'S' }))
+  it('SMTP host and user without a password throws the plain reason', async () => {
+    await expect(createMailProvider(smtpMail({ ...full, pass: '' }), log(), vi.fn()).send({ to: 'a@x.com', subject: 'S' }))
       .rejects.toThrow('SMTP password (app password)');
-    expect(l.error).toHaveBeenCalled();
-    expect(onResult.mock.calls[0][0]).toMatchObject({ ok: false, skipped: false });
   });
   it('skip() records a missing recipient', async () => {
     const l = log(); const onResult = vi.fn();
-    await createSmtpMailProvider(full, l, onResult).skip({ subject: 'S', reason: 'no recipient' });
+    await createMailProvider(resend, l, onResult).skip({ subject: 'S', reason: 'no recipient' });
     expect(l.warn).toHaveBeenCalled();
     expect(onResult.mock.calls[0][0]).toMatchObject({ skipped: true, error: 'no recipient' });
   });

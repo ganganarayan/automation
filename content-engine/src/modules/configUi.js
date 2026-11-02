@@ -37,7 +37,8 @@ import * as configService from '../services/configService.js';
 import * as users from '../repositories/usersRepository.js';
 import * as tenantRepo from '../repositories/tenantRepository.js';
 import { formatIst } from '../utils/time.js';
-import { smtpMissing, parseRecord, healthLines } from '../utils/emailHealth.js';
+import { mailMissing, parseRecord, healthLines } from '../utils/emailHealth.js';
+import { providerName, parseFrom } from '../utils/mailApis.js';
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as tenantSettings from '../core/tenantSettings.js';
 import * as tenantConfigRepo from '../repositories/tenantConfigRepository.js';
@@ -383,14 +384,15 @@ export function register(ctx) {
       if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
       const providers = await buildProviders(req.tenantId);
       const smtp = providers.resolved.smtp || {};
-      const to = (req.body?.to || smtp.from || smtp.user || '').trim();
-      const missing = smtpMissing(smtp);
-      if (missing.length) return res.json({ ok: false, error: `SMTP not configured: set ${missing.join(', ')} and Save first` });
+      const mail = { ...providers.resolved.mail, smtp };
+      const to = (req.body?.to || parseFrom(mail.from).email || smtp.user || '').trim();
+      const missing = mailMissing(mail);
+      if (missing.length) return res.json({ ok: false, error: `${providerName(mail.provider)} not configured: set ${missing.join(', ')} and Save first` });
       if (!to) return res.json({ ok: false, error: 'no recipient (set a From/user address)' });
       const result = await providers.mail.send({
         to,
         subject: 'Test email: automation content-engine',
-        text: 'This is a test from your content-engine SMTP settings. If you received this, approval and status emails will work.',
+        text: 'This is a test from your content-engine email settings. If you received this, approval and status emails will work.',
       });
       res.json({ ok: !!result.ok, to, error: result.ok ? null : (result.error || 'send failed') });
     } catch (err) {
@@ -407,7 +409,7 @@ export function register(ctx) {
         tenantConfig.get(req.tenantId, 'email_last_send'),
         tenantConfig.get(req.tenantId, 'email_last_error'),
       ]);
-      res.json({ ok: true, lines: healthLines({ smtp: providers.resolved.smtp, last: parseRecord(last), lastError: parseRecord(lastError), fmt: formatIst }) });
+      res.json({ ok: true, lines: healthLines({ mail: { ...providers.resolved.mail, smtp: providers.resolved.smtp }, last: parseRecord(last), lastError: parseRecord(lastError), fmt: formatIst }) });
     } catch (err) {
       res.json({ ok: false, lines: [{ dot: '🟡', text: err.message }] });
     }
@@ -1278,14 +1280,14 @@ function fieldRow(field, configMap) {
       <p class="hint">Tick the days this funnel runs. All unchecked = every day.</p></div>`;
   }
   if (field.type === 'smtp_test') {
-    const prefill = configMap.smtp_from || configMap.smtp_user || '';
+    const prefill = parseFrom(configMap.mail_from).email || configMap.smtp_from || configMap.smtp_user || '';
     return `<div class="field"><label>Send a test email</label>
       <div class="row" style="gap:.4rem">
         <input id="smtp-test-to" type="email" placeholder="recipient (defaults to your From)" value="${esc(prefill)}" style="flex:1;min-width:220px">
         <button type="button" class="act" onclick="testEmail()">Send test</button>
         <span id="smtp-test-result" class="hint"></span>
       </div>
-      <p class="hint">Save your SMTP settings first, then send a test to confirm delivery (check spam once).</p></div>
+      <p class="hint">Save your email settings first, then send a test to confirm delivery (check spam once).</p></div>
       <div class="field"><label>Email health</label>
         <div id="email-health" class="hint">Checking…</div></div>
       <script>

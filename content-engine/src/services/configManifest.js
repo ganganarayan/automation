@@ -17,6 +17,7 @@
  */
 
 import { DEFAULT_COPY_PROMPT } from '../utils/aiCopySpec.js';
+import { MAIL_PROVIDERS, DEFAULT_MAIL_PROVIDER } from '../utils/mailApis.js';
 import { DEFAULT_SCRIPT_PROMPT } from '../utils/stageSpec.js';
 import { VIDAPULSE_SYSTEM } from './prompts.js';
 
@@ -201,13 +202,23 @@ export const CONFIG_MANIFEST = {
         ],
       },
       {
-        title: 'Email (SMTP: for approval & status notifications)',
+        title: 'Email (for approval & status notifications)',
         fields: [
-          { key: 'smtp_host', label: 'SMTP host', placeholder: 'smtp.zoho.com / smtp.gmail.com' },
+          {
+            key: 'mail_provider',
+            label: 'Send email through',
+            type: 'select',
+            default: DEFAULT_MAIL_PROVIDER,
+            options: MAIL_PROVIDERS.map(({ value, label }) => ({ value, label })),
+            help: 'Railway blocks outbound SMTP, so use an HTTP email API. Resend and Brevo have free tiers; verify your sending domain (or From address) with the provider first.',
+          },
+          { key: 'mail_api_key', label: 'Email API key (for the provider above)', type: 'secret' },
+          { key: 'mail_from', label: 'From address (verified with the provider)', placeholder: 'Gita <hello@yourdomain.com>', help: 'Blank = the SMTP From or SMTP user below.' },
+          { key: 'smtp_host', label: 'SMTP host (only when sending through SMTP)', placeholder: 'smtp.zoho.com / smtp.gmail.com' },
           { key: 'smtp_port', label: 'SMTP port', placeholder: '587' },
           { key: 'smtp_user', label: 'SMTP user (your email)' },
           { key: 'smtp_pass', label: 'SMTP password (app password)', type: 'secret' },
-          { key: 'smtp_from', label: 'From address (defaults to user)' },
+          { key: 'smtp_from', label: 'SMTP From address (defaults to user)' },
           { key: 'smtp_test', label: 'Test', type: 'smtp_test' },
         ],
       },

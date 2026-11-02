@@ -22,7 +22,7 @@ import { createGoogleDriveProvider } from '../providers/storageProvider.js';
 import { createGoogleSheetsProvider } from '../providers/sheetsProvider.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { createJson2VideoProvider } from '../providers/videoProvider.js';
-import { createSmtpMailProvider } from '../providers/mailProvider.js';
+import { createMailProvider } from '../providers/mailProvider.js';
 import { createWaGatewayClient } from '../providers/whatsappClient.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 
@@ -49,9 +49,9 @@ export async function buildProviders(tenantId = 'default') {
     publish: createPostForMeProvider({ apiKey: r.postformeKey }, log),
     video: createJson2VideoProvider(r.video, log),
 
-    // Tenant-scoped: each tenant sends approval/status email from their own
-    // mailbox (SMTP configured in the app; env is only a fallback).
-    mail: createSmtpMailProvider(r.smtp, log, mailRecorder(tenantId)),
+    // Tenant-scoped: each tenant sends approval/status email through the
+    // provider chosen in the app (an HTTP email API; SMTP only off Railway).
+    mail: createMailProvider({ ...r.mail, smtp: r.smtp }, log, mailRecorder(tenantId)),
 
     // Google Sheets/Drive identity: the service account configured in the app
     // (tenant_config), falling back to the env default (see tenantSettings).

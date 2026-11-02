@@ -3,11 +3,13 @@
  *
  * Purpose:      Say plainly why an email can't go out, and keep the last send
  *               outcome in a form the Settings page can show.
- * Responsibility: smtpMissing (which SMTP settings are empty), recipientDomain
+ * Responsibility: smtpMissing / mailMissing (which settings are empty for the
+ *               chosen provider: an HTTP API, or SMTP), recipientDomain
  *               (log the domain, never the full address), sendRecord (the
  *               stored last-send JSON), parseRecord, healthLines (the readout).
- * Dependencies: none (the caller passes formatIst, so this stays pure).
+ * Dependencies: utils/mailApis (pure). The caller passes formatIst.
  */
+import { MAIL_PROVIDERS, providerName } from './mailApis.js';
 
 // The Settings labels, so a warning names the exact field to fill in.
 const SMTP_FIELDS = [
@@ -20,6 +22,21 @@ const SMTP_FIELDS = [
 export function smtpMissing(smtp) {
   const s = smtp || {};
   return SMTP_FIELDS.filter(([k]) => !String(s[k] ?? '').trim()).map(([, label]) => label);
+}
+
+/**
+ * Labels of the settings the chosen provider still needs (empty = complete).
+ * @param {{ provider: string, apiKey?: string, from?: string, smtp?: object }} mail
+ */
+export function mailMissing(mail) {
+  const m = mail || {};
+  if (m.provider === 'smtp') return smtpMissing(m.smtp);
+  const p = MAIL_PROVIDERS.find((x) => x.value === m.provider);
+  if (!p) return [`Email provider (unknown "${m.provider || ''}")`];
+  const out = [];
+  if (!String(m.apiKey || '').trim()) out.push(p.keyLabel);
+  if (!String(m.from || '').trim()) out.push('From address');
+  return out;
 }
 
 /** The domain part(s) of a recipient list: "a@x.com, b@y.in" -> "x.com, y.in". */
@@ -56,15 +73,19 @@ export function parseRecord(value) {
 
 /**
  * The readout lines for Settings: [{ dot, text }].
- * @param {{ smtp: object, last: object|null, lastError: object|null, fmt: (iso: string) => string }} input
+ * @param {{ mail: object, last: object|null, lastError: object|null, fmt: (iso: string) => string }} input
  * fmt is formatIst (utils/time): DD-MM-YYYY HH:MM IST.
  */
-export function healthLines({ smtp, last, lastError, fmt }) {
-  const missing = smtpMissing(smtp);
+export function healthLines({ mail, last, lastError, fmt }) {
+  const missing = mailMissing(mail);
+  const name = providerName(mail?.provider);
   const lines = [];
   lines.push(missing.length
-    ? { dot: '🔴', text: `SMTP incomplete: set ${missing.join(', ')}, Save, then Send test` }
-    : { dot: '🟢', text: 'SMTP host, user and password are all set' });
+    ? { dot: '🔴', text: `${name} incomplete: set ${missing.join(', ')}, Save, then Send test` }
+    : { dot: '🟢', text: `${name} is set up${mail?.provider === 'smtp' ? '' : ' (sends over HTTPS)'}` });
+  if (mail?.provider === 'smtp') {
+    lines.push({ dot: '🟡', text: 'Railway blocks outbound SMTP: pick an HTTP provider (Resend, Brevo, SendGrid, Postmark or SMTP2GO)' });
+  }
   if (!last) {
     lines.push({ dot: '🟡', text: 'No email has been attempted since this readout was added' });
   } else {
@@ -80,4 +101,4 @@ export function healthLines({ smtp, last, lastError, fmt }) {
   return lines;
 }
 
-export default { smtpMissing, recipientDomain, sendRecord, parseRecord, healthLines };
+export default { smtpMissing, mailMissing, recipientDomain, sendRecord, parseRecord, healthLines };
