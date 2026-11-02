@@ -1033,8 +1033,10 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
      if(j.listError){st.textContent='🟡 Could not read the folder: '+j.listError+(j.saEmail?' Share it with '+j.saEmail+' or make it public (anyone with the link).':' Make it public (anyone with the link).');st.style.color='#ffd479';return;}
      if(!j.folder){st.textContent='🟡 Paste the folder link above (or set the media folder on Shared basics).';st.style.color='#ffd479';return;}
      if(!j.videos.length){st.textContent='🟡 No unposted videos in that folder.';st.style.color='#ffd479';return;}
-     box.innerHTML=j.videos.map(function(v){return '<label class="acct"><input type="checkbox" data-rv="'+esc2(v.id)+'" data-name="'+esc2(v.name)+'"> '+esc2(v.name)+(v.created?' <span class="hint" style="margin:0">'+esc2(v.created)+'</span>':'')+(v.started?' <span class="hint" style="margin:0">(started)</span>':'')+'</label>';}).join('');
-     st.textContent='🟢 '+j.videos.length+' unposted video'+(j.videos.length===1?'':'s')+', newest first: tick the ones to prepare.';st.style.color='#5bd08a';
+     // Oldest first: the router posts from the top, one a day.
+     const list=j.videos.slice().reverse();
+     box.innerHTML=list.map(function(v,i){return '<label class="acct"><input type="checkbox" data-rv="'+esc2(v.id)+'" data-name="'+esc2(v.name)+'"> '+esc2(v.name)+(v.created?' <span class="hint" style="margin:0">'+esc2(v.created)+'</span>':'')+(i===0?' <b class="hint" style="margin:0;color:#5bd08a">next for the router</b>':'')+(v.started?' <span class="hint" style="margin:0">(started)</span>':'')+'</label>';}).join('');
+     st.textContent='🟢 '+j.videos.length+' video'+(j.videos.length===1?'':'s')+' not posted yet, oldest first. The router posts the top one each day by itself; tick any you want to prepare and schedule now.';st.style.color='#5bd08a';
      go.style.display='';
    }catch(e){st.textContent='🔴 '+(e.message||'failed');st.style.color='#ff9a9a';}
  }
