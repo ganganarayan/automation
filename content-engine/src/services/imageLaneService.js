@@ -41,7 +41,7 @@ import { patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpe
 import { costImages } from '../utils/pricing.js';
 import { formatIst } from '../utils/time.js';
 import {
-  IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, SOURCE_COL, SHEET_STATUS,
+  IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, LINKS_COL, SOURCE_COL, SHEET_STATUS,
   readyRows, pickReadyRow, planHeader, colLetter, nextMatchKeys, htmlToText, landingUrls, historyLines,
   instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt, normalizeRefill, rowsForSheet, postAtFor,
 } from '../utils/routerSpec.js';
@@ -296,15 +296,25 @@ export async function rework(approval, note) {
   return null;
 }
 
-/** Post check hook: an image instance is live → its sheet row is Posted + the post id. */
-export async function onPosted(row, { refs = [] } = {}) {
+/**
+ * Post check hook: an image instance is live → its sheet row is Posted, the
+ * post id, and the live links of the channels that made it, one per line so
+ * they can be copied straight out of the cell. A channel whose platform
+ * returned no permalink contributes no line.
+ */
+export async function onPosted(row, { refs = [], channels = [] } = {}) {
   if (!row || row.source_type !== 'sheet') return;
   const ctx = await sheetFor(row);
   if (!ctx) return;
   const ids = (refs.length ? refs : (Array.isArray(row.post_refs) ? row.post_refs : [])).filter(Boolean);
+  const links = (Array.isArray(channels) ? channels : [])
+    .filter((c) => c && c.state === 'ok' && c.url)
+    .map((c) => String(c.url).trim());
+  const unique = [...new Set(links)];
   await poster.markSheetRow(ctx.providers.sheets, ctx.f.sheetId, ctx.tab, {
     matchColName: ctx.sheet.matchColName, matchKey: ctx.sheet.key, rowNumber: ctx.sheet.rowNumber,
-    status: SHEET_STATUS.posted, extra: { [PFM_COL]: ids.join(', ') },
+    status: SHEET_STATUS.posted,
+    extra: { [PFM_COL]: ids.join(', '), ...(unique.length ? { [LINKS_COL]: unique.join('\n') } : {}) },
   }, baseLog);
 }
 

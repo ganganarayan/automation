@@ -28,6 +28,8 @@ export const REFILL_COUNT = 7;
 
 /** Columns the router keeps on the sheet (created when missing). */
 export const PFM_COL = 'pfm_post_id';
+/** The live post links, one per line, written when the post goes live. */
+export const LINKS_COL = 'post_links';
 export const SOURCE_COL = 'source';
 export const AUTO_SOURCE = 'Auto';
 
@@ -586,7 +588,7 @@ export function nudgeNeeded(funnelsState = []) {
 export const NUDGE_TEXT = 'Video lanes are empty. Upload ready videos or top up the video APIs so I can create videos and auto-post.';
 
 export default {
-  LANES, IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, SOURCE_COL, AUTO_SOURCE, SHEET_STATUS,
+  LANES, IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, LINKS_COL, SOURCE_COL, AUTO_SOURCE, SHEET_STATUS,
   routerTarget, runsOn, laneForInstance, existingReason, routerClash, postAtFor, colLetter, planHeader, colIndex, rowKey,
   readyRows, pickReadyRow, nextMatchKeys, htmlToText, landingUrls, landingLine, historyLines, instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt,
   normalizeRefill, rowsForSheet,
