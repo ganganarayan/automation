@@ -100,7 +100,7 @@ describe('no em dashes in copy', () => {
   });
 });
 
-import { mergeChannels, channelOutcome, channelText } from '../src/utils/laneSpec.js';
+import { mergeChannels, channelOutcome, channelText, channelIcon } from '../src/utils/laneSpec.js';
 
 describe('channels', () => {
   const ch = [{ id: 'a', platform: 'youtube', name: 'G', state: 'waiting' }, { id: 'b', platform: 'x', name: 'GN', state: 'waiting' }];
@@ -117,5 +117,11 @@ describe('channels', () => {
     const after = mergeChannels(retry, { a: { success: false }, b: { success: true } });
     expect(after.map((c) => c.state)).toEqual(['ok', 'ok']);
     expect(channelOutcome(after)).toBe('posted');
+  });
+});
+
+describe('channelIcon', () => {
+  it('shows each channel state as one icon', () => {
+    expect([{ state: 'ok' }, { state: 'failed' }, { state: 'waiting' }, {}].map(channelIcon)).toEqual(['✅', '❌', '⏳', '⏳']);
   });
 });

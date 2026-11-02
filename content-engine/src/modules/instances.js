@@ -32,12 +32,12 @@ import * as jobRunner from '../core/jobRunner.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
 import { INSTANCE_STEPS, sumInstanceCost, costBreakdown, shortId, formatDuration } from '../utils/instanceSpec.js';
-import { READY_STAGES, SOURCE_TYPES, laneOf, readyStage, stageLabel, istToInputValue, channelText } from '../utils/laneSpec.js';
+import { READY_STAGES, SOURCE_TYPES, laneOf, readyStage, stageLabel, istToInputValue, channelText, channelIcon } from '../utils/laneSpec.js';
 import cron from 'node-cron';
 import { settings } from '../settings/index.js';
 import { MANUAL_STAGES, STAGE_LABEL, inputKind, canExecute } from '../utils/manualStepSpec.js';
 import { navSlot, fillNav, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
-import { LIBRARY_LABELS, libraryStatus, rowStatus } from '../utils/libraryStatus.js';
+import { LIBRARY_LABELS, libraryStatus, rowStatus, latestAt } from '../utils/libraryStatus.js';
 import { formatIst } from '../utils/time.js';
 import { defaultSlotsIso, parseDriveFolderId, parsePickedFiles } from '../utils/readyPostSpec.js';
 import { driveThumbUrl } from '../utils/reviewSpec.js';
@@ -475,9 +475,10 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
   const visible = (all || []).filter((r) => status === 'superseded' || !libraryStatus(r.status).hidden);
   const inFunnel = visible.filter((r) => !funnel || String(r.funnel_id) === funnel);
   const filtered = label ? inFunnel.filter((r) => rowStatus(r).key === label) : inFunnel;
-  // Posts on their way to Post for Me, and ones that failed there, come first.
+  // Posts on their way to Post for Me, and ones that failed there, come first; then the latest first.
   const first = (r) => (['posting', 'post_failed'].includes(r.post_status) ? 0 : 1);
-  const rows = [...filtered].sort((a, b) => first(a) - first(b));
+  const rows = [...filtered].sort((a, b) => first(a) - first(b) || latestAt(b) - latestAt(a));
+  const spent = rows.reduce((t, r) => t + (Number(r.cost_usd) || 0), 0);
   const posting = rows.some((r) => rowStatus(r).posting);
   const link = (q) => {
     const p = new URLSearchParams(Object.entries({ label, funnel, ...q }).filter(([, v]) => v));
@@ -490,6 +491,7 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
     ? [`<a class="chip${!funnel ? ' on' : ''}" href="${link({ funnel: '' })}">All funnels</a>`,
       ...funnelList.map((f) => `<a class="chip${funnel === String(f.id) ? ' on' : ''}" href="${link({ funnel: String(f.id) })}">${esc(f.name)}</a>`)].join('')
     : '';
+  const spentChip = `<span class="chip spent" title="Total cost of the ${rows.length} instance(s) shown">💲 Spent ${esc(usd(spent))}</span>`;
 
   const body = (rows || [])
     .map((r) => {
@@ -508,7 +510,7 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
         <td>${statusPill(r.status, r)}${['draft', 'transcript_review'].includes(r.status) && !String(r.post_status || '').startsWith('post') && laneOf(r) === 'ready' ? `<div class="hint">next: ${esc(stageLabel(readyStage(r, steps)))}</div>` : ''}</td>
         <td class="when"><div title="Scheduled">📅 ${r.scheduled_for ? esc(formatIst(r.scheduled_for)) : '-'}</div><div title="Posted">✅ ${r.posted_at && ['posted', 'partial'].includes(r.status) ? esc(formatIst(r.posted_at)) : '-'}</div></td>
         <td class="actions">${preview} <a class="act" href="/api/v1/admin/instances/${esc(r.id)}">Open</a> ${del}</td>
-        <td class="chans">${esc(channelsOf(steps).map(channelText).join(', ')) || '<span class="hint">-</span>'}</td>
+        <td class="chans">${channelsOf(steps).map((c) => `<span class="ch" title="${esc(channelText(c))}">${channelIcon(c)} ${esc(c.platform || c.name || '?')}</span>`).join(' ') || '<span class="hint">-</span>'}</td>
       </tr>`;
     })
     .join('');
@@ -522,10 +524,10 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
         <button class="act" onclick="sample()">+ Sample</button>
       </div>
     </div>
-    <div class="libchips">${labelChips}</div>
+    <div class="libchips">${labelChips}${spentChip}</div>
     ${funnelChips ? `<div class="libchips">${funnelChips}</div>` : ''}
     ${status ? `<p class="hint">Showing raw status “${esc(STATUS_LABEL[status] || status)}” (old link). <a href="/api/v1/admin/instances">Show all</a></p>` : ''}
-    <table>
+    <table class="lib">
       <thead><tr><th>Instance</th><th>Title</th><th>Funnel</th><th>Length</th><th>Cost</th><th>Status</th><th>Scheduled / posted</th><th>Actions</th><th>Channels</th></tr></thead>
       <tbody>${body || `<tr><td colspan="9" class="hint">${label || funnel || status ? 'Nothing matches this filter.' : 'Nothing in the library yet. A run creates one; use + Sample to preview the UI.'}</td></tr>`}</tbody>
     </table>
@@ -1364,6 +1366,13 @@ ${NAV_CSS}
  .pill.bad{background:#3b1212;border-color:#6b1f1f;color:#ff9a9a}
  .pill.mut{background:#1c1c2a;color:#9a9ab0}
  td.when div{white-space:nowrap}td.chans{font-size:.78rem;min-width:220px;line-height:1.5}
+ .wrap:has(table.lib){max-width:1500px}
+ table.lib th,table.lib td{padding:.3rem .55rem;line-height:1.3}
+ table.lib td:nth-child(2){min-width:320px}
+ table.lib td.actions{white-space:nowrap}table.lib td.actions .act{padding:.25rem .55rem}
+ table.lib td.chans{min-width:0;max-width:300px}table.lib .ch{white-space:nowrap;margin-right:.35rem;cursor:default}
+ table.lib .pill{white-space:nowrap}
+ .chip.spent{color:#8ff0b0;border-color:#1f6b38}
  .pill.info{background:#12263b;border-color:#1f4f7a;color:#8fc4ff}
  .ro{color:#8a8aa2;font-size:.85rem;margin:.2rem 0 1rem}
  .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.4rem 0 1rem}

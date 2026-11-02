@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { libraryStatus, rowStatus, POSTING_STALE_MS, statusesFor, statusText, NEEDS_YOU_STATUSES, LIBRARY_LABELS } from '../src/utils/libraryStatus.js';
+import { libraryStatus, rowStatus, latestAt, POSTING_STALE_MS, statusesFor, statusText, NEEDS_YOU_STATUSES, LIBRARY_LABELS } from '../src/utils/libraryStatus.js';
 
 describe('library status labels', () => {
   it('maps every raw status to one of seven labels', () => {
@@ -63,5 +63,15 @@ describe('rowStatus (background posts)', () => {
   it('otherwise falls back to the raw status', () => {
     expect(rowStatus({ status: 'scheduled', post_status: 'scheduled' }, now)).toMatchObject({ key: 'scheduled', label: 'Scheduled', posting: false });
     expect(rowStatus({ status: 'draft', post_status: 'pending' }, now).label).toBe('Inbox');
+  });
+});
+
+describe('latestAt (Library order)', () => {
+  it('uses the latest of posted, scheduled and created', () => {
+    const a = { created_at: '2026-10-01T00:00:00Z', posted_at: '2026-11-01T17:44:00Z' };
+    const b = { created_at: '2026-10-05T00:00:00Z', scheduled_for: '2026-11-02T01:32:00Z' };
+    const c = { created_at: '2026-10-31T00:00:00Z' };
+    expect([c, a, b].sort((x, y) => latestAt(y) - latestAt(x))).toEqual([b, a, c]);
+    expect(latestAt({})).toBe(0);
   });
 });

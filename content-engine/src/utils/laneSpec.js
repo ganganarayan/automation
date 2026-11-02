@@ -159,7 +159,7 @@ export function istToInputValue(text) {
 }
 
 export default {
-  postOutcome, istToInputValue, mergeChannels, channelOutcome, channelText,
+  postOutcome, istToInputValue, mergeChannels, channelOutcome, channelText, channelIcon,
   SOURCE_TYPES, READY_STAGES, TRANSCRIPT_REVIEW, laneOf, transcriptApproved, canGenerateCopy, readyStage, stageLabel,
   isSrt, srtToText, prepareTranscript, glossaryTerms, whisperPrompt, isRecoverableError, nextAutoRetry, requestFromPost,
 };
@@ -189,10 +189,14 @@ export function channelOutcome(channels = []) {
   return ok ? 'partial' : 'failed';
 }
 
+/** A channel's state: ✅ posted, ❌ failed, ⏳ waiting. */
+export function channelIcon(c = {}) {
+  return c.state === 'ok' ? '✅' : c.state === 'failed' ? '❌' : '⏳';
+}
+
 /** One channel as "✅ youtube Ganga" / "❌ x (error)" / "⏳ threads name". */
 export function channelText(c = {}) {
-  const icon = c.state === 'ok' ? '✅' : c.state === 'failed' ? '❌' : '⏳';
-  return `${icon} ${[c.platform, c.name].filter(Boolean).join(' ')}${c.state === 'failed' && c.error ? ` (${c.error})` : ''}`;
+  return `${channelIcon(c)} ${[c.platform, c.name].filter(Boolean).join(' ')}${c.state === 'failed' && c.error ? ` (${c.error})` : ''}`;
 }
 
 /** Minutes to wait before each automatic retry of the ❌ channels (5 tries, ~2 days). */

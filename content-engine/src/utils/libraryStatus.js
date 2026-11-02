@@ -90,10 +90,17 @@ export function statusesFor(labelKey) {
   return Object.keys(STATUS_TO_LABEL).filter((s) => STATUS_TO_LABEL[s] === labelKey);
 }
 
+/** When a row last mattered: posted, else scheduled, else created (ms; newest sorts first). */
+export function latestAt(row) {
+  const r = row || {};
+  const t = (v) => (v ? new Date(v).getTime() || 0 : 0);
+  return Math.max(t(r.posted_at), t(r.scheduled_for), t(r.created_at));
+}
+
 /** Plain text, e.g. "🟡 Posted (partly)". */
 export function statusText(status) {
   const st = libraryStatus(status);
   return `${st.dot} ${st.label}${st.note ? ` (${st.note})` : ''}`;
 }
 
-export default { LIBRARY_LABELS, NEEDS_YOU_STATUSES, POSTING_STALE_MS, libraryStatus, rowStatus, statusesFor, statusText };
+export default { LIBRARY_LABELS, NEEDS_YOU_STATUSES, POSTING_STALE_MS, libraryStatus, rowStatus, latestAt, statusesFor, statusText };
