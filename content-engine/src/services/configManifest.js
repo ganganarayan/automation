@@ -219,10 +219,6 @@ export const CONFIG_MANIFEST = {
     // stored values are still read by tenantSettings.forTenant.)
     modules: [
       {
-        key: 'vidapulseRefill', label: 'VidaPulse content refill (09:00 IST)',
-        help: 'Only for the VidaPulse sheet: when it has 5 or fewer ready rows, writes 30 new scripts and emails them to you as an Excel file. Funnels refill their own sheets through the router (Lane 3), so leave this Off unless you still use that VidaPulse sheet.',
-      },
-      {
         key: 'delivery', label: 'Delivery log & daily reports',
         help: 'Records each Post for Me result (posted / failed) and emails the daily delivery reports (08:30 IST). On is recommended.',
       },

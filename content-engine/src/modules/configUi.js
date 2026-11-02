@@ -573,14 +573,18 @@ ${NAV_CSS}
 </div>
 <script>
   const KEY = ${JSON.stringify(key || '')};
-  // Save without leaving the page: if the sign-in is not accepted, what you
-  // typed stays here; sign in in a new tab and press Save again.
+  // Save without leaving the page: the result shows next to the Save button
+  // and the panel stays open. If the sign-in is not accepted, what you typed
+  // stays here; sign in in a new tab and press Save again.
+  function istNow(){ const d=new Date(Date.now()+330*60000); const p=(n)=>String(n).padStart(2,'0'); return p(d.getUTCDate())+'-'+p(d.getUTCMonth()+1)+'-'+d.getUTCFullYear()+' '+p(d.getUTCHours())+':'+p(d.getUTCMinutes()); }
   document.addEventListener('submit', async (ev) => {
     const f = ev.target;
     if (!f || !(f.getAttribute('action') || '').endsWith('settings/save')) return;
     ev.preventDefault();
     const btn = f.querySelector('button[type=submit]');
-    const note = f.querySelector('.savenote') || f.appendChild(Object.assign(document.createElement('p'), { className: 'savenote hint' }));
+    let note = f.querySelector('.savenote');
+    if (!note) { note = Object.assign(document.createElement('span'), { className: 'savenote hint' }); note.style.marginLeft = '.8rem'; if (btn) btn.insertAdjacentElement('afterend', note); else f.appendChild(note); }
+    note.style.color = '';
     if (btn) btn.disabled = true;
     note.textContent = 'Saving…';
     try {
@@ -591,7 +595,12 @@ ${NAV_CSS}
       }
       if (r.status === 503) { note.textContent = '🟡 The app could not reach its database just now. Nothing was saved, your entries are still here: press Save again.'; return; }
       if (!r.ok) { note.textContent = '🟡 Save failed (' + r.status + '). Your entries are still here: press Save again.'; return; }
-      location.href = r.url;
+      const err = new URL(r.url, location.href).searchParams.get('error');
+      if (err) { note.textContent = '🔴 Not saved: ' + err; note.style.color = '#ff9a9a'; return; }
+      note.textContent = '🟢 Saved ' + istNow() + ' IST';
+      note.style.color = '#5bd08a';
+      // A saved secret is not shown again: clear what was typed and mark it set.
+      f.querySelectorAll('input[type=password]').forEach((i) => { if (i.value) { i.value = ''; i.placeholder = '•••• (set: blank keeps current)'; } });
     } catch (err) {
       note.textContent = '🟡 Could not reach the app (' + err.message + '). Your entries are still here: press Save again.';
     } finally {

@@ -64,12 +64,15 @@ describe('buildSaveOps', () => {
   });
 
   it('sets module true/false and deletes on default', () => {
-    const ops = buildSaveOps('content-engine', {
-      settings: {},
-      modules: { vidapulseRefill: 'false', delivery: 'default' },
-    });
-    expect(ops.sets).toContainEqual({ key: 'module.content-engine.vidapulseRefill', value: 'false' });
-    expect(ops.dels).toContain('module.content-engine.delivery');
+    const off = buildSaveOps('content-engine', { settings: {}, modules: { delivery: 'false' } });
+    expect(off.sets).toContainEqual({ key: 'module.content-engine.delivery', value: 'false' });
+    const def = buildSaveOps('content-engine', { settings: {}, modules: { delivery: 'default' } });
+    expect(def.dels).toContain('module.content-engine.delivery');
+  });
+
+  it('no longer offers the VidaPulse refill toggle (funnels refill through the router)', () => {
+    const ops = buildSaveOps('content-engine', { settings: {}, modules: { vidapulseRefill: 'true' } });
+    expect(ops.sets).not.toContainEqual({ key: 'module.content-engine.vidapulseRefill', value: 'true' });
   });
 
   it('ignores unknown apps with an error', () => {

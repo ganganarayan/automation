@@ -1,27 +1,17 @@
 /**
  * Module: VidaPulse content refill.
  *
- * Purpose:      Schedule the 09:00 IST refill watchdog and expose a manual run.
- * Responsibility: lifecycle + route; logic in refillService.
- * Dependencies: node-cron, refillService, admin auth.
+ * Purpose:      A manual run of the VidaPulse refill watchdog. The 09:00 IST
+ *               schedule is retired: funnels refill their own sheets through
+ *               the daily router (Lane 3), and the Settings toggle is gone.
+ * Responsibility: route only; logic in refillService.
+ * Dependencies: refillService, admin auth.
  */
-import cron from 'node-cron';
 import * as refill from '../services/refillService.js';
-import * as tenantSettings from '../core/tenantSettings.js';
 import { requireAdminKey } from '../middleware/auth.js';
-import { ZONE } from '../utils/time.js';
 
 export function register(ctx) {
   const { router, log } = ctx;
-
-  cron.schedule(
-    '0 9 * * *',
-    async () => {
-      if (!(await tenantSettings.moduleEnabled('default', 'vidapulseRefill'))) return;
-      refill.run({ tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'refill cron failed'));
-    },
-    { timezone: ZONE },
-  );
 
   // Manual trigger for operators.
   router.post('/jobs/refill', requireAdminKey, async (req, res, next) => {
@@ -33,7 +23,7 @@ export function register(ctx) {
     }
   });
 
-  log.info('vidapulse refill scheduled 09:00 ' + ZONE);
+  log.info('vidapulse refill: manual run only (POST /jobs/refill)');
 }
 
 export default { register };
