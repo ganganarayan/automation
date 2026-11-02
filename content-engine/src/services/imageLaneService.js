@@ -42,6 +42,7 @@ import { costImages } from '../utils/pricing.js';
 import { formatIst } from '../utils/time.js';
 import {
   IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, LINKS_COL, SOURCE_COL, SHEET_STATUS,
+  CELL_NEWLINE, postedLinks,
   readyRows, pickReadyRow, planHeader, colLetter, nextMatchKeys, htmlToText, landingUrls, historyLines,
   instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt, normalizeRefill, rowsForSheet, postAtFor,
 } from '../utils/routerSpec.js';
@@ -307,14 +308,11 @@ export async function onPosted(row, { refs = [], channels = [] } = {}) {
   const ctx = await sheetFor(row);
   if (!ctx) return;
   const ids = (refs.length ? refs : (Array.isArray(row.post_refs) ? row.post_refs : [])).filter(Boolean);
-  const links = (Array.isArray(channels) ? channels : [])
-    .filter((c) => c && c.state === 'ok' && c.url)
-    .map((c) => String(c.url).trim());
-  const unique = [...new Set(links)];
+  const links = postedLinks(channels);
   await poster.markSheetRow(ctx.providers.sheets, ctx.f.sheetId, ctx.tab, {
     matchColName: ctx.sheet.matchColName, matchKey: ctx.sheet.key, rowNumber: ctx.sheet.rowNumber,
     status: SHEET_STATUS.posted,
-    extra: { [PFM_COL]: ids.join(', '), ...(unique.length ? { [LINKS_COL]: unique.join('\n') } : {}) },
+    extra: { [PFM_COL]: ids.join(', '), ...(links.length ? { [LINKS_COL]: links.join(CELL_NEWLINE) } : {}) },
   }, baseLog);
 }
 

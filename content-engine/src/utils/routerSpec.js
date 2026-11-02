@@ -30,6 +30,9 @@ export const REFILL_COUNT = 7;
 export const PFM_COL = 'pfm_post_id';
 /** The live post links, one per line in the cell, written when the post goes live. */
 export const LINKS_COL = 'posted links';
+/** Columns only an appended "already posted" row needs (the video lanes). */
+export const TITLE_COL = 'title';
+export const POSTED_AT_COL = 'posted at';
 export const SOURCE_COL = 'source';
 export const AUTO_SOURCE = 'Auto';
 
@@ -110,6 +113,60 @@ export function planHeader(rawHeader = [], needed = []) {
 /** The 0-based index of a header cell by name (case-insensitive), or -1. */
 export function colIndex(rawHeader = [], name) {
   return rawHeader.findIndex((h) => norm(h) === norm(name));
+}
+
+/** Links sit one per line inside a single cell. */
+export const CELL_NEWLINE = String.fromCharCode(10);
+
+/** The live links of the channels that posted, in order, de-duped. */
+export function postedLinks(channels = []) {
+  const list = (Array.isArray(channels) ? channels : [])
+    .filter((c) => c && c.state === 'ok' && c.url)
+    .map((c) => String(c.url).trim());
+  return [...new Set(list)];
+}
+
+/**
+ * Plan the "already posted" row for a post with no row of its own (the video
+ * lanes): which headers to create, the cells to write, and whether this post
+ * already has a row.
+ *
+ * Returns { added, header, values, rowNumber }. rowNumber > 0 means the post
+ * is already on the sheet (a partial that later posted in full): fill that row
+ * in with `cells` instead of appending `values`, so no row is written twice.
+ */
+export function postedRowPlan(rows = [], { title = '', postedAt = '', postRefs = [], links = [] } = {}) {
+  const header0 = (Array.isArray(rows) && rows[0]) || [];
+  const refs = (Array.isArray(postRefs) ? postRefs : []).filter(Boolean);
+  const list = (Array.isArray(links) ? links : []).filter(Boolean);
+  const cells = {
+    status: SHEET_STATUS.posted,
+    [POSTED_AT_COL]: postedAt,
+    ...(list.length ? { [LINKS_COL]: list.join(CELL_NEWLINE) } : {}),
+  };
+  if (!header0.length) return { added: [], header: [], values: [], rowNumber: 0, cells };
+  // Already here? Match on the Post for Me id, the one stable handle a row has.
+  const pfmIdx = colIndex(header0, PFM_COL);
+  const found = pfmIdx === -1 || !refs.length
+    ? -1
+    : rows.findIndex((r, i) => i > 0 && refs.some((ref) => String((r || [])[pfmIdx] ?? '').includes(ref)));
+  if (found > 0) return { added: [], header: header0, values: [], rowNumber: found + 1, cells };
+
+  const plan = planHeader(header0, ['status', TITLE_COL, POSTED_AT_COL, PFM_COL, ...(list.length ? [LINKS_COL] : [])]);
+  const values = new Array(plan.header.length).fill('');
+  const put = (name, value) => {
+    const ci = colIndex(plan.header, name);
+    if (ci !== -1) values[ci] = String(value ?? '');
+  };
+  // Continue the key column's numbering, so no image row can ever match this one.
+  const key = extractRow(header0, []).matchColName;
+  if (key) put(key, nextMatchKeys(rows, 1)[0] || '');
+  put('status', SHEET_STATUS.posted);
+  put(TITLE_COL, title);
+  put(POSTED_AT_COL, postedAt);
+  put(PFM_COL, refs.join(', '));
+  if (list.length) put(LINKS_COL, list.join(CELL_NEWLINE));
+  return { added: plan.added, header: plan.header, values, rowNumber: 0, cells };
 }
 
 /** The match key the router stores on an instance for a sheet row. */
@@ -588,7 +645,8 @@ export function nudgeNeeded(funnelsState = []) {
 export const NUDGE_TEXT = 'Video lanes are empty. Upload ready videos or top up the video APIs so I can create videos and auto-post.';
 
 export default {
-  LANES, IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, LINKS_COL, SOURCE_COL, AUTO_SOURCE, SHEET_STATUS,
+  LANES, IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, LINKS_COL, TITLE_COL, POSTED_AT_COL, SOURCE_COL, AUTO_SOURCE, SHEET_STATUS,
+  CELL_NEWLINE, postedLinks, postedRowPlan,
   routerTarget, runsOn, laneForInstance, existingReason, routerClash, postAtFor, colLetter, planHeader, colIndex, rowKey,
   readyRows, pickReadyRow, nextMatchKeys, htmlToText, landingUrls, landingLine, historyLines, instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt,
   normalizeRefill, rowsForSheet,

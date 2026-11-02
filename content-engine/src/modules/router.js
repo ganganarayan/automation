@@ -26,9 +26,10 @@
  *                 /api/v1/admin/credit/clear {key}, "I topped up".
  *               - Wire the lanes: approve / rework handlers for the image and
  *                 ready-video approval emails, the post check's "went live"
- *                 hook that marks the sheet row Posted, and the stage runner's
+ *                 hook that marks the sheet row Posted (and appends one for
+ *                 the video lanes), and the stage runner's
  *                 failure hook that drops a failed AI video to the image lane.
- * Dependencies: routerService, imageLaneService, readyLaneService,
+ * Dependencies: routerService, imageLaneService, postedLogService, readyLaneService,
  *               aiLaneService, creditService, stageRunnerService,
  *               approvalService, readyPostService, wakeScheduleService,
  *               accessService, funnelsRepository, settings, node-cron, auth middleware.
@@ -38,6 +39,7 @@ import * as routerService from '../services/routerService.js';
 import * as wakeSchedule from '../services/wakeScheduleService.js';
 import { settings } from '../settings/index.js';
 import * as imageLane from '../services/imageLaneService.js';
+import * as postedLog from '../services/postedLogService.js';
 import * as readyLane from '../services/readyLaneService.js';
 import * as aiLane from '../services/aiLaneService.js';
 import * as credit from '../services/creditService.js';
@@ -60,7 +62,10 @@ export function register(ctx) {
     onApprove: (a) => readyLane.approve(a),
     onRework: (a) => readyLane.rework(a),
   });
+  // Went live: the image lane marks its own sheet row; every other lane gets
+  // one appended to the funnel's sheet, so all posts log their links there.
   readyPost.onPosted((row, info) => imageLane.onPosted(row, info));
+  readyPost.onPosted((row, info) => postedLog.onPosted(row, info));
   stageRunner.onStageFailed((id, step, err) => aiLane.onStageFailed(id, step, err));
   const yes = (v) => ['1', 'true', 'yes'].includes(String(v || '').toLowerCase());
 

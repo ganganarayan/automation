@@ -41,6 +41,7 @@ import { LIBRARY_LABELS, libraryStatus, rowStatus, latestAt } from '../utils/lib
 import { formatIst } from '../utils/time.js';
 import { defaultSlotsIso, parseDriveFolderId, parsePickedFiles } from '../utils/readyPostSpec.js';
 import { driveThumbUrl } from '../utils/reviewSpec.js';
+import { postedLinks } from '../utils/routerSpec.js';
 import { keyOk, currentSession } from '../services/accessService.js';
 
 const MANUAL_JOB = 'manual_stage';
@@ -844,12 +845,12 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
   const chanList = chans.length ? `<div class="chans">${chans.map((c) => esc(channelText(c))).join('<br>')}</div>` : '';
   // The live links of the channels that posted, one per line so they copy out
   // in one go (the image lane writes the same list to its sheet row).
-  const postedLinks = [...new Set(chans.filter((c) => c.state === 'ok' && c.url).map((c) => String(c.url).trim()))];
+  const liveLinks = postedLinks(chans);
   const noLink = chans.filter((c) => c.state === 'ok' && !c.url).length;
-  const linkBox = postedLinks.length
-    ? `<div class="links"><textarea id="plinks" readonly rows="${postedLinks.length}">${esc(postedLinks.join('\n'))}</textarea>
+  const linkBox = liveLinks.length
+    ? `<div class="links"><textarea id="plinks" readonly rows="${liveLinks.length}">${esc(liveLinks.join('\n'))}</textarea>
         <div><button class="act primary" onclick="copyLinks()">\u29c9 Copy all</button> <span class="hint" id="lkmsg"></span></div>
-        <div class="hint">${postedLinks.map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a>`).join('<br>')}</div>
+        <div class="hint">${liveLinks.map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a>`).join('<br>')}</div>
         ${noLink ? `<div class="hint">\ud83d\udfe1 ${noLink} channel(s) posted but gave back no link.</div>` : ''}</div>`
     : '';
   const retryBtn = chans.some((c) => c.state === 'failed') ? '<button class="act primary" onclick="retryFailed()">↻ Post to the failed channels only</button>' : '';
@@ -871,7 +872,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     : failed
       ? `<div class="schedbar bad">🔴 Post for Me reported this post failed on every channel. Reconnect the accounts in Post for Me, then ${retryBtn || 'post again'}, or ✏ Edit it first.${autoNote} <button class="act" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span>${chanList}</div>`
       : single && single.status === 'posted' && chans.length
-      ? `<div class="schedbar">🟢 Posted${single.posted_at ? ` on <b>${esc(formatIst(single.posted_at))} IST</b>` : ''}.${postedLinks.length ? ' The links are below, one per line.' : ''}${chanList}${linkBox}</div>`
+      ? `<div class="schedbar">🟢 Posted${single.posted_at ? ` on <b>${esc(formatIst(single.posted_at))} IST</b>` : ''}.${liveLinks.length ? ' The links are below, one per line.' : ''}${chanList}${linkBox}</div>`
       : '';
   const head = single
     ? `<div class="top">

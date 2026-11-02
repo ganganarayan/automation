@@ -36,7 +36,7 @@ import { publishAtIst } from '../utils/scheduling.js';
 import { targetPostAt, postDateKey } from '../utils/videoSchedule.js';
 import { videoOnDate } from '../repositories/instanceRepository.js';
 import { request } from '../core/httpClient.js';
-import { planHeader, colIndex, colLetter } from '../utils/routerSpec.js';
+import { planHeader, colIndex, colLetter, postedRowPlan } from '../utils/routerSpec.js';
 import { childLogger } from '../core/logger.js';
 import { settings } from '../settings/index.js';
 import { fitImage } from '../providers/imageFit.js';
@@ -282,6 +282,34 @@ export async function markSheetRow(sheets, sheetId, tab, { matchColName = null, 
     return true;
   } catch (err) {
     log.warn({ err: err.message }, `failed to mark sheet row${status ? ` ${status}` : ''}`);
+    return false;
+  }
+}
+
+/**
+ * Append one "already posted" row to a funnel's sheet, for a post that never
+ * had a row of its own: the video lanes draw from Drive and from the AI
+ * pipeline, not from the sheet. The row carries Posted, a continued key, the
+ * title, the posted time (IST) and the live links, one per line in the cell.
+ * Missing columns are created at the end of row 1, and a row this post already
+ * has is filled in rather than written twice (routerSpec.postedRowPlan).
+ * Best-effort: returns false (and logs) instead of throwing, so a sheet
+ * problem never fails a post that is already live.
+ */
+export async function appendPostedRow(sheets, sheetId, tab, fields = {}, log) {
+  try {
+    const rows = await sheets.readTab(sheetId, tab, { fresh: true });
+    const plan = postedRowPlan(rows, fields);
+    if (!plan.header.length) return false; // no header row: not a content sheet
+    if (plan.rowNumber) {
+      const { status, ...extra } = plan.cells;
+      return markSheetRow(sheets, sheetId, tab, { matchKey: `row:${plan.rowNumber}`, status, extra }, log);
+    }
+    for (const a of plan.added) await sheets.updateCells(sheetId, `${tab}!${colLetter(a.index)}1`, [[a.name]]);
+    await sheets.appendRow(sheetId, tab, plan.values);
+    return true;
+  } catch (err) {
+    log.warn({ err: err.message }, 'failed to append the posted row');
     return false;
   }
 }
