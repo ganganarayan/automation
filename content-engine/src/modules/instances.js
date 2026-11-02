@@ -862,7 +862,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     : postFailed
     ? `<div class="schedbar bad">🔴 ${single.post_status === 'posting' ? 'Posting did not finish (the server restarted?).' : `The post did not go out: ${esc(single.note || 'unknown error')}`} Nothing was scheduled. Fix it, then press Schedule or Post now again.</div>`
     : partial
-    ? `<div class="schedbar bad">🟡 Partly posted. Reconnect the ❌ accounts in Post for Me, then re-post to just those (the ✅ ones are not posted again).${autoNote} ${retryBtn} <span class="hint" id="edmsg"></span>${chanList}</div>`
+    ? `<div class="schedbar bad">🟡 Partly posted. Reconnect the ❌ accounts in Post for Me, then re-post to just those (the ✅ ones are not posted again).${autoNote} ${retryBtn} <span class="hint" id="edmsg"></span>${chanList}${linkBox}</div>`
     : scheduled && chans.some((c) => c.state === 'ok')
       ? `<div class="schedbar">⏳ Re-posting to the failed channels… ${chanList}</div>`
       : scheduled
