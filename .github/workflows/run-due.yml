@@ -1,37 +1,29 @@
-name: Wake content-engine and run due funnels
+name: Run the legacy posters by hand
 
-# Free external scheduler (GitHub Actions runs on UTC). It pings the
-# content-engine run-due endpoints ~just before the daily generate window, so the
-# Railway service can sleep the rest of the day (SCHEDULER_MODE=external).
+# MANUAL ONLY. There is no schedule here on purpose: the daily router owns all
+# three posting lanes now (ready video → AI video → image), and it is woken by
+# .github/workflows/wake.yml. Putting a cron back on this workflow would make
+# the legacy image poster and the video scheduler create a second post for the
+# same funnel and day, so leave it on workflow_dispatch.
 #
-# Two waker endpoints (each admin-guarded, idempotent, 202 + async):
+# Kept as an escape hatch for the two older entry points, each admin-guarded,
+# idempotent and 202 + async:
 #   /api/v1/jobs/run-due        -> legacy image poster (funnel-posters module)
-#   /api/v1/jobs/run-due-video  -> video pipeline (creates one instance per due
-#                                  funnel at script_review, scheduled for its
-#                                  next publish time). Slice 3 of the video build.
+#   /api/v1/jobs/run-due-video  -> video pipeline (one instance per due funnel
+#                                  at script_review)
+# The LinkedIn → WhatsApp relay used to be pinged here; it now runs on its own
+# times in wake.yml (Setup → Settings → Daily schedule (IST)).
 #
-# Set two repo secrets (Settings -> Secrets and variables -> Actions):
+# Repo secrets (Settings -> Secrets and variables -> Actions):
 #   CONTENT_ENGINE_URL  e.g. https://automation-staging.up.railway.app   (no trailing slash)
 #   RUN_DUE_KEY         the content-engine ADMIN_KEY (sent as the X-Admin-Key header)
 #
 # A generous ?window means the ping can be early/late and still catch every
-# funnel due around that time; each funnel is generated once per target post date
-# (the endpoints de-dupe), and the video instance targets TOMORROW's publish time
-# when generated the evening before.
+# funnel due around that time; each funnel is generated once per target post
+# date (the endpoints de-dupe).
 
 on:
-  # SCHEDULE DISABLED (user request, 2026-09-09): the daily cron stays commented
-  # out so this workflow does not wake the app or trigger posting/emails on its
-  # own. Re-enable by uncommenting the `schedule:` block below; the workflow can
-  # still be run by hand from the Actions tab via workflow_dispatch meanwhile.
-  #
-  # schedule:
-  #   # Fire ~10 min before each funnel's generate time (GitHub Actions cron is
-  #   # UTC). The endpoints run only funnels due within ±window min, then the app
-  #   # sleeps again. Add/adjust a line per distinct generate time. Example:
-  #   - cron: '20 16 * * *'      # 21:50 IST daily    -> funnels generating 22:00
-  #   - cron: '50 15 * * 1,2,3'  # 21:20 IST Mon-Wed  -> funnels generating 21:30
-  workflow_dispatch: {}        # lets you run it manually from the Actions tab
+  workflow_dispatch: {}        # run it from the Actions tab when you need it
 
 jobs:
   run-due:
@@ -46,20 +38,9 @@ jobs:
             -w '\nHTTP %{http_code}\n'
 
       # Legacy image poster (kept until the video pipeline fully replaces it).
-      # Remove this step once a funnel should only produce video, not image posts.
       - name: Trigger run-due (legacy image poster)
         run: |
           curl -fsS -X POST \
             "${{ secrets.CONTENT_ENGINE_URL }}/api/v1/jobs/run-due?window=15" \
-            -H "X-Admin-Key: ${{ secrets.RUN_DUE_KEY }}" \
-            -w '\nHTTP %{http_code}\n'
-
-      # LinkedIn -> WhatsApp relay: poll Gmail for new LinkedIn notifications and
-      # relay them to WhatsApp. Safe to run often; add a frequent cron line above
-      # (e.g. '*/15 * * * *') if you want near-real-time relays while asleep.
-      - name: Trigger poll-linkedin
-        run: |
-          curl -fsS -X POST \
-            "${{ secrets.CONTENT_ENGINE_URL }}/api/v1/jobs/poll-linkedin" \
             -H "X-Admin-Key: ${{ secrets.RUN_DUE_KEY }}" \
             -w '\nHTTP %{http_code}\n'

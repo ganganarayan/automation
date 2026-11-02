@@ -30,6 +30,7 @@ The app is asleep by default. These things wake it with an incoming HTTP request
 | GitHub Actions cron | **16:00** | Router check for tomorrow, per funnel. |
 | GitHub Actions cron | **10:00** | Nudge check, after the day's posts are live. |
 | GitHub Actions cron | ~08:20 | Backup post check, in case a Post for Me webhook was missed. |
+| GitHub Actions cron | **09:30, 21:30** | LinkedIn → WhatsApp relay. |
 | Post for Me webhook | when a post finishes | Marks each channel ✅/❌ and sends the **go-live email**. |
 | Your approval link in an email | when you click it | Approves the item and continues the job. |
 | GitHub ffmpeg callback | when an assembly finishes | Continues the AI-video or Clean job. |
@@ -38,7 +39,7 @@ The app is asleep by default. These things wake it with an incoming HTTP request
 
 ⚠ **To verify before building:** Railway's current sleep rule. As far as I know it sleeps a service after about 10 minutes with no outbound traffic, and an active outbound heartbeat keeps it up. Confirm on Railway's docs/settings; don't assume.
 
-**The times are editable** in Setup → Settings → **Daily schedule (IST)**: the daily check (default 16:00), the morning nudge (10:00) and the backup post checks (08:20, 20:20). Saving a changed time, or pressing **Sync wake-up times**, writes them to the GitHub repository variable WAKE_SCHEDULE. One workflow, .github/workflows/wake.yml, runs every 15 minutes and pings each job whose time fell in the last 30 minutes, so a time fires about 15–30 minutes after it is set. A job may be pinged twice in that window; router_days and the one-at-a-time post check make that harmless. On an always-on host (SCHEDULER_MODE=internal) an in-process 15-minute cron runs the daily check from the same settings.
+**The times are editable** in Setup → Settings → **Daily schedule (IST)**: the daily check (default 16:00), the morning nudge (10:00), the backup post checks (08:20, 20:20) and the LinkedIn → WhatsApp relay runs (09:30, 21:30). Saving a changed time, or pressing **Sync wake-up times**, writes them to the GitHub repository variable WAKE_SCHEDULE. One workflow, .github/workflows/wake.yml, runs every 15 minutes and pings each job whose time fell in the last 30 minutes, so a time fires about 15–30 minutes after it is set. A job may be pinged twice in that window; router_days and the one-at-a-time post check make that harmless. On an always-on host (SCHEDULER_MODE=internal) an in-process 15-minute cron runs the daily check from the same settings.
 
 GitHub cron can start 5 to 30 minutes late. That's acceptable for 16:00 and 10:00. The go-live email relies on the Post for Me webhook, not the cron.
 
@@ -84,6 +85,8 @@ GitHub cron can start 5 to 30 minutes late. That's acceptable for 16:00 and 10:0
 4. It posts to all channels of the funnel at 08:02, or at once if approved late. The row becomes **Posted** and its **Post for Me ID** is written in.
 
 ## Go-live email (the bug found 01-11-2026)
+
+🟢 **Resolved 02-11-2026:** wake.yml carries the schedule, and it is the only schedule the app needs. run-due.yml is manual-only on purpose: the router owns all three lanes, so a cron there would post a second item for the same funnel and day. The relay moved to wake.yml too, so no job is left waiting for a hand.
 
 🔴 **Cause:** production has SCHEDULER_MODE=external, and the GitHub wake-up schedule has been disabled since 09-09-2026. So the post check only ran when you opened the Instances page. Post for Me published fine, but the app never looked.
 

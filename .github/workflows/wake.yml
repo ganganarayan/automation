@@ -3,7 +3,7 @@ name: Wake content-engine for its daily jobs
 # The app sleeps on Railway. Every 15 minutes this run reads the wake-up times
 # from the repository variable WAKE_SCHEDULE (written by the app's
 # Setup → Settings → Daily schedule (IST) → Sync wake-up times), e.g.
-#   {"router":["16:00"],"nudge":["10:00"],"posts":["08:20","20:20"]}
+#   {"router":["16:00"],"nudge":["10:00"],"posts":["08:20","20:20"],"relay":["09:30","21:30"]}
 # and pings each job whose time fell within the last 6 hours (IST). GitHub often
 # runs this "every 15 minutes" schedule only every 3-6 hours, so a short window
 # missed every time; the wide window catches up on the first run after the
@@ -14,6 +14,10 @@ name: Wake content-engine for its daily jobs
 #            ✅/❌ and the go-live email are recorded once)
 #   nudge  → /api/v1/jobs/nudge         (one email a day at most; the app
 #            runs each tenant's slot once, wake_ran_nudge)
+#   relay  → /api/v1/jobs/poll-linkedin (LinkedIn notification mail relayed to
+#            WhatsApp; the app runs each tenant's slot once, wake_ran_relay)
+# This workflow is the only schedule the app needs: the daily router owns all
+# three posting lanes, so run-due.yml stays a manual escape hatch.
 # Empty or unreadable variable → the defaults above.
 #
 # Repo secrets (Settings -> Secrets and variables -> Actions):
@@ -31,7 +35,7 @@ on:
         required: false
         default: ''
         type: choice
-        options: ['', 'router', 'posts', 'nudge']
+        options: ['', 'router', 'posts', 'nudge', 'relay']
       retry:
         description: "router only: re-decide days recorded as 'none' (1 = yes)"
         required: false
@@ -58,7 +62,7 @@ jobs:
             exit 0
           fi
           if [ "$RETRY" = "1" ]; then RETRY=1; else RETRY=0; fi
-          DEFAULT='{"router":["16:00"],"nudge":["10:00"],"posts":["08:20","20:20"]}'
+          DEFAULT='{"router":["16:00"],"nudge":["10:00"],"posts":["08:20","20:20"],"relay":["09:30","21:30"]}'
           if [ -z "$SCHED" ] || ! printf '%s' "$SCHED" | jq -e 'type == "object"' >/dev/null 2>&1; then
             echo "WAKE_SCHEDULE is empty or unreadable; using the defaults."
             SCHED="$DEFAULT"
@@ -91,7 +95,7 @@ jobs:
           }
 
           failed=0
-          for job in router posts nudge; do
+          for job in router posts nudge relay; do
             echo "$job: $(times "$job" | paste -sd, -)"
             if [ -n "$FORCE" ]; then
               [ "$FORCE" = "$job" ] || continue
@@ -106,6 +110,9 @@ jobs:
               posts) path="/api/v1/jobs/check-posts" ;;
               nudge)
                 path="/api/v1/jobs/nudge"
+                if [ -n "$FORCE" ]; then path="$path?all=1"; fi ;;
+              relay)
+                path="/api/v1/jobs/poll-linkedin"
                 if [ -n "$FORCE" ]; then path="$path?all=1"; fi ;;
             esac
             ping "$path" || failed=1

@@ -25,15 +25,21 @@ describe('parseTime / parseTimeList', () => {
 
 describe('buildWakeSchedule', () => {
   it('uses the defaults when nothing is set', () => {
-    expect(buildWakeSchedule([])).toEqual({ router: ['16:00'], nudge: ['10:00'], posts: ['08:20', '20:20'] });
-    expect(tenantTimes({ router_check_time: '', post_check_times: ' ' })).toEqual({ router: ['16:00'], nudge: ['10:00'], posts: ['08:20', '20:20'] });
+    const defaults = { router: ['16:00'], nudge: ['10:00'], posts: ['08:20', '20:20'], relay: ['09:30', '21:30'] };
+    expect(buildWakeSchedule([])).toEqual(defaults);
+    expect(tenantTimes({ router_check_time: '', post_check_times: ' ', relay_times: '' })).toEqual(defaults);
   });
   it('is the union across tenants', () => {
     const s = buildWakeSchedule([
-      { router_check_time: '15:30', post_check_times: '08:20' },
+      { router_check_time: '15:30', post_check_times: '08:20', relay_times: '07:00' },
       { nudge_time: '09:45', post_check_times: '21:00, 08:20' },
     ]);
-    expect(s).toEqual({ router: ['15:30', '16:00'], nudge: ['09:45', '10:00'], posts: ['08:20', '21:00'] });
+    expect(s).toEqual({
+      router: ['15:30', '16:00'],
+      nudge: ['09:45', '10:00'],
+      posts: ['08:20', '21:00'],
+      relay: ['07:00', '09:30', '21:30'],
+    });
   });
 });
 

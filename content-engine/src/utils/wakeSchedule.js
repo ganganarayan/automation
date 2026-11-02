@@ -11,7 +11,8 @@
  *                 them to validate on save).
  *               - tenantTimes: one tenant's times, defaults for blanks.
  *               - buildWakeSchedule: the union across tenants,
- *                 {"router":["16:00"],"nudge":["10:00"],"posts":["08:20","20:20"]}.
+ *                 {"router":["16:00"],"nudge":["10:00"],"posts":["08:20","20:20"],
+ *                  "relay":["09:30","21:30"]}.
  *               - isDue / anyDue: a time within the last windowMin minutes (IST),
  *                 across midnight too.
  *               - dueSlot: the latest such time as a slot key ("2026-11-02 16:00"),
@@ -36,6 +37,7 @@ export const WAKE_DEFAULTS = {
   router_check_time: '16:00',
   nudge_time: '10:00',
   post_check_times: '08:20, 20:20',
+  relay_times: '09:30, 21:30',
 };
 export const WAKE_KEYS = Object.keys(WAKE_DEFAULTS);
 export const SYNC_KEY = 'wake_schedule_synced';
@@ -68,18 +70,22 @@ export function parseTimeList(s) {
 /** One tenant's job times from its config map. Blank or unreadable → the default. */
 export function tenantTimes(cfg = {}) {
   const one = (key) => parseTime(cfg[key]) || WAKE_DEFAULTS[key];
-  const list = parseTimeList(cfg.post_check_times).times;
+  const list = (key) => {
+    const times = parseTimeList(cfg[key]).times;
+    return times.length ? times : parseTimeList(WAKE_DEFAULTS[key]).times;
+  };
   return {
     router: [one('router_check_time')],
     nudge: [one('nudge_time')],
-    posts: list.length ? list : parseTimeList(WAKE_DEFAULTS.post_check_times).times,
+    posts: list('post_check_times'),
+    relay: list('relay_times'),
   };
 }
 
 /** The union across tenants. No tenants → the defaults. */
 export function buildWakeSchedule(configs = []) {
   const list = configs.length ? configs : [{}];
-  const out = { router: new Set(), nudge: new Set(), posts: new Set() };
+  const out = { router: new Set(), nudge: new Set(), posts: new Set(), relay: new Set() };
   for (const cfg of list) {
     const t = tenantTimes(cfg);
     for (const job of Object.keys(out)) t[job].forEach((x) => out[job].add(x));

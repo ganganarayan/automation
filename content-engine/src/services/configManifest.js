@@ -181,6 +181,7 @@ export const CONFIG_MANIFEST = {
           { key: 'router_check_time', label: "Daily check: picks tomorrow's post and sends approvals", type: 'time', default: '16:00' },
           { key: 'nudge_time', label: 'Morning nudge if the video lanes are empty', type: 'time', default: '10:00' },
           { key: 'post_check_times', label: 'Backup checks that posts went live', type: 'time_list', default: '08:20, 20:20', placeholder: '08:20, 20:20', help: 'HH:MM, 24-hour, comma-separated.' },
+          { key: 'relay_times', label: 'LinkedIn → WhatsApp relay runs', type: 'time_list', default: '09:30, 21:30', placeholder: '09:30, 21:30', help: 'HH:MM, 24-hour, comma-separated. Each run wakes the app, so a handful of times a day keeps it cheap.' },
           { key: 'wake_schedule_sync', label: 'GitHub wake-up times', type: 'wake_sync' },
         ],
       },

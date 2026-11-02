@@ -8,8 +8,9 @@
  * Responsibility:
  *               - schedule: the union of every tenant's times.
  *               - dueTenants: tenants whose time for a job is due now and whose
- *                 slot has not run yet (router-check and nudge run only those
- *                 on a plain wake ping); marks the slot as run.
+ *                 slot has not run yet (router-check, nudge and the LinkedIn
+ *                 relay run only those on a plain wake ping); marks the slot
+ *                 as run.
  *               - sync: write WAKE_SCHEDULE with the default tenant's GitHub
  *                 token + repo (the ones set for Video clean), and store the
  *                 outcome under wake_schedule_synced on the default tenant.
@@ -29,7 +30,7 @@ import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'wake-schedule' });
 
-const RAN_KEYS = ['router', 'nudge'].map(ranKey);
+const RAN_KEYS = ['router', 'nudge', 'relay'].map(ranKey);
 
 /** Every tenant's config map (the wake keys and last-run slots), with its id. */
 async function tenantConfigs() {
@@ -49,7 +50,7 @@ export async function schedule() {
 
 /**
  * Tenant ids whose time for `job` (router = router_check_time, nudge =
- * nudge_time) fell within the catch-up window (IST, plus cold-start slack)
+ * nudge_time, relay = relay_times) fell within the catch-up window (IST, plus cold-start slack)
  * and whose slot has not run yet. Each returned tenant's slot is marked as
  * run (wake_ran_<job>), so a later ping in the same window skips it.
  */
