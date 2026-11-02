@@ -564,6 +564,20 @@ export function rerunAction(row = null) {
   return 'supersede';
 }
 
+/**
+ * Scheduling a post by hand for a day the router already filled: does the
+ * router's pick clash with it? null when not (no pick, the same instance or
+ * video, or the pick failed / was replaced); else { canReplace }, false when
+ * the pick is already approved or scheduled with Post for Me.
+ */
+export function routerClash(day, held, { instanceId = null, driveId = '' } = {}) {
+  if (!day || !day.instance_id || day.lane === 'none') return null;
+  if (instanceId && String(day.instance_id) === String(instanceId)) return null;
+  if (!held || ['failed', 'superseded'].includes(held.status)) return null;
+  if (driveId && held.source_ref && String(held.source_ref) === String(driveId)) return null;
+  return { canReplace: rerunAction(held) !== 'keep' };
+}
+
 /** The 10:00 nudge goes out when some funnel has neither video lane for tomorrow. */
 export function nudgeNeeded(funnelsState = []) {
   return (funnelsState || []).some((f) => !f.readyVideo && !f.aiVideo);
@@ -573,7 +587,7 @@ export const NUDGE_TEXT = 'Video lanes are empty. Upload ready videos or top up 
 
 export default {
   LANES, IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, SOURCE_COL, AUTO_SOURCE, SHEET_STATUS,
-  routerTarget, runsOn, laneForInstance, existingReason, postAtFor, colLetter, planHeader, colIndex, rowKey,
+  routerTarget, runsOn, laneForInstance, existingReason, routerClash, postAtFor, colLetter, planHeader, colIndex, rowKey,
   readyRows, pickReadyRow, nextMatchKeys, htmlToText, landingUrls, landingLine, historyLines, instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt,
   normalizeRefill, rowsForSheet,
   VIDEO_REVIEW, pickOldestVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, VIDEO_PROVIDERS, providerOrder,

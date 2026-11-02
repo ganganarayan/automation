@@ -103,9 +103,12 @@ export function register(ctx) {
       if (!funnelId) return res.status(400).json({ ok: false, error: 'funnelId required' });
       const accessToken = String(req.body?.accessToken || '');
       // Handed to Post for Me in the background; each instance shows Scheduling / Posting now, then the outcome.
-      const out = await readyPost.startPost({ tenantId: req.tenantId, funnelId, selections, accessToken, accounts: req.body?.accounts });
+      const onClash = String(req.body?.onClash || '');
+      const out = await readyPost.startPost({ tenantId: req.tenantId, funnelId, selections, accessToken, accounts: req.body?.accounts, onClash });
       res.json({ ok: true, started: true, ...out });
     } catch (err) {
+      // The router already filled that day: the page asks replace or both.
+      if (err instanceof readyPost.RouterClash) return res.json({ ok: false, clashes: err.clashes, error: err.message });
       res.status(400).json({ ok: false, error: err.message });
     }
   });
@@ -1162,8 +1165,18 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       document.querySelectorAll('.bar .approve').forEach(b=>{ b.disabled=true; });
       try{
         // The server hands the posts to Post for Me in the background; the Library shows how each one goes.
-        const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId:FUNNEL_ID, selections, accounts: pickedAccounts(), accessToken: await driveToken() })});
-        const j=await r.json();
+        const body={ funnelId:FUNNEL_ID, selections, accounts: pickedAccounts(), accessToken: await driveToken() };
+        const send=async()=>{ const r=await fetch('/api/v1/admin/instances/ready/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); return r.json(); };
+        let j=await send();
+        // The router already lined up a post that day: replace it, or post both.
+        if(!j.ok && j.clashes && j.clashes.length){
+          const lines=j.clashes.map(c=>'- '+c.day+': the router lined up "'+(c.held.title||'a post')+'"'+(c.canReplace?'':' (already scheduled with Post for Me, can only post both)')).join('\\n');
+          const canReplace=j.clashes.every(c=>c.canReplace);
+          if(canReplace && confirm('The router already lined up a post for this funnel on:\\n'+lines+'\\n\\nOK = replace the router post with yours.\\nCancel = more choices.')) body.onClash='replace';
+          else if(confirm('Post both on that day?\\n'+lines+'\\n\\nOK = post both.\\nCancel = do nothing.')) body.onClash='both';
+          else { msg('🟡 Nothing scheduled.'); document.querySelectorAll('.bar .approve').forEach(b=>{ b.disabled=false; }); return; }
+          j=await send();
+        }
         if(!j.ok) throw new Error(j.error||'failed');
         const when=(j.items||[]).map(x=>x.scheduledIso?('📅 '+x.whenIst+' IST'):'⚡ now').join(', ');
         msg('🟢 '+(nowCount===selections.length?'Posting now':'Scheduling')+' ('+when+') on the server. Opening Library…');

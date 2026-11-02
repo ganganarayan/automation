@@ -26,6 +26,9 @@
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as instanceService from '../services/instanceService.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
+import * as routerDays from '../repositories/routerDaysRepository.js';
+import { routerClash, rerunAction } from '../utils/routerSpec.js';
+import { DateTime } from 'luxon';
 import * as sourcesRepo from '../repositories/funnelSourcesRepository.js';
 import { buildProviders } from './providerFactory.js';
 import * as heartbeat from '../core/heartbeat.js';
@@ -1093,7 +1096,47 @@ const postJobs = new Map();
  * instance as posting (with its IST time), then hand the posts to Post for Me in
  * the background so the page can leave straight away. Returns one item a video.
  */
-export async function startPost({ tenantId = 'default', funnelId, selections, accessToken = '', accounts: pickedAccounts = null }) {
+/** The IST post date (yyyy-MM-dd) of a schedule time, or today for Post now. */
+const postDateOf = (iso) => (iso ? DateTime.fromISO(iso) : DateTime.now()).setZone('Asia/Kolkata').toFormat('yyyy-MM-dd');
+
+/**
+ * Thrown by startPost when a hand-scheduled video lands on a day the router
+ * already filled for this funnel; the page asks: replace it, or post both.
+ */
+export class RouterClash extends Error {
+  constructor(clashes) {
+    super('the router already lined up a post for that day');
+    this.clashes = clashes;
+  }
+}
+
+/**
+ * The router's picks that clash with these items (see routerClash), each with
+ * the held instance and its router_days row, for the page to show.
+ */
+async function routerClashes(funnel, items) {
+  const out = [];
+  for (const item of items) {
+    const postDate = postDateOf(item.scheduledIso);
+    const day = await routerDays.get(funnel.id, postDate).catch(() => null);
+    const held = day && day.instance_id ? await instanceRepo.get(day.instance_id).catch(() => null) : null;
+    const c = routerClash(day, held, { instanceId: item.instanceId, driveId: item.driveId });
+    if (c) out.push({ ...c, driveId: item.driveId, name: item.name, postDate, day: formatIst(DateTime.fromISO(postDate, { zone: 'Asia/Kolkata' }), { withTime: false }), held: { id: held.id, title: held.title || '', status: held.status }, dayId: day.id });
+  }
+  return out;
+}
+
+/** Replace the router's pick: release (ready video) or supersede it, and point the day at this post. */
+async function replaceRouterPick(clash, instanceId) {
+  const held = await instanceRepo.get(clash.held.id);
+  const action = rerunAction(held);
+  if (action === 'keep') throw new Error(`${clash.held.title || 'the router post'} for ${clash.day} is already scheduled with Post for Me, so it can't be replaced here`);
+  if (action === 'supersede') await instanceRepo.supersede(held.id, 'replaced by a hand-scheduled post');
+  if (action === 'release') await instanceRepo.releaseSlot(held.id);
+  await routerDays.update(clash.dayId, { lane: 'ready_video', reason: 'replaced by a hand-scheduled post', instanceId });
+}
+
+export async function startPost({ tenantId = 'default', funnelId, selections, accessToken = '', accounts: pickedAccounts = null, onClash = '' }) {
   const { funnel, resolved } = await loadFunnel(funnelId, pickedAccounts);
   const providers = await buildProviders(funnel.tenant_id || tenantId);
   const clean = normalizeSelections(selections);
@@ -1109,9 +1152,17 @@ export async function startPost({ tenantId = 'default', funnelId, selections, ac
     const sel = clean[i];
     const scheduledIso = postTimeIso(sel, slots[i]);
     const { inst } = await ensureInstance({ funnel, driveId: sel.driveId, name: sel.name });
-    await instanceRepo.markPosting(inst.id, { scheduledFor: scheduledIso ? new Date(scheduledIso) : null });
-    postJobs.set(sel.driveId, { state: 'running', instanceId: inst.id, scheduledIso, startedAt: Date.now() });
     items.push({ driveId: sel.driveId, name: sel.name, instanceId: inst.id, scheduledIso, whenIst: scheduledIso ? formatIst(scheduledIso) : '' });
+  }
+  // A day the router already filled: ask first ('replace' or 'both').
+  const clashes = await routerClashes(funnel, items);
+  if (clashes.length && onClash !== 'replace' && onClash !== 'both') throw new RouterClash(clashes);
+  if (onClash === 'replace') {
+    for (const c of clashes) await replaceRouterPick(c, items.find((x) => x.driveId === c.driveId).instanceId);
+  }
+  for (const item of items) {
+    await instanceRepo.markPosting(item.instanceId, { scheduledFor: item.scheduledIso ? new Date(item.scheduledIso) : null });
+    postJobs.set(item.driveId, { state: 'running', instanceId: item.instanceId, scheduledIso: item.scheduledIso, startedAt: Date.now() });
   }
 
   const fail = async (item, why) => {
