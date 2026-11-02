@@ -24,6 +24,15 @@ import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { createJson2VideoProvider } from '../providers/videoProvider.js';
 import { createSmtpMailProvider } from '../providers/mailProvider.js';
 import { createWaGatewayClient } from '../providers/whatsappClient.js';
+import * as tenantConfig from '../repositories/tenantConfigRepository.js';
+
+/** Keep the last email outcome (and the last failure) for Settings, Email health. */
+function mailRecorder(tenantId) {
+  return async (rec) => {
+    await tenantConfig.set(tenantId, 'email_last_send', JSON.stringify(rec));
+    if (!rec.ok) await tenantConfig.set(tenantId, 'email_last_error', JSON.stringify(rec));
+  };
+}
 
 /**
  * Build the provider set for a tenant.
@@ -42,7 +51,7 @@ export async function buildProviders(tenantId = 'default') {
 
     // Tenant-scoped: each tenant sends approval/status email from their own
     // mailbox (SMTP configured in the app; env is only a fallback).
-    mail: createSmtpMailProvider(r.smtp, log),
+    mail: createSmtpMailProvider(r.smtp, log, mailRecorder(tenantId)),
 
     // Google Sheets/Drive identity: the service account configured in the app
     // (tenant_config), falling back to the env default (see tenantSettings).

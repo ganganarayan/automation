@@ -37,6 +37,7 @@ import * as configService from '../services/configService.js';
 import * as users from '../repositories/usersRepository.js';
 import * as tenantRepo from '../repositories/tenantRepository.js';
 import { formatIst } from '../utils/time.js';
+import { smtpMissing, parseRecord, healthLines } from '../utils/emailHealth.js';
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as tenantSettings from '../core/tenantSettings.js';
 import * as tenantConfigRepo from '../repositories/tenantConfigRepository.js';
@@ -383,16 +384,32 @@ export function register(ctx) {
       const providers = await buildProviders(req.tenantId);
       const smtp = providers.resolved.smtp || {};
       const to = (req.body?.to || smtp.from || smtp.user || '').trim();
-      if (!smtp.host || !smtp.user) return res.json({ ok: false, error: 'SMTP not configured: set host/user and Save first' });
+      const missing = smtpMissing(smtp);
+      if (missing.length) return res.json({ ok: false, error: `SMTP not configured: set ${missing.join(', ')} and Save first` });
       if (!to) return res.json({ ok: false, error: 'no recipient (set a From/user address)' });
       const result = await providers.mail.send({
         to,
         subject: 'Test email: automation content-engine',
         text: 'This is a test from your content-engine SMTP settings. If you received this, approval and status emails will work.',
       });
-      res.json({ ok: !!result.ok, to, error: result.ok ? null : 'send failed' });
+      res.json({ ok: !!result.ok, to, error: result.ok ? null : (result.error || 'send failed') });
     } catch (err) {
       res.json({ ok: false, error: err.message });
+    }
+  });
+
+  // Settings → Email health: SMTP complete?, last send and last error.
+  router.get('/admin/email-health', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const providers = await buildProviders(req.tenantId);
+      const [last, lastError] = await Promise.all([
+        tenantConfig.get(req.tenantId, 'email_last_send'),
+        tenantConfig.get(req.tenantId, 'email_last_error'),
+      ]);
+      res.json({ ok: true, lines: healthLines({ smtp: providers.resolved.smtp, last: parseRecord(last), lastError: parseRecord(lastError), fmt: formatIst }) });
+    } catch (err) {
+      res.json({ ok: false, lines: [{ dot: '🟡', text: err.message }] });
     }
   });
 
@@ -687,6 +704,7 @@ ${NAV_CSS}
       el.textContent = j.ok ? ('✓ sent to '+(j.to||'')+', check inbox/spam') : ('✗ '+(j.error||'failed'));
       el.style.color = j.ok ? '#5bd08a' : '#ff9a9a';
     }catch(e){ el.textContent='✗ '+e.message; el.style.color='#ff9a9a'; }
+    if (typeof loadEmailHealth === 'function') loadEmailHealth();
   }
   function syncDays(gid){
     const boxes=document.querySelectorAll('[data-daygroup="'+gid+'"]');
@@ -1267,7 +1285,19 @@ function fieldRow(field, configMap) {
         <button type="button" class="act" onclick="testEmail()">Send test</button>
         <span id="smtp-test-result" class="hint"></span>
       </div>
-      <p class="hint">Save your SMTP settings first, then send a test to confirm delivery (check spam once).</p></div>`;
+      <p class="hint">Save your SMTP settings first, then send a test to confirm delivery (check spam once).</p></div>
+      <div class="field"><label>Email health</label>
+        <div id="email-health" class="hint">Checking…</div></div>
+      <script>
+        async function loadEmailHealth(){
+          const box=document.getElementById('email-health');
+          try{
+            const j=await (await fetch('/api/v1/admin/email-health',{headers:{'X-Admin-Key':KEY}})).json();
+            box.innerHTML=(j.lines||[]).map(function(l){ return '<div>'+esc2(l.dot+' '+l.text)+'</div>'; }).join('') || '🟡 '+esc2(j.error||'unavailable');
+          }catch(e){ box.textContent='🟡 '+e.message; }
+        }
+        window.addEventListener('DOMContentLoaded', loadEmailHealth);
+      </script>`;
   }
   if (field.type === 'drive_connect') {
     // Status is fetched live (the refresh token itself never reaches the page).

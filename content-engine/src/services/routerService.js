@@ -46,8 +46,11 @@ async function sendNoPostEmail({ funnel, f, scheduledFor, reason, log }) {
   try {
     const providers = await buildProviders(funnel.tenant_id);
     const to = f.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
-    if (!to) return;
     const day = formatIst(scheduledFor, { withTime: false });
+    if (!to) {
+      await providers.mail.skip?.({ subject: `🟡 No ${funnel.name} post lined up for ${day}`, reason: 'no recipient: set the funnel approval email or Settings, Emails, Notification' });
+      return;
+    }
     await providers.mail.send({
       to,
       subject: `🟡 No ${funnel.name} post lined up for ${day}`,
@@ -223,6 +226,8 @@ export async function runNudge({ tenantIds = null, log = baseLog } = {}) {
           await providers.mail.send({ to, subject: `🟡 Video lanes are empty (${empty.join(', ')})`, html: `<p>${NUDGE_TEXT}</p>` });
           await tenantConfig.set(tenantId, 'nudge_sent_on', today);
           sent = true;
+        } else {
+          await providers.mail.skip?.({ subject: '🟡 Video lanes are empty', reason: 'no recipient: set Settings, Emails, Notification' });
         }
       } catch (err) {
         log.warn({ tenantId, err: err.message }, 'nudge email failed');

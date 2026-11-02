@@ -168,7 +168,10 @@ export async function noteVerdict(tenantId = 'default', verdict = {}) {
   try {
     const providers = await buildProviders(tenantId);
     const to = providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
-    if (!to) return false;
+    if (!to) {
+      await providers.mail.skip?.({ subject: '🟡 AI video lane is out of credit', reason: 'no recipient: set Settings, Emails, Notification' });
+      return false;
+    }
     const list = (verdict.missing || []).map((m) => `<li>${String(m).replace(/[&<>]/g, '')}</li>`).join('');
     await providers.mail.send({
       to,
