@@ -26,9 +26,9 @@ describe('listElevenLabsVoices', () => {
   });
 });
 
-describe('voiceover step', () => {
+describe('AI video lane voice', () => {
   it('renders voice_id as the voice picker, still saved under voice_id', () => {
-    const f = WIZARD_STEPS.find((s) => s.id === 'voiceover').fields.find((x) => x.key === 'voice_id');
+    const f = WIZARD_STEPS.find((s) => s.id === 'ai').fields.find((x) => x.key === 'voice_id');
     expect(f.type).toBe('voice_select');
   });
 });

@@ -26,7 +26,7 @@ describe('configManifest', () => {
       expect(keys).not.toContain(forbidden);
     }
     // The funnel still chooses the provider/model and its own accounts.
-    for (const choice of ['animation_provider', 'tts_provider', 'transcript_source',
+    for (const choice of ['animation_provider', 'tts_provider',
       'image_provider', 'postforme_accounts', 'voice_id']) {
       expect(keys).toContain(choice);
     }

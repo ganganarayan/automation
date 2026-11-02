@@ -31,7 +31,7 @@
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
 import { navHtml, NAV_CSS } from '../utils/adminNav.js';
 import { FLOW_MANIFEST, hasFlow } from '../services/flowManifest.js';
-import { WIZARD_STEPS, completeness } from '../services/videoWizardManifest.js';
+import { WIZARD_STEPS, completeness, stepFields } from '../services/videoWizardManifest.js';
 import * as imageGateService from '../services/imageGateService.js';
 import * as configService from '../services/configService.js';
 import * as users from '../repositories/usersRepository.js';
@@ -268,7 +268,7 @@ export function register(ctx) {
       const step = WIZARD_STEPS[stepIndex];
       if (!step) return res.status(400).json({ ok: false, error: 'bad step' });
       const set = req.body?.set || {};
-      for (const field of step.fields) {
+      for (const field of stepFields(step)) {
         if (!(field.key in set)) continue;
         const val = String(set[field.key] ?? '');
         if (field.type === 'secret') {
@@ -768,7 +768,7 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
       return `<div class="funnelrow">
         <div class="funnelrow-main">
           <div class="funnelrow-name">${esc(f.name)} ${f.active ? '' : '<span class="pill">paused</span>'}</div>
-          <div class="funnelrow-meta">${ready ? '🟢 ready' : `🟡 ${done}/${total} steps set`}</div>
+          <div class="funnelrow-meta">${ready ? '🟢 ready' : `🟡 ${done}/${total} pages set`}</div>
         </div>
         <div class="row" style="gap:.4rem;margin:0">
           <a class="act primary" href="/api/v1/admin/funnels/${f.id}/setup">Set up →</a>
@@ -789,7 +789,7 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
 
   return `<section class="panel card" id="panel-funnels">
     <h2>Funnels</h2>
-    <p class="blurb">A funnel is a brand/campaign scope with its own content source, social accounts, and schedule. Add one, then open its step-by-step setup, one screen per stage, with Back / Save / Next always in view.</p>
+    <p class="blurb">A funnel is a brand/campaign scope with its own accounts and schedule. Each day the router picks the lane (ready video, AI video, image post) and lines up the content. Add one, then open its setup: shared basics, one page per lane, then publish.</p>
     <fieldset><legend>Add a funnel</legend>
       <form method="post" action="/api/v1/admin/funnels" class="row">
         <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
@@ -833,16 +833,13 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
     })
     .join('');
 
-  const directOn = (cfg.research_mode || 'manual') === 'direct';
   const fieldsHtml = step.fields
     .map((field) => {
+      if (field.type === 'heading') return `<h2 class="sect">${esc(field.label)}</h2>`;
       if (field.key === 'postforme_api_key') return funnelKeyRow(field, cfg, funnel.id);
       if (field.key === 'postforme_accounts') return pfmAccountsRow(cfg, funnel.id);
       if (field.key === 'account_map') return '';
-      const html = fieldRow(field, cfg);
-      // Fields tagged group:'direct' only apply to the Direct-upload source, show
-      // them only when that source is chosen (toggled client-side on change).
-      return field.group === 'direct' ? `<div class="direct-only"${directOn ? '' : ' style="display:none"'}>${html}</div>` : html;
+      return fieldRow(field, cfg);
     })
     .join('');
 
@@ -850,7 +847,7 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
   const isLast = stepIndex === total - 1;
 
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(funnel.name)}, video setup</title>
+<title>${esc(funnel.name)}, lane setup</title>
 <style>
  :root{color-scheme:dark}*{box-sizing:border-box}
  body{font-family:system-ui;margin:0;background:#0b0b12;color:#e8e8ef}
@@ -875,6 +872,8 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
  .main .desc{color:#9a9ab0;font-size:.88rem;margin:0 0 1.3rem;line-height:1.55}
  .field{margin:0 0 1rem}.field label{display:block;margin:0 0 .3rem;font-size:.82rem;color:#c7c7d9}
  .hint{color:#6f6f88;font-size:.78rem;margin:.25rem 0 0}
+ .sect{font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;color:#7aa2ff;margin:1.4rem 0 .7rem;padding-top:.9rem;border-top:1px solid #24243a;font-weight:600}
+ .sect:first-child{margin-top:0;padding-top:0;border-top:0}
  .igt{margin-top:1.3rem;border-top:1px solid #24243a;padding-top:1rem}
  .igt-title{font-size:.9rem;color:#c7c7d9;margin-bottom:.2rem}
  .igt input{width:auto}
@@ -897,7 +896,7 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
 </style>
 <div class="shell">
   <div class="top">
-    <div><div class="brand">${esc(funnel.name)}</div><div class="sub">video setup${funnel.active ? '' : ' · paused'}</div></div>
+    <div><div class="brand">${esc(funnel.name)}</div><div class="sub">lane setup${funnel.active ? '' : ' · paused'}</div></div>
     <div class="stepno"><div class="k">Step</div><div class="v">${stepIndex + 1} <small>/ ${total}</small></div></div>
   </div>
   <div class="bar"><i></i></div>
@@ -968,12 +967,6 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
  }
  async function nav(i){if(i<0||i>=TOTAL||i===STEP)return;const ok=await save();if(ok!==false)location.href=BASE+'?step='+i;}
  async function finish(){const ok=await save();if(ok!==false)location.href='/api/v1/admin/settings#funnels';}
- // Show the Direct-upload fields only when the content source is "direct".
- (function(){
-   const sel=document.querySelector('#wform [name="set[research_mode]"]');
-   function sync(){const on=sel&&sel.value==='direct';document.querySelectorAll('.direct-only').forEach(e=>{e.style.display=on?'':'none';});}
-   if(sel){sel.addEventListener('change',sync);sync();}
- })();
  function syncDays(gid){const boxes=document.querySelectorAll('[data-daygroup="'+gid+'"]');const vals=[];boxes.forEach(b=>{if(b.checked)vals.push(b.value);});const h=document.getElementById(gid);if(h)h.value=vals.join(',');}
  function syncPfm(fid){const boxes=document.querySelectorAll('[data-pfm="'+fid+'"]');const ids=[];const map={};boxes.forEach(b=>{if(b.checked){ids.push(b.value);map[b.value]={platform:b.dataset.plat||'',account_name:b.dataset.name||''};}});const a=document.getElementById('pfmaccts-'+fid);if(a)a.value=JSON.stringify(ids);const m=document.getElementById('pfmmap-'+fid);if(m)m.value=JSON.stringify(map);}
  function renderPfm(fid,accounts){const box=document.getElementById('pfmlist-'+fid);let selected=[];try{selected=JSON.parse(document.getElementById('pfmaccts-'+fid).value||'[]');}catch(_){}if(!accounts.length){box.innerHTML='<span class="hint">No connected accounts found for that key.</span>';return;}box.innerHTML=accounts.map(function(x){const ck=selected.indexOf(x.id)>=0?'checked':'';return '<label class="acct"><input type="checkbox" value="'+esc2(x.id)+'" data-pfm="'+fid+'" data-plat="'+esc2(x.platform)+'" data-name="'+esc2(x.name)+'" onchange="syncPfm('+fid+')" '+ck+'> <b>'+esc2(x.platform)+'</b>, '+esc2(x.name)+'</label>';}).join('');syncPfm(fid);}
