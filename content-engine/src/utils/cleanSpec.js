@@ -10,6 +10,9 @@
  *               - cleanVideoArgs({ input, output, zoomPct, keepSec, subPath }): ffmpeg args
  *               - transcriptSrt / clipSrt: the transcript's timed subtitles,
  *                 cut to the kept part, for burning in (subPath)
+ *               - routerCleanOpts(cfg): the funnel's Lane 1 Clean defaults
+ *               - autoCheckTimes / autoCleanFromFrames: where to look and what
+ *                 the AI's frame answers mean for zoom + trim (auto-check)
  * Dependencies: stageSpec (buildSrt: pure).
  */
 import { buildSrt } from './stageSpec.js';
@@ -264,4 +267,70 @@ export function progressPct(doneSec, totalSec) {
   return Math.min(99, Math.floor((doneSec / totalSec) * 100));
 }
 
-export default { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, subtitlesFilter, parseSrt, splitLongCues, transcriptSrt, clipSrt, captionSampleTimes, captionsVerdict, progressSeconds, progressPct };
+const ON = /^(on|true|1|yes)$/i;
+
+/**
+ * The daily router's Clean for one funnel (Lane 1 setup page, funnel_config):
+ * { on, auto, zoomPct, trimEndSec, endText, endLink, endSec }, clamped. A blank
+ * zoom is 10 %, a blank cut 0 s; an end card with text or a link and no
+ * seconds shows for 4 s.
+ */
+export function routerCleanOpts(cfg = {}) {
+  const c = cfg || {};
+  const has = (k) => String(c[k] ?? '').trim() !== '';
+  return {
+    on: ON.test(String(c.direct_clean || '').trim()),
+    auto: ON.test(String(c.direct_clean_auto || '').trim()),
+    ...normalizeCleanOpts({ zoomPct: has('direct_clean_zoom') ? c.direct_clean_zoom : 10, trimEndSec: has('direct_clean_trim') ? c.direct_clean_trim : 0 }),
+    ...normalizeEndCard({ endText: c.direct_clean_end_text, endLink: c.direct_clean_end_link, endSec: has('direct_clean_end_sec') ? c.direct_clean_end_sec : 4 }),
+  };
+}
+
+/**
+ * The auto-check's frames: one early (the watermark shows over the content)
+ * and one a second over the last `windowSec` seconds (where the outro starts),
+ * oldest first. No length known = the early frame only.
+ */
+export function autoCheckTimes(totalSec, windowSec = 15) {
+  const t = Number(totalSec) || 0;
+  if (!(t > 0)) return { early: 1, tail: [] };
+  const early = Math.round(Math.min(3, t * 0.1) * 10) / 10;
+  const tail = [];
+  for (let s = 1; s <= windowSec && t - s > early; s += 1) tail.unshift(Math.round((t - s) * 10) / 10);
+  return { early, tail };
+}
+
+/**
+ * The AI's answers (frames[0] = the early frame, then one per `tail` time:
+ * { watermark, watermarkBottomPct, outro }) → { zoomPct, trimEndSec,
+ * watermark, outro }, clamped by normalizeCleanOpts.
+ * Zoom: just enough to push the lowest-reaching bottom watermark (+2 %) out
+ * of the frame (zooming from the top crops 1 - 1/f of the height), 0 when
+ * there is none, the fallback when it is there but its height is unknown.
+ * Trim: the run of outro frames at the very end, cut halfway between the last
+ * content frame and the first outro frame.
+ */
+export function autoCleanFromFrames({ frames, tail = [], totalSec = 0, fallback = {} }) {
+  const list = Array.isArray(frames) ? frames.map((f) => f || {}) : [];
+  const base = normalizeCleanOpts(fallback);
+  if (!list.length) return { ...base, watermark: null, outro: null };
+  const tailFr = list.slice(1, 1 + tail.length);
+  const content = [list[0], ...tailFr.filter((f) => f.outro !== true)];
+  const marked = content.filter((f) => f.watermark === true);
+  let zoomPct = 0;
+  if (marked.length) {
+    const bands = marked.map((f) => Number(f.watermarkBottomPct)).filter((n) => Number.isFinite(n) && n > 0 && n <= 40);
+    zoomPct = bands.length ? Math.ceil((100 / (100 - (Math.max(...bands) + 2)) - 1) * 1000) / 10 : base.zoomPct;
+  }
+  let k = tailFr.length;
+  while (k > 0 && tailFr[k - 1].outro === true) k -= 1;
+  let trimEndSec = 0;
+  if (k < tailFr.length && Number(totalSec) > 0) {
+    const firstOutro = Number(tail[k]);
+    const lastContent = k > 0 ? Number(tail[k - 1]) : firstOutro - 1;
+    trimEndSec = Number(totalSec) - (lastContent + firstOutro) / 2;
+  }
+  return { ...normalizeCleanOpts({ zoomPct, trimEndSec }), watermark: marked.length > 0, outro: k < tailFr.length };
+}
+
+export default { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, subtitlesFilter, parseSrt, splitLongCues, transcriptSrt, clipSrt, captionSampleTimes, captionsVerdict, progressSeconds, progressPct, routerCleanOpts, autoCheckTimes, autoCleanFromFrames };

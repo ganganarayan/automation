@@ -106,7 +106,8 @@ export async function decideFunnel({ funnel, now = nowIst(), retryNone = false, 
   // Lane 1: the oldest ready video.
   try {
     const r = await readyLane.prepare({ funnelRow: funnel, scheduledFor, log: flog });
-    return done('ready_video', r.approval ? 'ready video: approval email sent' : 'ready video: scheduled (own thumbnail + caption)', r.instance && r.instance.id);
+    const what = r.approval ? 'ready video: approval email sent' : 'ready video: scheduled (own thumbnail + caption)';
+    return done('ready_video', r.note ? `${what}, ${r.note}` : what, r.instance && r.instance.id);
   } catch (err) {
     note('ready video', err);
   }

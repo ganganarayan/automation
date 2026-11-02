@@ -6,7 +6,9 @@
  *               goes out at the funnel's publish time (docs/daily-router-plan.md,
  *               Lane 1).
  * Responsibility:
- *               - prepare: pick the video. Same-name .jpg/.png + .txt next to
+ *               - prepare: pick the video, ✂ Clean it first when the funnel
+ *                 has Clean on (readyPostService.cleanForRouter: a failed
+ *                 clean falls back to the original, noted). Same-name .jpg/.png + .txt next to
  *                 it → that thumbnail + caption, scheduled with no approval.
  *                 Otherwise transcribe → AI caption + headline + thumbnail
  *                 (readyPostService, the transcript gate passed by the router)
@@ -56,18 +58,19 @@ async function schedule({ funnelId, video, copy, thumbs, ctaLink = '', scheduled
 }
 
 /** Send (or re-send) the approval email for a draft that has its copy. */
-async function sendApproval({ inst, funnel, resolved, providers, video, log }) {
+async function sendApproval({ inst, funnel, resolved, providers, video, log, clean = null, cleanNote = '' }) {
   const steps = instanceService.parseSteps(await instanceRepo.get(inst.id));
   const copy = art(steps, 'script').copy || {};
   const sizes = art(steps, 'images').sizes || [];
   const thumb = (sizes[0] || {}).url || '';
   const when = inst.scheduled_for ? `${formatIst(inst.scheduled_for)} IST` : '';
+  const videoUrl = (clean && clean.url) || publicDlUrl(video.id);
   const { reviewUrl } = await approvalService.createRequest({
     tenantId: funnel.tenant_id,
     kind: KIND,
     payload: {
       instanceId: inst.id, funnelId: funnel.id, driveId: video.id, name: video.name,
-      thumbnailUrl: thumb, videoUrl: publicDlUrl(video.id), caption: [copy.title, copy.description].filter(Boolean).join('\n\n'),
+      thumbnailUrl: thumb, videoUrl, caption: [copy.title, copy.description].filter(Boolean).join('\n\n'),
     },
   });
   await instanceRepo.setStatus(inst.id, VIDEO_REVIEW);
@@ -80,7 +83,8 @@ async function sendApproval({ inst, funnel, resolved, providers, video, log }) {
     html: `<p>The next ready video for <b>${esc(funnel.name)}</b>: <b>${esc(video.name)}</b>${when ? `, posting ${esc(when)}` : ''}.</p>
       ${thumb ? `<p><img src="${esc(thumb)}" width="320" style="border-radius:8px;max-width:100%" alt="thumbnail"></p>` : ''}
       <p><b>${esc(copy.title)}</b></p><pre style="white-space:pre-wrap;background:#f5f5f5;padding:1rem;border-radius:6px">${esc(copy.description)}</pre>
-      <p><a href="${esc(publicDlUrl(video.id))}">▶ The video</a></p>
+      <p><a href="${esc(videoUrl)}">▶ The video${clean ? ' (cleaned)' : ''}</a></p>
+      ${cleanNote ? `<p>${clean ? '🟢' : '🟡'} ${esc(cleanNote)}</p>` : ''}
       <p><a href="${esc(reviewUrl)}" style="background:#0a7d32;color:#fff;padding:.6rem 1rem;border-radius:6px;text-decoration:none;display:inline-block">Approve &amp; schedule, or ask for new copy</a></p>
       <p style="color:#666">Approved after its time, it posts at once.</p>`,
   });
@@ -100,6 +104,9 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
   if (!video) throw new LaneSkip('no unposted ready video in the folder');
   const at = scheduledFor.toJSDate();
   const side = sidecarsFor(files, video);
+  // ✂ Clean (funnel setting): posting then uses the cleaned copy; a failure keeps the original.
+  const { clean, note } = await readyPost.cleanForRouter({ funnelId: funnel.id, driveId: video.id, name: video.name });
+  if (note) log.info({ video: video.name, cleaned: !!clean, note }, 'ready video clean');
 
   // Thumbnail + caption made by you: schedule straight away.
   if (side.thumb && side.caption) {
@@ -111,7 +118,7 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
     const url = await publish.uploadMedia(img, /\.png$/i.test(side.thumb.name) ? 'image/png' : 'image/jpeg');
     const instanceId = await schedule({ funnelId: funnel.id, video, copy, thumbs: thumbsForAll(url, Object.keys(PLATFORM_SIZE)), scheduledFor: at });
     log.info({ video: video.name, instance: instanceId }, 'ready video scheduled with its own thumbnail + caption');
-    return { instance: await instanceRepo.get(instanceId), approval: false };
+    return { instance: await instanceRepo.get(instanceId), approval: false, note };
   }
 
   // Otherwise: transcribe → AI copy + thumbnail → one approval email.
@@ -121,8 +128,8 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
     await readyPost.approveTranscriptAuto({ funnelId: funnel.id, driveId: video.id });
     await readyPost.generateCopy({ funnelId: funnel.id, driveId: video.id, name: video.name });
     const inst = await instanceRepo.get(t.instanceId);
-    await sendApproval({ inst, funnel, resolved, providers, video, log });
-    return { instance: inst, approval: true };
+    await sendApproval({ inst, funnel, resolved, providers, video, log, clean, cleanNote: note });
+    return { instance: inst, approval: true, note };
   } catch (err) {
     // Unlink it from the day: the video stays in the folder for another go.
     await instanceRepo.releaseSlot(t.instanceId).catch(() => {});
@@ -164,7 +171,8 @@ export async function rework(approval) {
   try {
     await readyPost.generateCopy({ funnelId: row.funnel_id, driveId: p.driveId, name: p.name });
     const { funnel, resolved, providers } = await readyPost.folderFiles({ funnelId: row.funnel_id }).catch(() => ({}));
-    await sendApproval({ inst: await instanceRepo.get(row.id), funnel, resolved, providers, video: { id: p.driveId, name: p.name }, log });
+    const clean = p.videoUrl && p.videoUrl !== publicDlUrl(p.driveId) ? { url: p.videoUrl } : null;
+    await sendApproval({ inst: await instanceRepo.get(row.id), funnel, resolved, providers, video: { id: p.driveId, name: p.name }, log, clean });
   } catch (err) {
     log.error({ err: err.message }, 'ready video rework failed');
     await instanceRepo.setStatus(row.id, 'failed', `Rework: ${err.message}`);

@@ -48,7 +48,7 @@ import sharp from 'sharp';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, progressPct, transcriptSrt, clipSrt, parseSrt, captionSampleTimes, captionsVerdict } from '../utils/cleanSpec.js';
+import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, progressPct, transcriptSrt, clipSrt, parseSrt, captionSampleTimes, captionsVerdict, routerCleanOpts, autoCheckTimes, autoCleanFromFrames } from '../utils/cleanSpec.js';
 import { writeFile } from 'node:fs/promises';
 import * as driveConnect from './driveConnectService.js';
 import { signTicket, peekTicket, readTicket, dispatchRequest, normalizeRunner, keepSecFor, DEFAULT_REPO } from '../utils/cleanHookSpec.js';
@@ -857,6 +857,106 @@ async function saveClean(funnel, driveId, clean, { name = '', source = null } = 
   await instanceRepo.setMeta(inst.id, { durationSeconds: clean.durationSec || undefined });
 }
 
+const AUTO_CHECK_SYSTEM = 'You check frames of a short video. Frame 1 is from the start, the others are its last seconds, in order. For each frame say: '
+  + 'watermark: is there a small logo or brand mark laid over the picture (often in a bottom corner, e.g. "NotebookLM"); a title, slide text or subtitles are NOT a watermark. '
+  + 'watermarkBottomPct: when that watermark is in the lower part of the picture, how far its TOP edge is above the bottom edge, as a percent of the picture height (e.g. 6); else 0. '
+  + 'outro: is this frame a branded end screen (a product logo or "made with" card on a plain background) rather than the video’s own content. '
+  + 'Return JSON: {"frames":[{"watermark":true|false,"watermarkBottomPct":number,"outro":true|false}, ...]}, one entry per image, in order.';
+
+/**
+ * Auto-check: an AI looks at an early frame and the last 15 s and sets this
+ * video's zoom (watermark height) and cut (where the outro starts). Returns
+ * { zoomPct, trimEndSec, note }; throws when the frames can't be read.
+ */
+async function autoCleanPlan({ funnel, providers, driveId, name, fallback }) {
+  const total = (await videoDurations([driveId]))[driveId] || 0;
+  if (!(total > 0)) throw new Error('could not read the video length');
+  const { early, tail } = autoCheckTimes(total);
+  const url = publicDlUrl(driveId);
+  const ffmpeg = createFfmpegProvider({}, log);
+  const frames = [];
+  for (const atSec of [early, ...tail]) {
+    const f = await ffmpeg.extractFrame({ url, atSec });
+    frames.push(await sharp(f).resize(512, 512, { fit: 'inside' }).jpeg({ quality: 80 }).toBuffer());
+  }
+  const r = await providers.llm.generateJsonVision({ system: AUTO_CHECK_SYSTEM, user: `${frames.length} frames: the first at ${early} s, then one a second from ${tail[0]} s to ${tail[tail.length - 1]} s of a ${Math.round(total)} s video.`, images: frames });
+  const cost = { ...costText({ inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, model: r.model }), provider: r.provider };
+  await recordCost(funnel, driveId, 'stitch', cost, { name }).catch((err) => log.warn({ err: err.message, driveId }, 'auto-check cost not saved'));
+  const got = autoCleanFromFrames({ frames: (r.data || {}).frames, tail, totalSec: total, fallback });
+  log.info({ driveId, ...got }, 'clean auto-check');
+  const what = [got.watermark ? `watermark found, zoom ${got.zoomPct}%` : 'no watermark', got.outro ? `outro found, cut last ${got.trimEndSec} s` : 'no outro'];
+  return { zoomPct: got.zoomPct, trimEndSec: got.trimEndSec, note: `auto-check: ${what.join(', ')}` };
+}
+
+const ROUTER_CLEAN_WAIT_MS = 25 * 60 * 1000;
+const sleep = (ms) => new Promise((r) => { setTimeout(r, ms).unref?.(); });
+
+/**
+ * The daily router's ✂ Clean for Lane 1, with the funnel's Clean defaults (or
+ * the auto-check's numbers), waited for inside the router's run: on Railway it
+ * runs here; on GitHub it is polled for up to 25 min. A video already cleaned
+ * by hand keeps that clean. Never throws: { clean, note }, clean null = post
+ * the original (Clean off, or it failed: note says why, for router_days and
+ * the approval email).
+ */
+export async function cleanForRouter({ funnelId, driveId, name = '' }) {
+  const id = String(driveId);
+  let note = '';
+  try {
+    const { funnel, cfg } = await loadFunnel(funnelId);
+    const o = routerCleanOpts(cfg);
+    if (!o.on) return { clean: null, note: '' };
+    const done = (await loadDrafts(funnel, [id]))[id];
+    if (done && done.clean) return { clean: done.clean, note: 'cleaned earlier on the Prepare page' };
+    const providers = await buildProviders(funnel.tenant_id);
+    const opts = { zoomPct: o.zoomPct, trimEndSec: o.trimEndSec, ...normalizeEndCard(o) };
+    if (o.auto) {
+      try {
+        const a = await autoCleanPlan({ funnel, providers, driveId: id, name, fallback: o });
+        Object.assign(opts, normalizeCleanOpts(a));
+        note = a.note;
+      } catch (err) {
+        log.warn({ err: err.message, driveId: id }, 'clean auto-check failed (funnel defaults used)');
+        note = `auto-check failed (${String(err.message).slice(0, 120)}), used the funnel's zoom and cut`;
+      }
+    }
+    if (!opts.zoomPct && !opts.trimEndSec && !opts.endSec) return { clean: null, note: [note, 'nothing to clean, the original video is used'].filter(Boolean).join('; ') };
+    let job = cleanJobs.get(id);
+    if (!job || job.state !== 'running') {
+      const where = normalizeRunner((providers.resolved.clean || {}).runner);
+      if (where === 'github') {
+        job = await startCleanGithub({ funnel, providers, id, opts, name, source: null, baseUrl: settings.app.publicBaseUrl });
+      } else {
+        if (!providers.resolved.postformeKey) throw new Error('no Post for Me API key to upload the cleaned video');
+        cleanJobs.set(id, { state: 'running', startedAt: Date.now(), phase: 'starting', pct: 0, ...opts });
+        const onPhase = (patch) => { const j = cleanJobs.get(id); if (j && j.state === 'running') Object.assign(j, patch); };
+        try {
+          cleanJobs.set(id, { state: 'done', clean: await runClean({ funnel, providers, driveId: id, opts, name, source: null, onPhase }) });
+        } catch (err) {
+          cleanJobs.set(id, { state: 'failed', error: err.message });
+          throw err;
+        }
+      }
+    }
+    // A GitHub run (or one already running): wait for its done / fail callback.
+    const until = Date.now() + ROUTER_CLEAN_WAIT_MS;
+    for (;;) {
+      const j = cleanJobs.get(id) || { state: 'none' };
+      if (j.state === 'done' && j.clean) {
+        const c = j.clean;
+        return { clean: c, note: [`cleaned: zoom ${c.zoomPct}%, cut last ${c.trimEndSec} s${c.endSec ? `, end card ${c.endSec} s` : ''}`, note].filter(Boolean).join('; ') };
+      }
+      if (j.state === 'failed') throw new Error(j.error || 'the clean failed');
+      if (j.state !== 'running') throw new Error('the clean stopped without a result');
+      if (Date.now() > until) throw new Error('still running on GitHub after 25 min (if it finishes before approval, posting uses the cleaned copy)');
+      await sleep(15000);
+    }
+  } catch (err) {
+    log.warn({ err: err.message, driveId: id }, 'router clean failed (original video used)');
+    return { clean: null, note: [`clean failed, using the original video: ${String(err.message).slice(0, 200)}`, note].filter(Boolean).join('; ') };
+  }
+}
+
 /** Where a clean job stands (running / done / failed), else the saved cleaned video. */
 export async function cleanStatus({ funnelId, driveId }) {
   const job = cleanJobs.get(String(driveId));
@@ -1470,7 +1570,7 @@ export async function folderFiles({ funnelId }) {
   const drive = driveFor(providers, '');
   const files = folder ? await drive.listFiles(folder) : [];
   const posted = await instanceRepo.postedDriveIds(funnel.id, funnel.tenant_id).catch(() => []);
-  return { funnel, resolved, providers, folder, files, posted, drive };
+  return { funnel, resolved, cfg, providers, folder, files, posted, drive };
 }
 
 /**
@@ -1488,5 +1588,5 @@ export async function approveTranscriptAuto({ funnelId, driveId }) {
 }
 
 export default {
-  onPosted, startPost, postStatus, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, startTranscribe, transcribeStatus, saveTranscript, generateCopy, generateThumbnail, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, postSelections, folderFiles, approveTranscriptAuto,
+  onPosted, startPost, postStatus, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, startTranscribe, transcribeStatus, saveTranscript, generateCopy, generateThumbnail, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, cleanForRouter, postSelections, folderFiles, approveTranscriptAuto,
 };

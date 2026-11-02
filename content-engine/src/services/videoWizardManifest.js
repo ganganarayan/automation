@@ -57,6 +57,28 @@ export const WIZARD_STEPS = [
       { key: 'direct_copy_brief', label: 'AI copy: brand / voice brief (title, description, captions for each video)', type: 'textarea', placeholder: 'e.g. calm, practical tone; speak to founders; always use #gitawisdom' },
       { key: 'direct_caption', label: 'Fallback caption (Instagram & LinkedIn caption, YouTube description; the CTA link is appended)', type: 'textarea', placeholder: 'default caption for these posts' },
       { key: 'direct_yt_title', label: 'Fallback YouTube title', placeholder: 'title shown on YouTube' },
+      { type: 'heading', label: 'Clean (remove the watermark and the outro)' },
+      {
+        key: 'direct_clean', label: 'Clean each video before it posts', type: 'select', default: 'off',
+        options: [
+          { value: 'off', label: 'Off: post the video as it is' },
+          { value: 'on', label: 'On: zoom out the bottom watermark, cut the outro, add the end card' },
+        ],
+        help: 'The same as ✂ Clean on the Prepare page, run by the router on its own. If a clean fails, the original video is used and the approval email says so.',
+      },
+      {
+        key: 'direct_clean_auto', label: 'Auto-check each video (AI looks at the frames)', type: 'select', default: 'off',
+        options: [
+          { value: 'off', label: 'Off: use the zoom and cut below for every video' },
+          { value: 'on', label: 'On: the AI finds the watermark and where the outro starts, per video' },
+        ],
+        help: 'Looks at an early frame and the last 15 seconds. When the check fails, the numbers below are used.',
+      },
+      { key: 'direct_clean_zoom', label: 'Zoom % (0 to 30, blank = 10)', placeholder: '10' },
+      { key: 'direct_clean_trim', label: 'Seconds to cut from the end (0 to 60)', placeholder: 'e.g. 4' },
+      { key: 'direct_clean_end_text', label: 'End card text (blank = no end card)', type: 'textarea', placeholder: 'e.g. Take the free assessment' },
+      { key: 'direct_clean_end_link', label: 'End card link', placeholder: 'https://…' },
+      { key: 'direct_clean_end_sec', label: 'End card seconds (0 to 15, blank = 4)', placeholder: '4' },
     ],
   },
   {

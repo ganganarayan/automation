@@ -122,6 +122,33 @@ export function createLlmProvider(cfg, log) {
       throw new ExternalAPIError('OpenAI image response had no image data');
     },
 
+    /**
+     * A JSON answer about a few images (JPEG Buffers) from Gemini vision; OpenAI
+     * when Gemini has no key or its call fails. Returns { data, model, usage, provider }.
+     */
+    async generateJsonVision({ system, user, images = [], model, maxTokens = 4000 }) {
+      if (gemini) {
+        const usedModel = model || cfg.gemini.visionModel || 'gemini-2.5-flash';
+        try {
+          const m = gemini.getGenerativeModel({
+            model: usedModel,
+            ...(String(system || '').trim() ? { systemInstruction: String(system).trim() } : {}),
+            generationConfig: { responseMimeType: 'application/json', maxOutputTokens: maxTokens },
+          });
+          const res = await m.generateContent([{ text: user }, ...images.map((b) => ({ inlineData: { mimeType: 'image/jpeg', data: Buffer.from(b).toString('base64') } }))]);
+          const text = res.response?.text?.() || '';
+          let data;
+          try { data = JSON.parse(text); } catch { throw new ExternalAPIError(`Gemini returned no JSON: ${text.slice(0, 120)}`); }
+          const u = res.response?.usageMetadata || {};
+          return { data, model: usedModel, provider: 'gemini', usage: { inputTokens: u.promptTokenCount || 0, outputTokens: u.candidatesTokenCount || 0 } };
+        } catch (err) {
+          if (!openai) throw err;
+          log?.warn?.({ err: err.message }, 'Gemini vision failed, asking OpenAI');
+        }
+      }
+      return { ...(await this.generateJsonDetailed({ system, user, images, maxTokens })), provider: 'openai' };
+    },
+
     async generateImageGemini({ prompt, model }) {
       if (!gemini) throw new ExternalAPIError('Gemini not configured (GEMINI_API_KEY missing)');
       const m = gemini.getGenerativeModel({ model: model || cfg.gemini.imageModel });
