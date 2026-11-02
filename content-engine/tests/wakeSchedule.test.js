@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { DateTime } from 'luxon';
 import {
   parseTime, parseTimeList, tenantTimes, buildWakeSchedule, isDue, anyDue, variableRequests, syncOutcome,
+  dueSlot, ranKey, WAKE_WINDOW_MIN,
 } from '../src/utils/wakeSchedule.js';
 import { buildSaveOps } from '../src/services/configOps.js';
 
@@ -37,10 +38,11 @@ describe('buildWakeSchedule', () => {
 });
 
 describe('isDue', () => {
-  it('is due from the time itself up to the window', () => {
+  it('is due from the time itself for the 6-hour catch-up window', () => {
+    expect(WAKE_WINDOW_MIN).toBe(360);
     expect(isDue('16:00', ist('16:00'))).toBe(true);
-    expect(isDue('16:00', ist('16:29'))).toBe(true);
-    expect(isDue('16:00', ist('16:30'))).toBe(false);
+    expect(isDue('16:00', ist('21:59'))).toBe(true);
+    expect(isDue('16:00', ist('22:00'))).toBe(false);
     expect(isDue('16:00', ist('15:59'))).toBe(false);
   });
   it('crosses midnight', () => {
@@ -48,10 +50,29 @@ describe('isDue', () => {
     expect(isDue('00:10', ist('23:50'))).toBe(false);
   });
   it('takes a custom window, and anyDue checks a list', () => {
+    expect(isDue('16:00', ist('16:35'), 30)).toBe(false);
     expect(isDue('16:00', ist('16:35'), 40)).toBe(true);
     expect(anyDue(['08:20', '20:20'], ist('20:30'))).toBe(true);
-    expect(anyDue(['08:20', '20:20'], ist('12:00'))).toBe(false);
+    expect(anyDue(['08:20', '20:20'], ist('15:00'))).toBe(false);
     expect(isDue('bad', ist('12:00'))).toBe(false);
+  });
+});
+
+describe('dueSlot', () => {
+  it('catches up on the first run hours after the time (GitHub ran at 22:25, 02:26, 05:42, 11:35)', () => {
+    expect(dueSlot(['16:00'], ist('19:40'))).toEqual({ time: '16:00', key: '2026-11-01 16:00' });
+    expect(dueSlot(['10:00'], ist('11:35'))).toEqual({ time: '10:00', key: '2026-11-01 10:00' });
+    expect(dueSlot(['16:00'], ist('15:00'))).toBeNull();
+  });
+  it('picks the most recent of several times', () => {
+    expect(dueSlot(['08:20', '20:20'], ist('22:25'))).toEqual({ time: '20:20', key: '2026-11-01 20:20' });
+    expect(dueSlot(['08:20', '20:20'], ist('09:00'))).toEqual({ time: '08:20', key: '2026-11-01 08:20' });
+  });
+  it('a time before midnight seen after it belongs to the day before', () => {
+    expect(dueSlot(['23:50'], ist('00:10'))).toEqual({ time: '23:50', key: '2026-10-31 23:50' });
+  });
+  it('names the run marker per job', () => {
+    expect(ranKey('router')).toBe('wake_ran_router');
   });
 });
 

@@ -4,15 +4,16 @@ name: Wake content-engine for its daily jobs
 # from the repository variable WAKE_SCHEDULE (written by the app's
 # Setup → Settings → Daily schedule (IST) → Sync wake-up times), e.g.
 #   {"router":["16:00"],"nudge":["10:00"],"posts":["08:20","20:20"]}
-# and pings each job whose time fell within the last 30 minutes (IST). A time
-# therefore fires about 15–30 minutes after it is set, and GitHub's own cron
-# delays are absorbed. A job can be pinged by two runs in a row; that is fine:
-#   router → /api/v1/jobs/router-check  (router_days de-dupes per funnel + day,
-#            and the app runs only the tenants whose time is due)
+# and pings each job whose time fell within the last 6 hours (IST). GitHub often
+# runs this "every 15 minutes" schedule only every 3-6 hours, so a short window
+# missed every time; the wide window catches up on the first run after the
+# time. A job is pinged by every run inside its window; that is fine:
+#   router → /api/v1/jobs/router-check  (the app runs each tenant's slot once,
+#            wake_ran_router, and router_days de-dupes per funnel + day)
 #   posts  → /api/v1/jobs/check-posts   (one run at a time; each channel's
 #            ✅/❌ and the go-live email are recorded once)
 #   nudge  → /api/v1/jobs/nudge         (one email a day at most; the app
-#            runs only the tenants whose nudge time is due)
+#            runs each tenant's slot once, wake_ran_nudge)
 # Empty or unreadable variable → the defaults above.
 #
 # Repo secrets (Settings -> Secrets and variables -> Actions):
@@ -74,7 +75,7 @@ jobs:
             for t in $(times "$1"); do
               m=$(( 10#${t%%:*} * 60 + 10#${t##*:} ))
               ago=$(( (NOW - m + 1440) % 1440 ))
-              if [ "$ago" -lt 30 ]; then echo "$1: $t is due (${ago} min ago)"; return 0; fi
+              if [ "$ago" -lt 360 ]; then echo "$1: $t is due (${ago} min ago)"; return 0; fi
             done
             return 1
           }

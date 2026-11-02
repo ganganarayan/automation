@@ -14,6 +14,8 @@
  *                 {"router":["16:00"],"nudge":["10:00"],"posts":["08:20","20:20"]}.
  *               - isDue / anyDue: a time within the last windowMin minutes (IST),
  *                 across midnight too.
+ *               - dueSlot: the latest such time as a slot key ("2026-11-02 16:00"),
+ *                 so the app runs each slot once however many pings arrive.
  *               - variableRequests / syncOutcome: the GitHub REST calls that
  *                 write WAKE_SCHEDULE, and how their answer reads in the UI.
  * Dependencies: utils/cleanHookSpec (normalizeRepo).
@@ -21,7 +23,10 @@
 import { normalizeRepo } from './cleanHookSpec.js';
 
 export const WAKE_VARIABLE = 'WAKE_SCHEDULE';
-export const WAKE_WINDOW_MIN = 30;
+// Catch-up window: GitHub's 15-minute cron often runs only every 3-6 hours, so
+// a job stays due for 6 hours after its time. The app de-dupes per slot
+// (wake_ran_<job>), so the extra pings inside the window do nothing.
+export const WAKE_WINDOW_MIN = 360;
 // The app's own due test allows 10 minutes more: the workflow decides at its
 // start, and the cold-start retries can land the ping a few minutes later.
 export const SERVER_WINDOW_MIN = WAKE_WINDOW_MIN + 10;
@@ -34,6 +39,8 @@ export const WAKE_DEFAULTS = {
 };
 export const WAKE_KEYS = Object.keys(WAKE_DEFAULTS);
 export const SYNC_KEY = 'wake_schedule_synced';
+/** tenant_config key holding the last slot a job ran for that tenant. */
+export const ranKey = (job) => `wake_ran_${job}`;
 
 /** 'HH:MM' (24h, zero-padded) or null. Accepts '8:20' as 08:20. */
 export function parseTime(s) {
@@ -106,6 +113,27 @@ export function anyDue(times, nowIst, windowMin = WAKE_WINDOW_MIN) {
 }
 
 /**
+ * The most recent of `times` that is due (see isDue) as { time, key }, where
+ * key names the slot by its IST date and time ("2026-11-02 16:00"; a 23:50
+ * time seen at 00:10 belongs to the day before). null when none is due.
+ * `nowIst` is a Luxon DateTime in IST.
+ */
+export function dueSlot(times, nowIst, windowMin = WAKE_WINDOW_MIN) {
+  if (!nowIst) return null;
+  const now = Number(nowIst.hour) * 60 + Number(nowIst.minute);
+  let best = null;
+  for (const raw of times || []) {
+    const time = parseTime(raw);
+    if (!time || !isDue(time, nowIst, windowMin)) continue;
+    const ago = (now - minutesOf(time) + 1440) % 1440;
+    if (best && best.ago <= ago) continue;
+    const day = minutesOf(time) <= now ? nowIst : nowIst.minus({ days: 1 });
+    best = { time, key: `${day.toISODate()} ${time}`, ago };
+  }
+  return best && { time: best.time, key: best.key };
+}
+
+/**
  * The two GitHub REST calls that write the repository variable: PATCH it,
  * and on a 404 create it with POST.
  */
@@ -139,6 +167,6 @@ export function syncOutcome(status, reason = '') {
 }
 
 export default {
-  WAKE_VARIABLE, WAKE_WINDOW_MIN, SERVER_WINDOW_MIN, WAKE_DEFAULTS, WAKE_KEYS, SYNC_KEY,
-  parseTime, parseTimeList, tenantTimes, buildWakeSchedule, isDue, anyDue, variableRequests, syncOutcome,
+  WAKE_VARIABLE, WAKE_WINDOW_MIN, SERVER_WINDOW_MIN, WAKE_DEFAULTS, WAKE_KEYS, SYNC_KEY, ranKey,
+  parseTime, parseTimeList, tenantTimes, buildWakeSchedule, isDue, anyDue, dueSlot, variableRequests, syncOutcome,
 };

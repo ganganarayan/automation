@@ -14,7 +14,7 @@
  *               - HTTP: POST /api/v1/jobs/router-check (admin-guarded, 202 +
  *                 async, idempotent per funnel + post date). A plain ping runs
  *                 only the tenants whose router_check_time is due (within the
- *                 last 30 minutes, IST). ?all=1 runs every tenant; ?retry=1
+ *                 last 6 hours, IST) and not yet run for that slot. ?all=1 runs every tenant; ?retry=1
  *                 re-decides days recorded as 'none' (every tenant); ?funnel=ID
  *                 limits the run to one funnel.
  *               - HTTP: POST /api/v1/jobs/nudge (admin-guarded, 202): the 10:00
@@ -132,8 +132,8 @@ export function register(ctx) {
     }
   });
 
-  // Always-on host: the same due test every 15 minutes (router_days de-dupes
-  // a second hit inside the 30-minute window).
+  // Always-on host: the same due test every 15 minutes (dueTenants runs each
+  // slot once; router_days de-dupes per funnel + day as well).
   if (settings.schedulerInternal) {
     cron.schedule('*/15 * * * *', async () => {
       try {

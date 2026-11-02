@@ -7,8 +7,9 @@
  *               and pings the job endpoints whose times are due.
  * Responsibility:
  *               - schedule: the union of every tenant's times.
- *               - dueTenants: tenants whose router_check_time is due now (the
- *                 router-check endpoint runs only those on a plain wake ping).
+ *               - dueTenants: tenants whose time for a job is due now and whose
+ *                 slot has not run yet (router-check and nudge run only those
+ *                 on a plain wake ping); marks the slot as run.
  *               - sync: write WAKE_SCHEDULE with the default tenant's GitHub
  *                 token + repo (the ones set for Video clean), and store the
  *                 outcome under wake_schedule_synced on the default tenant.
@@ -20,7 +21,7 @@ import * as tenantRepo from '../repositories/tenantRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import * as tenantSettings from '../core/tenantSettings.js';
 import {
-  WAKE_KEYS, SYNC_KEY, SERVER_WINDOW_MIN, buildWakeSchedule, tenantTimes, isDue, variableRequests, syncOutcome,
+  WAKE_KEYS, SYNC_KEY, SERVER_WINDOW_MIN, buildWakeSchedule, tenantTimes, dueSlot, ranKey, variableRequests, syncOutcome,
 } from '../utils/wakeSchedule.js';
 import { DEFAULT_REPO } from '../utils/cleanHookSpec.js';
 import { nowIst, formatIst } from '../utils/time.js';
@@ -28,13 +29,15 @@ import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'wake-schedule' });
 
-/** Every tenant's config map (just the wake keys), with its id. */
+const RAN_KEYS = ['router', 'nudge'].map(ranKey);
+
+/** Every tenant's config map (the wake keys and last-run slots), with its id. */
 async function tenantConfigs() {
   const list = await tenantRepo.list().catch(() => [{ id: 'default' }]);
   const out = [];
   for (const t of list.length ? list : [{ id: 'default' }]) {
     const all = await tenantConfig.getAll(t.id).catch(() => ({}));
-    out.push({ tenantId: t.id, cfg: Object.fromEntries(WAKE_KEYS.map((k) => [k, all[k]])) });
+    out.push({ tenantId: t.id, cfg: Object.fromEntries([...WAKE_KEYS, ...RAN_KEYS].map((k) => [k, all[k]])) });
   }
   return out;
 }
@@ -46,12 +49,20 @@ export async function schedule() {
 
 /**
  * Tenant ids whose time for `job` (router = router_check_time, nudge =
- * nudge_time) fell within the last 40 minutes (IST; 30 + cold-start slack).
+ * nudge_time) fell within the catch-up window (IST, plus cold-start slack)
+ * and whose slot has not run yet. Each returned tenant's slot is marked as
+ * run (wake_ran_<job>), so a later ping in the same window skips it.
  */
 export async function dueTenants({ now = nowIst(), job = 'router' } = {}) {
-  return (await tenantConfigs())
-    .filter(({ cfg }) => (tenantTimes(cfg)[job] || []).some((t) => isDue(t, now, SERVER_WINDOW_MIN)))
-    .map((x) => x.tenantId);
+  const out = [];
+  for (const { tenantId, cfg } of await tenantConfigs()) {
+    const slot = dueSlot(tenantTimes(cfg)[job], now, SERVER_WINDOW_MIN);
+    if (!slot || cfg[ranKey(job)] === slot.key) continue;
+    await tenantConfig.set(tenantId, ranKey(job), slot.key);
+    log.info({ tenantId, job, slot: slot.key }, 'wake: slot due, running');
+    out.push(tenantId);
+  }
+  return out;
 }
 
 /** True when a saved form changed any wake key (old map vs. new map). */

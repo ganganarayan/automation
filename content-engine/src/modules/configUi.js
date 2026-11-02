@@ -1172,7 +1172,7 @@ function fieldRow(field, configMap) {
         <button type="button" class="act" onclick="wakeSync()">↻ Sync wake-up times</button>
         <span id="wake-st" class="hint">Checking…</span>
       </div>
-      <p class="hint">GitHub checks every 15 minutes, so a job runs about 15–30 minutes after its time. Saving a changed time syncs too.
+      <p class="hint">GitHub is set to check every 15 minutes but often runs only every few hours, so a job runs on the first check within 6 hours after its time (once per time). Saving a changed time syncs too.
         Uses the GitHub token and repo under Keys and credit → Video clean; the token needs <b>Variables: Read and write</b>.</p>
       <p id="wake-times" class="hint"></p>
       <script>
