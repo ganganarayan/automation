@@ -842,6 +842,16 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
   const postFailed = !!(single && ['posting', 'post_failed'].includes(single.post_status) && !posting);
   const chans = single ? channelsOf(instances.parseSteps(single)) : [];
   const chanList = chans.length ? `<div class="chans">${chans.map((c) => esc(channelText(c))).join('<br>')}</div>` : '';
+  // The live links of the channels that posted, one per line so they copy out
+  // in one go (the image lane writes the same list to its sheet row).
+  const postedLinks = [...new Set(chans.filter((c) => c.state === 'ok' && c.url).map((c) => String(c.url).trim()))];
+  const noLink = chans.filter((c) => c.state === 'ok' && !c.url).length;
+  const linkBox = postedLinks.length
+    ? `<div class="links"><textarea id="plinks" readonly rows="${postedLinks.length}">${esc(postedLinks.join('\n'))}</textarea>
+        <div><button class="act primary" onclick="copyLinks()">\u29c9 Copy all</button> <span class="hint" id="lkmsg"></span></div>
+        <div class="hint">${postedLinks.map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a>`).join('<br>')}</div>
+        ${noLink ? `<div class="hint">\ud83d\udfe1 ${noLink} channel(s) posted but gave back no link.</div>` : ''}</div>`
+    : '';
   const retryBtn = chans.some((c) => c.state === 'failed') ? '<button class="act primary" onclick="retryFailed()">↻ Post to the failed channels only</button>' : '';
   const pubArt = single ? ((instances.parseSteps(single).find((x) => x.key === 'publish') || {}).artifacts || {}) : {};
   const autoNote = pubArt.retry && pubArt.retry.nextAt
@@ -860,6 +870,8 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         <button class="act primary" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span>${chanList}</div>`
     : failed
       ? `<div class="schedbar bad">🔴 Post for Me reported this post failed on every channel. Reconnect the accounts in Post for Me, then ${retryBtn || 'post again'}, or ✏ Edit it first.${autoNote} <button class="act" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span>${chanList}</div>`
+      : single && single.status === 'posted' && chans.length
+      ? `<div class="schedbar">🟢 Posted${single.posted_at ? ` on <b>${esc(formatIst(single.posted_at))} IST</b>` : ''}.${postedLinks.length ? ' The links are below, one per line.' : ''}${chanList}${linkBox}</div>`
       : '';
   const head = single
     ? `<div class="top">
@@ -930,6 +942,12 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       const r=await fetch(${JSON.stringify(single ? `/api/v1/admin/instances/${single.id}/move` : '')},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ funnelId: sel.value })});
       const j=await r.json();
       if(j.ok) location.reload(); else alert(j.error||'failed');
+    }
+    function copyLinks(){
+      const el=document.getElementById('plinks'); const m=document.getElementById('lkmsg'); if(!el) return;
+      el.select(); navigator.clipboard?.writeText(el.value)
+        .then(()=>{ if(m) m.textContent='\ud83d\udfe2 Copied'; })
+        .catch(()=>{ if(m) m.textContent='Press Ctrl+C'; });
     }
     async function retryFailed(){
       const m=document.getElementById('edmsg'); if(m) m.textContent='Re-posting…';
@@ -1440,6 +1458,8 @@ ${NAV_CSS}
  .warnt{color:#f0d68f}
  .schedbar{border:1px solid #1f4f7a;background:#12263b;border-radius:8px;padding:.6rem .8rem;margin:.4rem 0 .8rem;font-size:.86rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
  .schedbar .chans{flex-basis:100%;font-size:.82rem;line-height:1.6}
+ .schedbar .links{flex-basis:100%;display:flex;flex-direction:column;gap:.4rem}
+ .schedbar .links textarea{width:100%;font-family:ui-monospace,monospace;font-size:.8rem;resize:vertical}
  .schedbar.bad{border-color:#6b1f1f;background:#3b1212}
  fieldset.ro-set{border:0;margin:0;padding:0;min-width:0}
  .endcard{border-top:1px dashed #24243a;margin-top:.5rem;padding-top:.2rem}

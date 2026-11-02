@@ -28,8 +28,8 @@ export const REFILL_COUNT = 7;
 
 /** Columns the router keeps on the sheet (created when missing). */
 export const PFM_COL = 'pfm_post_id';
-/** The live post links, one per line, written when the post goes live. */
-export const LINKS_COL = 'post_links';
+/** The live post links, one per line in the cell, written when the post goes live. */
+export const LINKS_COL = 'posted links';
 export const SOURCE_COL = 'source';
 export const AUTO_SOURCE = 'Auto';
 
