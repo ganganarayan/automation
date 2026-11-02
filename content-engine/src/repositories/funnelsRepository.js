@@ -12,6 +12,7 @@
  * everything is set in the app.
  */
 import { query } from '../core/db.js';
+import { imageSpec } from '../utils/imageGateSpec.js';
 
 /**
  * The config fields a funnel form edits, the ONE template every funnel shares.
@@ -46,6 +47,8 @@ export const FUNNEL_FIELDS = [
     options: [
       { value: 'square', label: 'Square (1:1)' },
       { value: 'portrait', label: 'Portrait (2:3)' },
+      { value: 'story', label: 'Story / reel (9:16)' },
+      { value: 'landscape', label: 'Landscape (16:9)' },
     ],
   },
   { key: 'ig_webhook_url', label: 'IG-comment webhook URL (optional)' },
@@ -161,7 +164,10 @@ export async function resolve(funnel) {
     generateTime: c.generate_time || '22:00',
     generateDays: c.generate_days || '', // '' = daily
     publishTime: c.publish_time || '08:02',
-    imageSize: (c.image_size || 'square').toLowerCase() === 'portrait' ? '1024x1536' : '1024x1024',
+    // Image posts default to square; story (9:16) / landscape (16:9) are
+    // generated at the nearest OpenAI size and cropped (providers/imageFit).
+    imageSize: imageSpec(c.image_size, 'square').size,
+    imageKey: (c.image_size || 'square').toLowerCase(),
     igWebhookUrl: c.ig_webhook_url || '',
     captureKeyword: (c.capture_keyword || '').trim(),
     captureDmText: c.capture_dm_text || '',

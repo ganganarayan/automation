@@ -112,7 +112,7 @@ async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '
   if (!inst) throw new Error(`instance ${instanceId} not found`);
   const { full, short } = composeCaptions(fields, { ctaLink: f.ctaLink, audiencePrefix: f.audiencePrefix });
   const prompt = composePrompt(fields, note);
-  const image = await poster.generate(providers, prompt, f.imageSize);
+  const image = await poster.generate(providers, prompt, f.imageSize, f.imageKey);
   const upload = await providers.storage.uploadPng(f.driveFolder, `${poster.slug(f.name)}-${poster.slug(sheet.key)}-r${inst.round || 1}.png`, image);
   if (!upload || !upload.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
 

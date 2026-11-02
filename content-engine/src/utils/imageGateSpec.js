@@ -9,9 +9,42 @@
  * Dependencies: none.
  */
 
+/**
+ * Funnel image_size choices: the OpenAI size to generate at (OpenAI makes
+ * only 1024x1024, 1024x1536, 1536x1024) and the aspect to crop to after.
+ */
+export const IMAGE_SIZES = {
+  square: { size: '1024x1024', aspect: null },
+  portrait: { size: '1024x1536', aspect: null },
+  story: { size: '1024x1536', aspect: '9:16' },
+  landscape: { size: '1536x1024', aspect: '16:9' },
+};
+
+/** Funnel image_size -> { size, aspect } (unknown -> the fallback choice). */
+export function imageSpec(imageSize, fallback = 'portrait') {
+  return IMAGE_SIZES[String(imageSize || '').toLowerCase()] || IMAGE_SIZES[fallback];
+}
+
 /** Funnel image_size -> an OpenAI image size (portrait is the reel default). */
 export function mapImageSize(imageSize) {
-  return String(imageSize || '').toLowerCase() === 'square' ? '1024x1024' : '1024x1536';
+  return imageSpec(imageSize).size;
+}
+
+/**
+ * The centred crop box that turns a width x height image into the aspect
+ * ('9:16', '16:9'), or null when it already fits (or no aspect is asked).
+ */
+export function cropBox(width, height, aspect) {
+  const m = /^(\d+):(\d+)$/.exec(String(aspect || ''));
+  if (!m || !width || !height) return null;
+  const target = Number(m[1]) / Number(m[2]);
+  if (Math.abs(width / height - target) < 0.01) return null;
+  if (width / height > target) {
+    const w = Math.round(height * target);
+    return { left: Math.floor((width - w) / 2), top: 0, width: w, height };
+  }
+  const h = Math.round(width / target);
+  return { left: 0, top: Math.floor((height - h) / 2), width, height: h };
 }
 
 /** Parse a configured count into an integer in [1, 12], with a fallback. */

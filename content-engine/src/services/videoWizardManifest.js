@@ -154,7 +154,9 @@ export const WIZARD_STEPS = [
         key: 'image_size', label: 'Image size (image posts and AI video stills)', type: 'select', default: 'portrait',
         options: [
           { value: 'portrait', label: 'Portrait (2:3)' },
+          { value: 'story', label: 'Story / reel (9:16)' },
           { value: 'square', label: 'Square (1:1)' },
+          { value: 'landscape', label: 'Landscape (16:9)' },
         ],
       },
       {

@@ -27,6 +27,7 @@ import {
   buildImageName,
   selectKept,
 } from '../utils/imageGateSpec.js';
+import { fitImage } from '../providers/imageFit.js';
 
 export const KIND = 'image_gate';
 
@@ -38,8 +39,8 @@ async function loadFunnel(funnelId) {
 }
 
 /** Generate one image and upload it to the funnel's Drive folder. */
-async function makeImage(providers, folderId, size, prompt, name) {
-  const buf = await providers.llm.generateImage({ prompt, size });
+async function makeImage(providers, folderId, size, prompt, name, imageSize = '') {
+  const buf = await fitImage(await providers.llm.generateImage({ prompt, size }), imageSize);
   const up = await providers.storage.uploadPng(folderId, name, buf);
   return { id: up.id, url: up.downloadUrl, thumb: up.thumbnailUrl, prompt, keep: true };
 }
@@ -74,7 +75,7 @@ export async function generateForFunnel({ tenantId = 'default', funnelId, prompt
 
   const images = [];
   for (let i = 0; i < finalPrompts.length; i += 1) {
-    images.push(await makeImage(providers, cfg.drive_folder_id, size, finalPrompts[i], buildImageName('img', i, stamp)));
+    images.push(await makeImage(providers, cfg.drive_folder_id, size, finalPrompts[i], buildImageName('img', i, stamp), cfg.image_size));
   }
 
   const approvalEmail = cfg.approval_email || providers.resolved.emails.notify || providers.resolved.emails.approvalGita;
@@ -109,7 +110,7 @@ export async function regenerate(approval, body) {
     const img = images[i];
     if (regenIds.includes(img.id)) {
       const prompt = (promptMap[img.id] || img.prompt || '').toString();
-      next.push(await makeImage(providers, cfg.drive_folder_id, size, prompt, buildImageName('img', i, stamp)));
+      next.push(await makeImage(providers, cfg.drive_folder_id, size, prompt, buildImageName('img', i, stamp), cfg.image_size));
     } else {
       next.push(img);
     }

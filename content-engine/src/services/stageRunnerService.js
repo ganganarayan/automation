@@ -35,6 +35,7 @@ import * as firstComment from './firstCommentService.js';
 import { dlUrl } from '../providers/storageProvider.js';
 import { costText, costImages, costAnimation, costTts, costTranscript } from '../utils/pricing.js';
 import { mapImageSize } from '../utils/imageGateSpec.js';
+import { fitImage } from '../providers/imageFit.js';
 import { resolveAnimationConfig, clipSeconds } from '../utils/animationSpec.js';
 import {
   scriptSystemPrompt,
@@ -99,6 +100,10 @@ function ttsKeyFor(cfg, t) {
 
 /** Generate one still with the funnel's chosen image model (auto | openai | gemini). */
 async function genImage(providers, cfg, prompt, size) {
+  return fitImage(await genRaw(providers, cfg, prompt, size), cfg.image_size);
+}
+
+async function genRaw(providers, cfg, prompt, size) {
   const choice = String(cfg.image_provider || 'auto').toLowerCase();
   const r = providers.resolved || {};
   if (choice === 'gemini') return providers.llm.generateImageGemini({ prompt });

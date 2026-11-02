@@ -39,6 +39,7 @@ import { request } from '../core/httpClient.js';
 import { planHeader, colIndex, colLetter } from '../utils/routerSpec.js';
 import { childLogger } from '../core/logger.js';
 import { settings } from '../settings/index.js';
+import { fitImage } from '../providers/imageFit.js';
 
 const KIND = 'funnel_image';
 const DEFAULT_TAB = 'Sheet1';
@@ -76,12 +77,13 @@ async function nextReadyRow(sheets, sheetId, tab) {
  * when present (honors the image size), otherwise Gemini. If neither is set the
  * OpenAI path throws a clear "not configured" error.
  */
-export async function generate(providers, prompt, size) {
+export async function generate(providers, prompt, size, imageKey = '') {
   const r = providers.resolved || {};
-  if (!r.openai?.apiKey && r.gemini?.apiKey) {
-    return providers.llm.generateImageGemini({ prompt });
-  }
-  return providers.llm.generateImage({ prompt, size });
+  const buf = (!r.openai?.apiKey && r.gemini?.apiKey)
+    ? await providers.llm.generateImageGemini({ prompt })
+    : await providers.llm.generateImage({ prompt, size });
+  // 9:16 / 16:9 come out a little taller / wider: crop to the funnel's aspect.
+  return fitImage(buf, imageKey, 'square');
 }
 
 /** Generation + approval for one funnel. */
@@ -110,7 +112,7 @@ export async function runFunnel(funnelRow) {
     return;
   }
 
-  const image = await generate(providers, composePrompt(row), f.imageSize);
+  const image = await generate(providers, composePrompt(row), f.imageSize, f.imageKey);
   const upload = await providers.storage.uploadPng(f.driveFolder, `${slug(f.name)}-${row.matchKey || Date.now()}.png`, image);
   const { full, short } = composeCaptions(row, { ctaLink: f.ctaLink, audiencePrefix: f.audiencePrefix });
 
@@ -215,7 +217,7 @@ export async function rework(approval, note) {
   const log = childLogger({ module: 'funnelPoster', tenant_id: f.tenantId, funnel: f.name });
   const providers = await buildProviders(f.tenantId);
 
-  const image = await generate(providers, composePrompt({ imagePrompt: p.basePrompt }, note), f.imageSize);
+  const image = await generate(providers, composePrompt({ imagePrompt: p.basePrompt }, note), f.imageSize, f.imageKey);
   const upload = await providers.storage.uploadPng(f.driveFolder, `${slug(f.name)}-${p.matchKey || Date.now()}-rework.png`, image);
 
   const { reviewUrl } = await approvalService.createRequest({
