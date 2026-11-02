@@ -46,16 +46,33 @@ export function composePrompt(prompt, motion) {
   return [String(prompt || '').trim(), extra].filter(Boolean).join(', ');
 }
 
-/** Kling / Runway accept 5 or 10 second clips. */
+/** The funnel's clip length in whole seconds, 5 to 10 (default 5). */
+export function clipSeconds(clipLength) {
+  const n = Math.round(Number(clipLength));
+  if (!Number.isFinite(n) || n <= 0) return 5;
+  return Math.min(10, Math.max(5, n));
+}
+
+/**
+ * What a provider actually renders (and bills) for a clip length: Kling and
+ * Runway make 5 or 10 second clips, MiniMax Hailuo-02 makes 6 or 10. A length
+ * in between renders the next size up and the stitch trims it to length
+ * (stageSpec.ffmpegConcatArgs clipSec).
+ */
+export function renderSeconds(provider, clipLength) {
+  const want = clipSeconds(clipLength);
+  const short = provider === 'hailuo' ? 6 : 5;
+  return want <= short ? short : 10;
+}
+
 export function klingDuration(clipLength) {
-  return String(clipLength) === '10' ? '10' : '5';
+  return String(renderSeconds('kling', clipLength));
 }
 export function runwayDuration(clipLength) {
-  return String(clipLength) === '10' ? 10 : 5;
+  return renderSeconds('runway', clipLength);
 }
-/** MiniMax Hailuo-02 renders 6s or 10s; map a 5s request onto 6s. */
 export function hailuoDuration(clipLength) {
-  return String(clipLength) === '10' ? 10 : 6;
+  return renderSeconds('hailuo', clipLength);
 }
 
 export function normalizeKling(body) {
@@ -117,6 +134,8 @@ export default {
   base64url,
   signKlingToken,
   composePrompt,
+  clipSeconds,
+  renderSeconds,
   klingDuration,
   runwayDuration,
   hailuoDuration,

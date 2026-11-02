@@ -9,8 +9,9 @@
  *               settings, a DB, keys, or the ffmpeg binary (like utils/
  *               animationSpec, utils/videoSchedule).
  * Responsibility: Pure functions only.
- * Dependencies: none.
+ * Dependencies: utils/animationSpec (renderSeconds).
  */
+import { renderSeconds } from './animationSpec.js';
 
 /** The editable script-writer system prompt (API Keys → System prompts). */
 export const DEFAULT_SCRIPT_PROMPT =
@@ -76,9 +77,9 @@ export function aspectToSize(aspect = '9:16') {
   return map[String(aspect)] || map['9:16'];
 }
 
-/** Total animated seconds for cost = per-clip length × number of clips. */
-export function totalClipSeconds(clipLength, clipCount) {
-  const per = String(clipLength) === '10' ? 10 : 5;
+/** Total animated seconds for cost = rendered (billed) seconds per clip × number of clips. */
+export function totalClipSeconds(clipLength, clipCount, provider = 'kling') {
+  const per = renderSeconds(provider, clipLength);
   const n = Math.max(0, Math.floor(Number(clipCount) || 0));
   return per * n;
 }
@@ -126,7 +127,7 @@ export function buildSrt(cues) {
  * @param {number}   a.height
  * @param {string}   [a.subPath] - SRT path to burn in (optional)
  */
-export function ffmpegConcatArgs({ clipPaths, audioPath, outPath, width = 1080, height = 1920, subPath = '' }) {
+export function ffmpegConcatArgs({ clipPaths, audioPath, outPath, width = 1080, height = 1920, subPath = '', clipSec = 0 }) {
   const clips = (Array.isArray(clipPaths) ? clipPaths : []).filter(Boolean);
   if (!clips.length) throw new Error('ffmpegConcatArgs needs at least one clip');
   if (!audioPath) throw new Error('ffmpegConcatArgs needs an audio path');
@@ -136,8 +137,10 @@ export function ffmpegConcatArgs({ clipPaths, audioPath, outPath, width = 1080, 
   for (const c of clips) args.push('-i', c);
   args.push('-i', audioPath);
 
+  // A length the provider can't render exactly (e.g. 7 s) comes back longer: trim it.
+  const trim = clipSec > 0 ? `trim=duration=${clipSec},setpts=PTS-STARTPTS,` : '';
   const scale = (i) =>
-    `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,`
+    `[${i}:v]${trim}scale=${width}:${height}:force_original_aspect_ratio=decrease,`
     + `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1[v${i}]`;
   const parts = clips.map((_, i) => scale(i));
   const concatIn = clips.map((_, i) => `[v${i}]`).join('');

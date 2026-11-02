@@ -59,6 +59,7 @@ import {
   postTimeIso,
   normalizeSelections,
   normalizePickedAccounts,
+  parseDriveFolderId,
 } from '../utils/readyPostSpec.js';
 import * as tenantRepo from '../repositories/tenantRepository.js';
 import { settings } from '../settings/index.js';
@@ -84,9 +85,10 @@ async function loadFunnel(funnelId, pickedAccounts = null) {
 }
 
 /** The Drive folder that holds a funnel's ready videos (direct-upload override,
- *  else the funnel media folder). */
+ *  else the funnel media folder). A pasted folder link becomes its ID. */
 function readyFolder(cfg, resolved) {
-  return (cfg && cfg.direct_drive_folder) || resolved.driveFolder || '';
+  const raw = String((cfg && cfg.direct_drive_folder) || resolved.driveFolder || '').trim();
+  return parseDriveFolderId(raw) || raw;
 }
 
 /** The default caption for this funnel's direct posts. */

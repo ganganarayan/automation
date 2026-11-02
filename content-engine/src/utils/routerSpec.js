@@ -152,6 +152,30 @@ export function nextMatchKeys(rows = [], count = REFILL_COUNT, now = DateTime.no
 }
 
 /** Landing page HTML → plain text for the LLM, capped. */
+/**
+ * The funnel's landing page setting → its URLs: one per line (commas and
+ * spaces also split), http(s) only, de-duped, at most 10.
+ */
+export function landingUrls(raw) {
+  const seen = new Set();
+  const out = [];
+  for (const t of String(raw || '').split(/[\s,]+/)) {
+    const u = t.trim();
+    if (!/^https?:\/\/\S+$/i.test(u) || seen.has(u.toLowerCase())) continue;
+    seen.add(u.toLowerCase());
+    out.push(u);
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+/** The prompt line naming the landing page(s). */
+export function landingLine(raw) {
+  const urls = landingUrls(raw);
+  if (!urls.length) return 'Landing page: (none set)';
+  return urls.length === 1 ? `Landing page: ${urls[0]}` : `Landing pages:\n${urls.map((u) => `- ${u}`).join('\n')}`;
+}
+
 export function htmlToText(html, cap = 6000) {
   const text = String(html || '')
     .replace(/<(script|style|noscript|svg|template)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
@@ -242,7 +266,7 @@ export function refillPrompt({ funnelName = '', landingUrl = '', landingText = '
     ...fields.map((f) => `- ${f}`),
   ].join('\n');
   const user = [
-    landingUrl ? `Landing page: ${landingUrl}` : 'Landing page: (none set)',
+    landingLine(landingUrl),
     landingText ? `Landing page text:\n${landingText}` : '',
     examples.length ? `Image prompts already used on this sheet (match their style, not their topics):\n${examples.map((e) => `- ${e}`).join('\n')}` : '',
     history.length ? `Past posts (do NOT repeat these topics or angles):\n${history.map((e) => `- ${e}`).join('\n')}` : 'Past posts: none yet.',
@@ -497,7 +521,7 @@ export function researchPrompt({ funnelName = '', landingUrl = '', landingText =
     'Return ONLY a JSON object: {"topic": "...", "angle": "...", "format": "...", "title": "a short title", "caption": "the post caption (hook first, call to action last, no links)"}',
   ].join('\n');
   const user = [
-    landingUrl ? `Landing page: ${landingUrl}` : 'Landing page: (none set)',
+    landingLine(landingUrl),
     landingText ? `Landing page text:\n${landingText}` : '',
     history.length ? `Past posts (do NOT repeat these topics or angles):\n${history.map((e) => `- ${e}`).join('\n')}` : 'Past posts: none yet.',
     'Pick the next video.',
@@ -550,7 +574,7 @@ export const NUDGE_TEXT = 'Video lanes are empty. Upload ready videos or top up 
 export default {
   LANES, IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, SOURCE_COL, AUTO_SOURCE, SHEET_STATUS,
   routerTarget, runsOn, laneForInstance, existingReason, postAtFor, colLetter, planHeader, colIndex, rowKey,
-  readyRows, pickReadyRow, nextMatchKeys, htmlToText, historyLines, instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt,
+  readyRows, pickReadyRow, nextMatchKeys, htmlToText, landingUrls, landingLine, historyLines, instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt,
   normalizeRefill, rowsForSheet,
   VIDEO_REVIEW, pickOldestVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, VIDEO_PROVIDERS, providerOrder,
   isCreditError, creditState, creditView, chooseProvider, laneTwoVerdict, dryTransition, researchPrompt, normalizeResearch, briefTopic,

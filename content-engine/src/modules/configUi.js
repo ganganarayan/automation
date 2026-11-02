@@ -46,6 +46,9 @@ import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { buildProviders } from '../services/providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { listElevenLabsVoices } from '../providers/ttsProvider.js';
+import { settings } from '../settings/index.js';
+import { listReadyVideos } from '../services/readyPostService.js';
+import { parseDriveFolderId } from '../utils/readyPostSpec.js';
 import { keyOk, gateState, currentSession } from '../services/accessService.js';
 import * as wakeSchedule from '../services/wakeScheduleService.js';
 
@@ -140,7 +143,9 @@ export function register(ctx) {
         const set = body.set || {};
         for (const field of funnels.FUNNEL_FIELDS) {
           if (!(field.key in set)) continue;
-          const val = String(set[field.key] ?? '');
+          let val = String(set[field.key] ?? '');
+        // A pasted Drive folder link is stored as its folder ID.
+        if (field.driveFolder) val = parseDriveFolderId(val) || val;
           if (field.type === 'secret') {
             if (val.trim() !== '') await funnels.setConfig(id, field.key, val);
           } else if (val.trim() === '') {
@@ -283,6 +288,31 @@ export function register(ctx) {
       res.json({ ok: true, complete: completeness(cfg) });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Lane 1 page: the unposted videos in the ready folder (the one typed on the
+  // page, else the saved one), for "Prepare selected" on the Prepare page.
+  router.post('/admin/funnels/:id/ready-videos', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const id = Number(req.params.id);
+      const funnel = await funnels.get(id);
+      if (!funnel) return res.status(404).json({ ok: false, error: 'funnel not found' });
+      const folder = parseDriveFolderId(req.body?.folder || '');
+      const r = await listReadyVideos({ tenantId: req.tenantId, funnelId: id, folder });
+      const drafts = r.drafts || {};
+      res.json({
+        ok: true,
+        folder: r.folder || '',
+        listError: r.listError || '',
+        saEmail: r.saEmail || '',
+        videos: (r.videos || []).map((v) => ({
+          id: v.id, name: v.name, created: v.createdTime ? formatIst(v.createdTime) : '', started: !!drafts[v.id],
+        })),
+      });
+    } catch (err) {
+      res.json({ ok: false, error: err.message });
     }
   });
 
@@ -476,7 +506,7 @@ ${NAV_CSS}
  legend{color:#9a9ab0;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;padding:0 .4rem}
  label{display:block;margin:.6rem 0 .2rem;font-size:.85rem;color:#c7c7d9}
  .field input,.field select{width:100%}
- .mods{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:.6rem}
+ .mods{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:.6rem}
  .mod{display:flex;justify-content:space-between;align-items:center;gap:.5rem;background:#15151f;border:1px solid #24243a;border-radius:8px;padding:.5rem .7rem}
  .mod span{font-size:.85rem}
  .save{margin-top:.5rem;background:#0a7d32;color:#fff;border:0;border-radius:8px;padding:.6rem 1.3rem;font-size:.95rem;cursor:pointer}
@@ -818,6 +848,21 @@ function imageGateTestBlock() {
   </div>`;
 }
 
+// Lane 1 only: list the folder's unposted videos, tick some, and open them on
+// the Prepare page (transcribe, AI copy + thumbnails, schedule), the same flow
+// as Library's "+ New".
+function readyVideosBlock(field) {
+  return `<div class="field">
+    <label>${esc(field.label)}</label>
+    <div class="row">
+      <button type="button" class="act" onclick="loadVideos()">↻ Load videos</button>
+      <button type="button" class="act" id="rv-go" onclick="prepareVideos()" style="display:none">Prepare selected →</button>
+      <span id="rv-status" class="hint"></span>
+    </div>
+    <div id="rv-list" class="acctlist"></div>
+  </div>`;
+}
+
 function wizardPage({ funnel, cfg, stepIndex, complete }) {
   const total = WIZARD_STEPS.length;
   const step = WIZARD_STEPS[stepIndex];
@@ -836,6 +881,7 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
   const fieldsHtml = step.fields
     .map((field) => {
       if (field.type === 'heading') return `<h2 class="sect">${esc(field.label)}</h2>`;
+      if (field.type === 'ready_videos') return readyVideosBlock(field);
       if (field.key === 'postforme_api_key') return funnelKeyRow(field, cfg, funnel.id);
       if (field.key === 'postforme_accounts') return pfmAccountsRow(cfg, funnel.id);
       if (field.key === 'account_map') return '';
@@ -967,6 +1013,28 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
  }
  async function nav(i){if(i<0||i>=TOTAL||i===STEP)return;const ok=await save();if(ok!==false)location.href=BASE+'?step='+i;}
  async function finish(){const ok=await save();if(ok!==false)location.href='/api/v1/admin/settings#funnels';}
+ async function loadVideos(){
+   const st=document.getElementById('rv-status'),box=document.getElementById('rv-list'),go=document.getElementById('rv-go');
+   const inp=document.querySelector('#wform [name="set[direct_drive_folder]"]');
+   st.textContent='Loading…';st.style.color='';box.innerHTML='';go.style.display='none';
+   try{
+     const r=await fetch(FUNNEL_BASE+'/ready-videos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder:inp?inp.value.trim():''})});
+     const j=await r.json();
+     if(!j.ok){st.textContent='🔴 '+(j.error||'failed');st.style.color='#ff9a9a';return;}
+     if(j.listError){st.textContent='🟡 Could not read the folder: '+j.listError+(j.saEmail?' Share it with '+j.saEmail+' or make it public (anyone with the link).':' Make it public (anyone with the link).');st.style.color='#ffd479';return;}
+     if(!j.folder){st.textContent='🟡 Paste the folder link above (or set the media folder on Shared basics).';st.style.color='#ffd479';return;}
+     if(!j.videos.length){st.textContent='🟡 No unposted videos in that folder.';st.style.color='#ffd479';return;}
+     box.innerHTML=j.videos.map(function(v){return '<label class="acct"><input type="checkbox" data-rv="'+esc2(v.id)+'" data-name="'+esc2(v.name)+'"> '+esc2(v.name)+(v.created?' <span class="hint" style="margin:0">'+esc2(v.created)+'</span>':'')+(v.started?' <span class="hint" style="margin:0">(started)</span>':'')+'</label>';}).join('');
+     st.textContent='🟢 '+j.videos.length+' unposted video'+(j.videos.length===1?'':'s')+', newest first: tick the ones to prepare.';st.style.color='#5bd08a';
+     go.style.display='';
+   }catch(e){st.textContent='🔴 '+(e.message||'failed');st.style.color='#ff9a9a';}
+ }
+ async function prepareVideos(){
+   const picked=[];document.querySelectorAll('[data-rv]').forEach(function(b){if(b.checked)picked.push({id:b.dataset.rv,name:b.dataset.name});});
+   if(!picked.length){toast('Tick at least one video',true);return;}
+   const ok=await save();if(ok===false)return;
+   location.href='/api/v1/admin/instances/prepare?funnel='+FID+'&picked='+encodeURIComponent(JSON.stringify(picked));
+ }
  function syncDays(gid){const boxes=document.querySelectorAll('[data-daygroup="'+gid+'"]');const vals=[];boxes.forEach(b=>{if(b.checked)vals.push(b.value);});const h=document.getElementById(gid);if(h)h.value=vals.join(',');}
  function syncPfm(fid){const boxes=document.querySelectorAll('[data-pfm="'+fid+'"]');const ids=[];const map={};boxes.forEach(b=>{if(b.checked){ids.push(b.value);map[b.value]={platform:b.dataset.plat||'',account_name:b.dataset.name||''};}});const a=document.getElementById('pfmaccts-'+fid);if(a)a.value=JSON.stringify(ids);const m=document.getElementById('pfmmap-'+fid);if(m)m.value=JSON.stringify(map);}
  function renderPfm(fid,accounts){const box=document.getElementById('pfmlist-'+fid);let selected=[];try{selected=JSON.parse(document.getElementById('pfmaccts-'+fid).value||'[]');}catch(_){}if(!accounts.length){box.innerHTML='<span class="hint">No connected accounts found for that key.</span>';return;}box.innerHTML=accounts.map(function(x){const ck=selected.indexOf(x.id)>=0?'checked':'';return '<label class="acct"><input type="checkbox" value="'+esc2(x.id)+'" data-pfm="'+fid+'" data-plat="'+esc2(x.platform)+'" data-name="'+esc2(x.name)+'" onchange="syncPfm('+fid+')" '+ck+'> <b>'+esc2(x.platform)+'</b>, '+esc2(x.name)+'</label>';}).join('');syncPfm(fid);}
@@ -1032,8 +1100,10 @@ function appSection(app, tenantId, configMap, key, extra = '') {
     .map((mod) => {
       const choice = configService.moduleChoice(configMap, app, mod.key);
       const opt = (v, lbl) => `<option value="${v}"${choice === v ? ' selected' : ''}>${lbl}</option>`;
-      return `<div class="mod"><span>${esc(mod.label)}</span>
-        <select name="mod[${esc(mod.key)}]">${opt('default', 'Default')}${opt('true', 'On')}${opt('false', 'Off')}</select></div>`;
+      // "Default" is the platform setting; say what it is so the choice is clear.
+      const def = settings.modules && settings.modules[mod.key] ? 'on' : 'off';
+      return `<div class="mod"><span>${esc(mod.label)}${mod.help ? `<small class="hint" style="display:block;margin-top:.2rem">${esc(mod.help)}</small>` : ''}</span>
+        <select name="mod[${esc(mod.key)}]">${opt('default', `Default (${def})`)}${opt('true', 'On')}${opt('false', 'Off')}</select></div>`;
     })
     .join('');
 
@@ -1044,7 +1114,7 @@ function appSection(app, tenantId, configMap, key, extra = '') {
       <input type="hidden" name="tenant" value="${esc(tenantId)}">
       <input type="hidden" name="key" value="${esc(key)}">
       ${groups}
-      ${mods ? `<fieldset><legend>Background jobs (apply to all funnels)</legend><div class="mods">${mods}</div></fieldset>` : ''}
+      ${mods ? `<fieldset><legend>Background jobs (not per funnel)</legend><div class="mods">${mods}</div></fieldset>` : ''}
       <button class="save" type="submit">Save ${esc(m.label)}</button>
     </form>
     ${extra}
@@ -1103,7 +1173,8 @@ function fieldRow(field, configMap) {
       })
       .join('');
     return `<div class="field"><label>${esc(field.label)}</label>
-      <select name="set[${esc(field.key)}]" class="pick">${opts}</select></div>`;
+      <select name="set[${esc(field.key)}]" class="pick">${opts}</select>
+      ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
   }
   if (field.type === 'model_select') {
     const val = has ? current : (field.default || field.placeholder || '');
@@ -1152,7 +1223,7 @@ function fieldRow(field, configMap) {
           const esc=(x)=>String(x).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
           let j;
           try{ j=await (await fetch('/api/v1/admin/tts/voices')).json(); }catch(e){ j={ok:false,error:e.message}; }
-          if(!j.ok){ m.textContent=(j.missingKey?'🟡 ':'🟡 Could not load voices: ')+(j.error||'failed')+' Type a voice ID instead.'; return; }
+          if(!j.ok){ m.textContent=(j.missingKey?'🟡 ':'🟡 Could not load voices: ')+(j.error||'failed')+(/voice ID/.test(j.error||'')?'':' Type a voice ID instead.'); return; }
           const cur=i.value.trim(), vs=j.voices||[];
           const known=vs.some((v)=>v.voice_id===cur);
           let h=cur?'':'<option value="" selected>Choose a voice…</option>';
@@ -1262,8 +1333,9 @@ function secretJsonSummary(raw) {
       ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
   }
   return `<div class="field"><label>${esc(field.label)}</label>
-    <input type="text" name="set[${esc(field.key)}]" value="${esc(has ? current : '')}"
-      placeholder="${field.placeholder ? esc(field.placeholder) : ''}"></div>`;
+    <input type="text" name="set[${esc(field.key)}]" value="${esc(has ? current : '')}" autocomplete="off"
+      placeholder="${field.placeholder ? esc(field.placeholder) : ''}">
+    ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
 }
 
 // Monotonic id source for widgets that need unique DOM ids within a page.

@@ -32,7 +32,7 @@ export function createFfmpegProvider(cfg = {}, log) {
   const bin = cfg.bin || process.env.FFMPEG_PATH || 'ffmpeg';
 
   return {
-    async stitch({ clipBuffers, audioBuffer, width = 1080, height = 1920, srtText = '', audioExt = 'mp3' }) {
+    async stitch({ clipBuffers, audioBuffer, width = 1080, height = 1920, srtText = '', audioExt = 'mp3', clipSec = 0 }) {
       const clips = (Array.isArray(clipBuffers) ? clipBuffers : []).filter((b) => b && b.length);
       if (!clips.length) throw new ExternalAPIError('stitch needs at least one clip');
       if (!audioBuffer || !audioBuffer.length) throw new ExternalAPIError('stitch needs audio');
@@ -55,7 +55,7 @@ export function createFfmpegProvider(cfg = {}, log) {
         }
 
         const outPath = join(dir, 'reel.mp4');
-        const args = ffmpegConcatArgs({ clipPaths, audioPath, outPath, width, height, subPath });
+        const args = ffmpegConcatArgs({ clipPaths, audioPath, outPath, width, height, subPath, clipSec });
         log?.info?.({ clips: clipPaths.length, captions: !!subPath }, 'ffmpeg stitch start');
         await run(bin, args, { maxBuffer: 64 * 1024 * 1024 });
 

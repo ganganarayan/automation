@@ -47,7 +47,7 @@ export const CONFIG_MANIFEST = {
           { key: 'kling_secret_key', label: 'Kling secret key', type: 'secret' },
           { key: 'runway_api_key', label: 'Runway API key', type: 'secret' },
           { key: 'hailuo_api_key', label: 'Hailuo / MiniMax API key', type: 'secret' },
-          { key: 'hailuo_group_id', label: 'Hailuo / MiniMax GroupId', placeholder: 'from the MiniMax console' },
+          { key: 'hailuo_group_id', label: 'Hailuo / MiniMax GroupId', placeholder: 'a long number, e.g. 1234567890123456789', help: 'MiniMax console (platform.minimax.io): Account, Basic information, GroupID. A number, not your email. Hailuo needs it to download each finished clip.' },
         ],
       },
       {
@@ -218,8 +218,14 @@ export const CONFIG_MANIFEST = {
     // (Legacy ig_* / video_* / factory_* keys are no longer edited here; any
     // stored values are still read by tenantSettings.forTenant.)
     modules: [
-      { key: 'vidapulseRefill', label: 'VidaPulse content refill (09:00)' },
-      { key: 'delivery', label: 'Delivery log & daily reports' },
+      {
+        key: 'vidapulseRefill', label: 'VidaPulse content refill (09:00 IST)',
+        help: 'Only for the VidaPulse sheet: when it has 5 or fewer ready rows, writes 30 new scripts and emails them to you as an Excel file. Funnels refill their own sheets through the router (Lane 3), so leave this Off unless you still use that VidaPulse sheet.',
+      },
+      {
+        key: 'delivery', label: 'Delivery log & daily reports',
+        help: 'Records each Post for Me result (posted / failed) and emails the daily delivery reports (08:30 IST). On is recommended.',
+      },
     ],
   },
 

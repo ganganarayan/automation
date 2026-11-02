@@ -13,14 +13,19 @@
  * Field descriptor shape (matches configManifest / FUNNEL_FIELDS so the existing
  * fieldRow renderer handles it): { key, label, type?, options?, default?,
  * placeholder?, help? }. Supported types: text (default) | time | weekdays |
- * select | secret | json | textarea, plus { type: 'heading', label } for a
- * section title (no key, never saved). The publish step's postforme_* fields are
- * rendered by the account-picker widgets, keyed by name.
+ * select | secret | json | textarea (driveFolder: true stores a pasted folder
+ * link as its ID), plus { type: 'ready_videos' } for Lane 1's video list and
+ * { type: 'heading', label } for a section title (neither has a key or is
+ * saved). The publish step's postforme_* fields are rendered by the
+ * account-picker widgets, keyed by name.
  *
  * Values persist to funnel_config as flat keys; downstream pipeline steps read
  * them. Building the wizard shell (this step) does not wire the providers, a
  * saved field is just stored config until its stage is built.
  */
+
+/** Clip lengths offered for Lane 2 (animationSpec.clipSeconds clamps to these). */
+export const CLIP_SECONDS = [5, 6, 7, 8, 9, 10];
 
 export const WIZARD_STEPS = [
   {
@@ -32,9 +37,9 @@ export const WIZARD_STEPS = [
     fields: [
       { key: 'approval_email', label: 'Approval email' },
       { key: 'cta_link', label: 'CTA / assessment link' },
-      { key: 'landing_page_url', label: 'Landing page link', placeholder: 'https://…', help: 'The router researches new topics (AI video, image posts) from this page.' },
+      { key: 'landing_page_url', label: 'Landing page links (one per line)', type: 'textarea', placeholder: 'https://…\nhttps://…', help: 'The router researches new topics (AI video, image posts) from all of these pages.' },
       { key: 'audience_prefix', label: 'Audience prefix (caption line, optional)' },
-      { key: 'drive_folder_id', label: 'Drive media folder for this funnel', help: 'AI videos and stills are saved here. Also the ready-video folder when Lane 1 has none of its own.' },
+      { key: 'drive_folder_id', label: 'Drive media folder for this funnel', driveFolder: true, placeholder: 'folder link or ID', help: 'AI videos and stills are saved here. Also the ready-video folder when Lane 1 has none of its own.' },
       { key: 'publish_time', label: 'Publish time (IST)', type: 'time', default: '08:02' },
       { key: 'generate_days', label: 'Days to post (blank = every day)', type: 'weekdays' },
       { key: 'generate_time', label: 'Prepare time (IST)', type: 'time', default: '22:00', help: 'The older per-funnel trigger. The router also checks every afternoon at the router check time on the settings page.' },
@@ -47,7 +52,8 @@ export const WIZARD_STEPS = [
     desc: 'First choice every day. The router takes the oldest unposted video in this Drive folder. A same-name .jpg/.png and .txt next to it are used as its thumbnail and caption, and it is scheduled with no approval; otherwise it is transcribed, the AI writes the copy and thumbnail, and you get one approval email.',
     requiredFn: readyRequired,
     fields: [
-      { key: 'direct_drive_folder', label: 'Drive folder of ready videos (blank = the funnel media folder)', placeholder: 'Drive folder ID' },
+      { key: 'direct_drive_folder', label: 'Drive folder of ready videos (blank = the funnel media folder)', driveFolder: true, placeholder: 'folder link or ID' },
+      { type: 'ready_videos', label: 'Videos in the folder' },
       { key: 'direct_copy_brief', label: 'AI copy: brand / voice brief (title, description, captions for each video)', type: 'textarea', placeholder: 'e.g. calm, practical tone; speak to founders; always use #gitawisdom' },
       { key: 'direct_caption', label: 'Fallback caption (Instagram & LinkedIn caption, YouTube description; the CTA link is appended)', type: 'textarea', placeholder: 'default caption for these posts' },
       { key: 'direct_yt_title', label: 'Fallback YouTube title', placeholder: 'title shown on YouTube' },
@@ -89,9 +95,9 @@ export const WIZARD_STEPS = [
       {
         key: 'clip_length', label: 'Clip length', type: 'select', default: '5',
         options: [
-          { value: '5', label: '5 seconds' },
-          { value: '10', label: '10 seconds' },
+          ...CLIP_SECONDS.map((n) => ({ value: String(n), label: `${n} seconds` })),
         ],
+        help: 'Kling and Runway make 5 or 10 second clips (Hailuo 6 or 10). A length in between is made at the next size up, billed at that size, and trimmed when stitched.',
       },
       {
         key: 'motion', label: 'Motion', type: 'select', default: 'subtle',

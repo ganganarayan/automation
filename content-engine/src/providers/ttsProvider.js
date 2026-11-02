@@ -49,6 +49,21 @@ export function createTtsProvider(cfg = {}, log) {
 }
 
 /**
+ * A failed voices call → a message the operator can act on. A restricted key
+ * without the voices_read permission says how to fix it in ElevenLabs.
+ */
+export function voicesErrorText(status, detail = '') {
+  const d = String(detail || '');
+  if (/missing_permissions|voices_read/i.test(d)) {
+    return 'The ElevenLabs key is set, but it is a restricted key without the "Voices: Read" permission. '
+      + 'In ElevenLabs open Developers, API Keys, edit this key and set Voices to Read (keep Text to Speech on), '
+      + 'or paste the voice ID below.';
+  }
+  if (status === 401) return 'ElevenLabs rejected the key (401). Check the ElevenLabs key on Keys and credit.';
+  return `ElevenLabs voices failed (${status}): ${d.slice(0, 200)}`;
+}
+
+/**
  * The voices on an ElevenLabs account, for the wizard's Voice picker.
  * GET /v2/voices pages with next_page_token (page_size max 100); a short page
  * cap keeps a huge library from stalling the request.
@@ -66,7 +81,7 @@ export async function listElevenLabsVoices(apiKey, { fetchImpl = fetch, maxPages
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
-      throw new ExternalAPIError(`ElevenLabs voices failed (${res.status}): ${detail.slice(0, 200)}`);
+      throw new ExternalAPIError(voicesErrorText(res.status, detail));
     }
     const data = await res.json();
     for (const v of data.voices || []) {
@@ -78,4 +93,4 @@ export async function listElevenLabsVoices(apiKey, { fetchImpl = fetch, maxPages
   return voices.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export default { createTtsProvider, listElevenLabsVoices };
+export default { createTtsProvider, listElevenLabsVoices, voicesErrorText };

@@ -42,7 +42,7 @@ import { costImages } from '../utils/pricing.js';
 import { formatIst } from '../utils/time.js';
 import {
   IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, SOURCE_COL, SHEET_STATUS,
-  readyRows, pickReadyRow, planHeader, colLetter, nextMatchKeys, htmlToText, historyLines,
+  readyRows, pickReadyRow, planHeader, colLetter, nextMatchKeys, htmlToText, landingUrls, historyLines,
   instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt, normalizeRefill, rowsForSheet, postAtFor,
 } from '../utils/routerSpec.js';
 import { childLogger } from '../core/logger.js';
@@ -57,16 +57,26 @@ export class LaneError extends Error {}
 const recipient = (f, providers) => f.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
 const art = (steps, k) => ((steps.find((s) => s.key === k) || {}).artifacts) || {};
 
-/** The funnel's landing page as plain text ('' when unset or unreachable). Lane 2 research uses it too. */
-export async function landingText(url, log) {
-  if (!url) return '';
-  try {
-    const res = await request(url, { label: 'landing.page', log, retries: 0, timeoutMs: 15000, headers: { Accept: 'text/html' } });
-    return res.ok ? htmlToText(res.text, 6000) : '';
-  } catch (err) {
-    log.warn({ err: err.message, url }, 'landing page fetch failed (refilling without it)');
-    return '';
-  }
+/**
+ * The funnel's landing page(s) as plain text ('' when unset or unreachable),
+ * one block per page, about 6000 characters shared between them. Lane 2
+ * research uses it too.
+ */
+export async function landingText(raw, log) {
+  const urls = landingUrls(raw);
+  if (!urls.length) return '';
+  const cap = Math.max(1500, Math.floor(6000 / urls.length));
+  const pages = await Promise.all(urls.map(async (url) => {
+    try {
+      const res = await request(url, { label: 'landing.page', log, retries: 0, timeoutMs: 15000, headers: { Accept: 'text/html' } });
+      return res.ok ? htmlToText(res.text, cap) : '';
+    } catch (err) {
+      log.warn({ err: err.message, url }, 'landing page fetch failed (researching without it)');
+      return '';
+    }
+  }));
+  if (urls.length === 1) return pages[0];
+  return urls.map((u, i) => (pages[i] ? `[${u}]\n${pages[i]}` : '')).filter(Boolean).join('\n\n');
 }
 
 /**

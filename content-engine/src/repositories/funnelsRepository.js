@@ -26,7 +26,7 @@ export const FUNNEL_FIELDS = [
   { key: 'account_map', label: 'Account map (JSON id → {platform,account_name})', type: 'json' },
   { key: 'approval_email', label: 'Approval email' },
   { key: 'cta_link', label: 'CTA / assessment link' },
-  { key: 'landing_page_url', label: 'Landing page link', placeholder: 'https://…' },
+  { key: 'landing_page_url', label: 'Landing page links (one per line)', type: 'textarea', placeholder: 'https://…' },
   { key: 'audience_prefix', label: 'Audience prefix (caption line, optional)' },
   { key: 'generate_time', label: 'Generate/approval time (IST)', type: 'time', default: '22:00' },
   { key: 'generate_days', label: 'Days to run (blank = every day)', type: 'weekdays' },

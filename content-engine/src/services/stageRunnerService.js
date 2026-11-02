@@ -35,7 +35,7 @@ import * as firstComment from './firstCommentService.js';
 import { dlUrl } from '../providers/storageProvider.js';
 import { costText, costImages, costAnimation, costTts, costTranscript } from '../utils/pricing.js';
 import { mapImageSize } from '../utils/imageGateSpec.js';
-import { resolveAnimationConfig } from '../utils/animationSpec.js';
+import { resolveAnimationConfig, clipSeconds } from '../utils/animationSpec.js';
 import {
   scriptSystemPrompt,
   scriptUserPrompt,
@@ -206,7 +206,7 @@ async function runAnimate(ctx, images) {
     clips.push({ driveId: up.id, url: up.downloadUrl, sourceImageId: images[i].driveId });
   }
   await instanceService.updateStep(instance.id, 'animate', { status: 'done', artifacts: { clips }, finishedAt: new Date().toISOString() });
-  await instanceService.recordCost(instance.id, 'animate', costAnimation({ provider: anim.provider, seconds: totalClipSeconds(cfg.clip_length, clips.length) }));
+  await instanceService.recordCost(instance.id, 'animate', costAnimation({ provider: anim.provider, seconds: totalClipSeconds(cfg.clip_length, clips.length, anim.provider) }));
   return clips;
 }
 
@@ -267,7 +267,7 @@ async function runStitch(ctx, clips, audioBuffer, cues) {
   const clipBuffers = [];
   for (const c of clips) clipBuffers.push(await providers.storage.download(c.driveId));
   const srtText = (String(cfg.burn_captions || 'on') !== 'off' && Array.isArray(cues) && cues.length) ? buildSrt(cues) : '';
-  const { buffer, durationSeconds } = await ffmpeg.stitch({ clipBuffers, audioBuffer, width, height, srtText });
+  const { buffer, durationSeconds } = await ffmpeg.stitch({ clipBuffers, audioBuffer, width, height, srtText, clipSec: clipSeconds(cfg.clip_length) });
   const up = await providers.storage.uploadMedia(folder, buildMediaName('reel', Date.now().toString(36), 0, 'mp4'), 'video/mp4', buffer);
   await instanceService.updateStep(instance.id, 'stitch', { status: 'done', artifacts: { video: { driveId: up.id, durationSec: Math.round(durationSeconds) } }, finishedAt: new Date().toISOString() });
   await instanceRepo.setMeta(instance.id, { durationSeconds: Math.round(durationSeconds) });
@@ -419,7 +419,7 @@ async function manualAnimate(ctx, promptOverride) {
     clips.push({ driveId: up.id, url: up.downloadUrl, sourceImageId: images[i].driveId });
   }
   await instanceService.updateStep(instance.id, 'animate', { status: 'done', artifacts: { clips }, finishedAt: new Date().toISOString() });
-  await instanceService.recordCost(instance.id, 'animate', costAnimation({ provider: anim.provider, seconds: totalClipSeconds(cfg.clip_length, clips.length) }));
+  await instanceService.recordCost(instance.id, 'animate', costAnimation({ provider: anim.provider, seconds: totalClipSeconds(cfg.clip_length, clips.length, anim.provider) }));
   return clips;
 }
 
