@@ -67,4 +67,28 @@ export async function recent({ tenantId, limit = 50 }) {
   return rows;
 }
 
-export default { create, findById, consumeToken, setPayload, setStatus, reopenForRework, recent };
+/** Open (pending, link unused) approvals that belong to an instance, newest first. */
+export async function openForInstances({ tenantId, limit = 500 }) {
+  const { rows } = await query(
+    `SELECT id, tenant_id, kind, payload, status, token_used, created_at
+       FROM approvals
+      WHERE tenant_id = $1 AND status = 'pending' AND token_used = false
+        AND payload->>'instanceId' IS NOT NULL
+      ORDER BY created_at DESC LIMIT $2`,
+    [tenantId, limit],
+  );
+  return rows;
+}
+
+/** The newest open approval for one instance, or null. */
+export async function openForInstance(instanceId) {
+  const { rows } = await query(
+    `SELECT * FROM approvals
+      WHERE payload->>'instanceId' = $1 AND status = 'pending' AND token_used = false
+      ORDER BY created_at DESC LIMIT 1`,
+    [String(instanceId)],
+  );
+  return rows[0] || null;
+}
+
+export default { create, findById, consumeToken, setPayload, setStatus, reopenForRework, recent, openForInstances, openForInstance };

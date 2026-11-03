@@ -42,7 +42,10 @@ import { formatIst } from '../utils/time.js';
 import { defaultSlotsIso, parseDriveFolderId, parsePickedFiles } from '../utils/readyPostSpec.js';
 import { driveThumbUrl } from '../utils/reviewSpec.js';
 import { postedLinks } from '../utils/routerSpec.js';
-import { keyOk, currentSession } from '../services/accessService.js';
+import { keyOk, currentSession, canApprove } from '../services/accessService.js';
+import * as approvalService from '../services/approvalService.js';
+import * as approvalsRepo from '../repositories/approvalRepository.js';
+import { pendingByInstance, approvalButtons, reviewFields, applyReviewEdit } from '../utils/approvalButtons.js';
 
 const MANUAL_JOB = 'manual_stage';
 
@@ -66,11 +69,16 @@ export function register(ctx) {
       await readyPost.refreshScheduled({ tenantId: req.tenantId }).catch((err) => log.warn({ err: err.message }, 'scheduled refresh failed'));
       // Label / funnel chips filter in memory over a wider page; an old ?status=
       // bookmark still filters in SQL.
-      const [all, funnelList] = await Promise.all([
+      const [all, funnelList, approver] = await Promise.all([
         instances.list({ tenantId: req.tenantId, status, limit: 300 }),
         funnelsRepo.listByTenant(req.tenantId).catch(() => []),
+        canApprove(req),
       ]);
-      await sendPage(req, res, listPage(all, { status, label, funnel, funnelList }));
+      // Waiting on the user: the open approval per instance, for Review / Approve.
+      const pending = approver
+        ? pendingByInstance(await approvalsRepo.openForInstances({ tenantId: req.tenantId }).catch(() => []))
+        : new Map();
+      await sendPage(req, res, listPage(all, { status, label, funnel, funnelList, pending, approver }));
     } catch (err) {
       next(err);
     }
@@ -424,6 +432,62 @@ export function register(ctx) {
     }
   });
 
+  // Approve from the app (a phone, say), not only from the email. Review shows
+  // the script (or the reel at the final checkpoint) and Saves edits only;
+  // Approve does exactly what the email link's Approve does.
+  const approvalFor = async (req) => {
+    const row = await instances.get(req.params.id);
+    if (!row) return { row: null };
+    const approval = await approvalsRepo.openForInstance(row.id);
+    const steps = instances.parseSteps(row);
+    const buttons = approvalButtons(row, approval, { canApprove: true, videoId: finalVideoId(steps) });
+    return { row, steps, approval: buttons ? approval : null, buttons };
+  };
+  const scriptArtifacts = (steps) => ((steps || []).find((s) => s.key === 'script') || {}).artifacts || {};
+
+  router.get('/admin/instances/:id/review', async (req, res, next) => {
+    try {
+      if (!(await guardHtml(req, res))) return;
+      if (!(await canApprove(req))) return res.redirect(`/api/v1/admin/instances/${encodeURIComponent(req.params.id)}`);
+      const { row, steps, approval, buttons } = await approvalFor(req);
+      if (!row) return res.redirect('/api/v1/admin/instances');
+      await sendPage(req, res, reviewPage(row, steps, approval, buttons, scriptArtifacts(steps)));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/admin/instances/:id/review/save', async (req, res) => {
+    try {
+      if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to save' });
+      const { row, steps, approval } = await approvalFor(req);
+      if (!row) return res.status(404).json({ ok: false, error: 'instance not found' });
+      if (!approval) return res.status(409).json({ ok: false, error: 'this is no longer waiting for approval' });
+      const edit = applyReviewEdit(approval, scriptArtifacts(steps), req.body || {});
+      if (!edit) return res.status(400).json({ ok: false, error: 'nothing to edit at this checkpoint' });
+      await instances.updateStep(row.id, 'script', { artifacts: edit.artifacts });
+      await approvalsRepo.setPayload(approval.id, edit.payload);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  router.post('/admin/instances/:id/approve', async (req, res) => {
+    try {
+      if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to approve' });
+      const { row, approval } = await approvalFor(req);
+      if (!row) return res.status(404).json({ ok: false, error: 'instance not found' });
+      if (!approval) return res.status(409).json({ ok: false, error: 'this is no longer waiting for approval' });
+      const r = await approvalService.approveById(approval.id);
+      if (!r.ok) return res.status(409).json({ ok: false, error: 'already approved or sent back (maybe from the email)' });
+      log.info({ instance: row.id, approval: approval.id, kind: r.kind }, 'approved from the app');
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   log.info('instances UI routes registered');
 }
 
@@ -474,7 +538,7 @@ function finalVideoId(steps) {
   return stitch && stitch.artifacts && stitch.artifacts.video ? stitch.artifacts.video.driveId : '';
 }
 
-function listPage(all, { status = null, label = '', funnel = '', funnelList = [] } = {}) {
+function listPage(all, { status = null, label = '', funnel = '', funnelList = [], pending = new Map(), approver = false } = {}) {
   // Replaced (superseded) runs are hidden unless asked for by an old ?status= link.
   const visible = (all || []).filter((r) => status === 'superseded' || !libraryStatus(r.status).hidden);
   const inFunnel = visible.filter((r) => !funnel || String(r.funnel_id) === funnel);
@@ -505,9 +569,13 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
         ? `<button class="act" onclick="openVideo('${esc(vid)}')">▶ Preview</button>`
         : '<span class="hint">-</span>';
       const del = r.locked || r.status === 'scheduled' ? '' : `<button class="act danger" onclick="del('${esc(r.id)}')">Delete</button>`;
+      const ab = approvalButtons(r, pending.get(String(r.id)) || null, { canApprove: approver, videoId: vid });
+      const approve = ab ? `<div class="apbtns">${ab.videoId
+        ? `<button class="act big" onclick="openVideo('${esc(ab.videoId)}')">▶ Review</button>`
+        : `<a class="act big" href="${esc(ab.reviewHref)}">Review</a>`}<button class="act big approve" onclick="approveRow(this,'${esc(r.id)}','${esc(ab.approveLabel)}')">${esc(ab.approveLabel)}</button></div>` : '';
       return `<tr>
         <td><a href="/api/v1/admin/instances/${esc(r.id)}">${esc(shortId(r.id))}</a></td>
-        <td>${esc(r.title || '-')}</td>
+        <td class="ttl">${esc(r.title || '-')}${approve}</td>
         <td>${esc(r.funnel_name || '-')}</td>
         <td>${r.duration_seconds != null ? esc(formatDuration(r.duration_seconds)) : '-'}</td>
         <td>${esc(usd(r.cost_usd))}</td>
@@ -538,6 +606,12 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
     ${previewModal()}
   `, `
     async function sample(){ const r=await fetch('/api/v1/admin/instances/sample',{method:'POST'}); const j=await r.json(); if(j.ok) location.reload(); else alert(j.error||'failed'); }
+    async function approveRow(b, id, label){
+      if(!confirm(label+'?')) return;
+      b.disabled=true; const t=b.textContent; b.textContent='Approving…';
+      try{ const r=await fetch('/api/v1/admin/instances/'+id+'/approve',{method:'POST'}); const j=await r.json(); if(j.ok){ b.textContent='🟢 Approved'; setTimeout(()=>location.reload(), 900); } else { b.disabled=false; b.textContent=t; alert(j.error||'failed'); } }
+      catch(e){ b.disabled=false; b.textContent=t; alert(e.message); }
+    }
     async function del(id){ if(!confirm('Delete this instance?')) return; const r=await fetch('/api/v1/admin/instances/'+id+'/delete',{method:'POST'}); const j=await r.json(); if(j.ok) location.reload(); else alert(j.error||'failed'); }
     ${posting ? 'setTimeout(()=>location.reload(), 8000); // a post is on its way to Post for Me' : ''}
   `, 'instances');
@@ -614,6 +688,57 @@ function detailPage(row, steps) {
         const j=await r.json();
         if(m) m.textContent = j.ok ? ('Sent'+(j.emailedTo?(' to '+j.emailedTo):', no approval email set, link only')) : ('Failed: '+(j.error||''));
       }catch(e){ if(m) m.textContent='Failed: '+e.message; }
+    }
+  `, 'instances');
+}
+
+// The in-app review screen for an instance waiting on approval: the script
+// (or copy / image) to edit + Save, or the reel at the final checkpoint, and
+// its own Approve button. Save never approves.
+function reviewPage(row, steps, approval, buttons, script) {
+  const back = '<a class="act" href="/api/v1/admin/instances">← Library</a>';
+  const head = `<div class="top"><div><h1>${esc(row.title || 'Untitled')}</h1>
+    <div class="sub">${esc(row.funnel_name || '-')} · round ${esc(String(row.round || 1))}${row.scheduled_for ? ` · 📅 ${esc(formatIst(row.scheduled_for))}` : ''}</div></div>
+    <div class="toprow">${statusPill(row.status, row)}${back}</div></div>`;
+  if (!approval || !buttons) {
+    return shell('Review', `${head}<p class="ro">🟢 Nothing is waiting for your approval here.</p>`, '', 'instances');
+  }
+  const p = approval.payload || {};
+  const fields = reviewFields(approval, script);
+  const vid = buttons.videoId;
+  const img = p.thumbnailUrl || p.mediaUrl || '';
+  const media = buttons.view === 'video'
+    ? (vid ? `<iframe class="rvplayer" allow="autoplay" src="https://drive.google.com/file/d/${esc(encodeURIComponent(vid))}/preview"></iframe>` : '<p class="hint">🟡 No video attached yet.</p>')
+    : (img ? `<img class="rvimg" src="${esc(img)}" alt="preview">` : '');
+  const videoLink = buttons.view !== 'video' && p.videoUrl ? `<p><a class="act" href="${esc(p.videoUrl)}" target="_blank" rel="noopener">▶ Open video</a></p>` : '';
+  const form = fields.map((f) => `<label class="rvf">${esc(f.label)}<textarea name="${esc(f.key)}" rows="${f.rows}">${esc(f.value)}</textarea></label>`).join('');
+  return shell('Review', `${head}
+    ${media}${videoLink}
+    ${form ? `<form id="rvform" onsubmit="return false">${form}</form>` : ''}
+    <div class="rvbar">
+      ${form ? '<button class="act big" id="savebtn" onclick="save()">Save</button>' : ''}
+      <button class="act big approve" id="apbtn" onclick="approve()">${esc(buttons.approveLabel)}</button>
+      <span id="rvmsg" class="hint"></span>
+    </div>
+    <p class="hint">Save stores your edit only. ${esc(buttons.approveLabel)} moves it on, the same as the email's link.</p>
+  `, `
+    const ID=${JSON.stringify(String(row.id))};
+    let dirty=false;
+    const fm=document.getElementById('rvform'); if(fm) fm.addEventListener('input',()=>{ dirty=true; msg('🟡 Not saved yet'); });
+    function msg(t){ document.getElementById('rvmsg').textContent=t; }
+    function body(){ const o={}; if(fm) fm.querySelectorAll('textarea').forEach((t)=>{ o[t.name]=t.value; }); return o; }
+    async function post(path, data){ const r=await fetch('/api/v1/admin/instances/'+ID+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data||{})}); return r.json(); }
+    async function save(){
+      const b=document.getElementById('savebtn'); b.disabled=true; msg('Saving…');
+      try{ const j=await post('/review/save', body()); if(j.ok){ dirty=false; msg('🟢 Saved'); } else msg('🔴 '+(j.error||'failed')); }
+      catch(e){ msg('🔴 '+e.message); }
+      b.disabled=false;
+    }
+    async function approve(){
+      if(dirty && !confirm('You have unsaved edits. Approve without them?')) return;
+      const b=document.getElementById('apbtn'); b.disabled=true; msg('Approving…');
+      try{ const j=await post('/approve'); if(j.ok){ msg('🟢 Approved. Opening Library…'); setTimeout(()=>{ location.href='/api/v1/admin/instances'; }, 900); } else { b.disabled=false; msg('🔴 '+(j.error||'failed')); } }
+      catch(e){ b.disabled=false; msg('🔴 '+e.message); }
     }
   `, 'instances');
 }
@@ -1474,6 +1599,27 @@ ${NAV_CSS}
  .srcchip.on{border-color:#2d6cdf}.srcchip a{color:#c7c7d9;text-decoration:none}.srcchip button{background:none;border:0;color:#6f6f88;cursor:pointer}
  h3{font-size:1rem;margin:1.2rem 0 .3rem}
  .approve{background:#0a7d32;color:#fff;border:0;border-radius:8px;padding:.7rem 1.3rem;font-size:1rem;cursor:pointer}
+ .act.big{min-height:44px;padding:.55rem 1rem;font-size:.95rem;justify-content:center}
+ table.lib td .act.big{padding:.55rem 1rem}
+ .act.approve{background:#0a7d32}
+ .apbtns{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.45rem}
+ .rvplayer{width:100%;height:65vh;border:0;border-radius:10px;background:#000;margin-bottom:.8rem}
+ .rvimg{display:block;max-width:100%;max-height:60vh;border-radius:8px;margin:0 auto .8rem}
+ .rvf{display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:#9a9ab0;margin-bottom:.8rem}
+ .rvf textarea{width:100%;font:inherit;font-size:1rem;line-height:1.45;background:#0b0b12;color:#e8e8ef;border:1px solid #24243a;border-radius:8px;padding:.6rem;resize:vertical}
+ .rvbar{position:sticky;bottom:0;background:#0b0b12;border-top:1px solid #24243a;padding:.7rem 0;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+ .rvbar .act.big{flex:1 1 140px}
+ @media (max-width:700px){
+  .wrap{margin:.8rem auto;padding:0 .75rem}
+  table.lib,table.lib tbody,table.lib tr,table.lib td{display:block;width:100%}
+  table.lib thead{display:none}
+  table.lib tr{border-bottom:1px solid #24243a;padding:.5rem .2rem}
+  table.lib td{border:0;padding:.2rem .4rem}
+  table.lib td:nth-child(2){min-width:0;font-weight:600}
+  table.lib td.actions,table.lib td.when div{white-space:normal}
+  table.lib td.chans{max-width:none}
+  .apbtns .act.big{flex:1 1 0}
+ }
 </style>
 <div class="layout">
   <aside>${navSlot(current)}</aside>

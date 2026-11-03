@@ -95,6 +95,12 @@ export async function currentSession(req) {
   return session;
 }
 
+/** True if a signed-in person (not a machine key) may approve content from the app. */
+export async function canApprove(req) {
+  const session = await currentSession(req);
+  return !!(session && !session.mustChange && ADMIN_ROLES.includes(session.role));
+}
+
 /** True if the request may use the admin pages and actions. */
 export async function keyOk(req) {
   const session = await currentSession(req);
@@ -223,5 +229,5 @@ export async function signOut(req, res) {
 }
 
 export default {
-  requiredKey, resetEnabled, currentSession, keyOk, gateState, signIn, changePassword, resetWithCode, signOut, ACCESS_KEY_STORE,
+  requiredKey, resetEnabled, currentSession, canApprove, keyOk, gateState, signIn, changePassword, resetWithCode, signOut, ACCESS_KEY_STORE,
 };

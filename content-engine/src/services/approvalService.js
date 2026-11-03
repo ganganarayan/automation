@@ -72,6 +72,28 @@ export function reviewPath(id) {
   return `/api/v1/review/${encodeURIComponent(sign(String(id)))}`;
 }
 
+// The kind's approve handler, in the background (the caller has already
+// answered the person).
+function runApprove(approval, body) {
+  const handler = handlers.get(approval.kind);
+  Promise.resolve(handler?.onApprove?.(approval, body)).catch((e) =>
+    log.error({ err: e.message, id: approval.id }, 'approve handler failed'),
+  );
+}
+
+/**
+ * Approve from the app (the Library's Approve button): exactly what the email
+ * link's Approve does. The link is single-use, so whichever comes first wins.
+ * @returns {Promise<{ ok: boolean, used?: boolean, kind?: string }>}
+ */
+export async function approveById(id, body = {}) {
+  const approval = await approvals.consumeToken(String(id));
+  if (!approval) return { ok: false, used: true };
+  await approvals.setStatus(approval.id, 'approved');
+  runApprove(approval, { ...body, decision: 'approve' });
+  return { ok: true, kind: approval.kind };
+}
+
 /** Mount the review routes on a router. */
 export function register(router) {
   router.get('/review/:token', async (req, res, next) => {
@@ -109,9 +131,7 @@ export function register(router) {
       if (decision === 'approve') {
         await approvals.setStatus(id, 'approved');
         res.type('html').send(page('Approved', 'Publishing now. You can close this tab.'));
-        Promise.resolve(handler?.onApprove?.(approval, req.body)).catch((e) =>
-          log.error({ err: e.message, id }, 'approve handler failed'),
-        );
+        runApprove(approval, req.body);
       } else if (decision === 'rework') {
         // Custom-kind handlers (with their own review page) validate their own
         // body; the generic note requirement applies only to the default flow.
@@ -188,4 +208,4 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export default { onKind, createRequest, reviewPath, register };
+export default { onKind, createRequest, reviewPath, approveById, register };
