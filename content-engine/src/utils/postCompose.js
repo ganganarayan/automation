@@ -38,6 +38,7 @@ export function extractRow(rawHeader, row) {
   const iSubhead = locate(header, ['subhead', 'subheadline']);
   const iHashtags = locate(header, ['hashtags']);
   const iLocked = locate(header, ['locked text specs']);
+  const iSource = locate(header, ['source']);
   const iAudience = locate(header, ['audience']);
   // Comment-to-DM columns (optional): a keyword on this post arms the auto-DM.
   const iKeyword = locate(header, ['keyword', 'dm_keyword'], ['dm keyword']);
@@ -58,6 +59,7 @@ export function extractRow(rawHeader, row) {
     subhead: get(iSubhead),
     hashtags: get(iHashtags),
     lockedSpecs: get(iLocked),
+    source: get(iSource),
     audience: get(iAudience),
     dmKeyword: get(iKeyword),
     dmText: get(iDmText),
@@ -73,6 +75,14 @@ export function composePrompt(fields, note) {
   if (fields.subhead) p += `\nSUBHEAD (render exactly and verbatim): "${fields.subhead}"`;
   if (note) p += `\n\nRevision requested: ${note}`;
   return p;
+}
+
+/**
+ * One thumbnail's prompt: the row's own prompt and text, plus the size this
+ * version is for. The final crop takes up to 10% off each side of the image.
+ */
+export function sheetThumbPrompt(fields, label, note) {
+  return `${composePrompt(fields, note)}\n\nFormat of this version: ${label}. Ignore any other format named above. Keep all text and the main subject inside the central 80% of the frame, so nothing is cropped.`;
 }
 
 function withCta({ full, short }, ctaLink) {
@@ -101,4 +111,4 @@ export function buildPlatformConfigs(full, short) {
   return cfg;
 }
 
-export default { locate, extractRow, composePrompt, composeCaptions, buildPlatformConfigs, OTHER_PLATFORMS };
+export default { locate, extractRow, composePrompt, sheetThumbPrompt, composeCaptions, buildPlatformConfigs, OTHER_PLATFORMS };

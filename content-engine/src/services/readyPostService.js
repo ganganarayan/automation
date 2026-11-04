@@ -28,7 +28,9 @@ import * as instanceService from '../services/instanceService.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
 import * as stepLog from './stepLogService.js';
 import * as routerDays from '../repositories/routerDaysRepository.js';
-import { routerClash, rerunAction } from '../utils/routerSpec.js';
+import { routerClash, rerunAction, pickReadyRow, sheetStock, sheetEmptyText } from '../utils/routerSpec.js';
+import { sheetThumbPrompt } from '../utils/postCompose.js';
+import * as poster from './funnelPosterService.js';
 import { DateTime } from 'luxon';
 import * as sourcesRepo from '../repositories/funnelSourcesRepository.js';
 import { buildProviders } from './providerFactory.js';
@@ -44,7 +46,7 @@ import * as firstCommentsRepo from '../repositories/firstCommentsRepository.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
 import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey, nextImagePrompt } from '../utils/aiCopySpec.js';
-import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt } from '../utils/thumbSpec.js';
+import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, nativeArtSize, thumbSvg, thumbArt, thumbImagePrompt } from '../utils/thumbSpec.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
 import sharp from 'sharp';
@@ -440,11 +442,19 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
   const saved = ((draftSteps.find((x) => x.key === 'images') || {}).artifacts) || {};
   const lastCopy = ((draftSteps.find((x) => x.key === 'script') || {}).artifacts || {}).copy || {};
   const imagePromptWas = String(tArt.imagePrompt || '');
-  const imagePrompt = nextImagePrompt(imagePromptWas, lastCopy.thumbPrompt, copy.thumbPrompt);
+  // A funnel with a content sheet takes its thumbnail from the sheet, unless you typed a prompt for this video.
+  const typed = !saved.sheetRow && !!imagePromptWas.trim() && imagePromptWas.trim() !== String(lastCopy.thumbPrompt || '').trim();
+  const sheetRow = withThumbs && !comparison && !typed ? saved.sheetRow || await nextSheetRow({ funnel, resolved, providers }) : null;
+  const sheetFields = (sheetRow && sheetRow.fields) || null;
+  if (sheetRow) {
+    copy.thumbText = sheetFields ? sheetFields.headline : '';
+    copy.thumbPrompt = '';
+  }
+  const imagePrompt = sheetRow ? (sheetFields ? sheetFields.imagePrompt : '') : nextImagePrompt(imagePromptWas, lastCopy.thumbPrompt, copy.thumbPrompt);
   // A thumbnail failure never loses the copy; the video's first frame is used instead.
   const { thumbs, sizes, thumbError } = withThumbs
     ? await makeThumbs({
-      providers, resolved, driveId, ext, accessToken, costs, comparison,
+      providers, resolved, driveId, ext, accessToken, costs, comparison, sheetRow, note,
       imagePrompt: imagePrompt || copy.title, text: comparison ? tArt.headline || '' : tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '',
     })
     : { thumbs: saved.thumbs || {}, sizes: saved.sizes || [], thumbError: '' };
@@ -453,16 +463,49 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
     return null;
   });
   // The copy also writes an image prompt: it never replaces one you wrote.
-  if (imagePrompt !== imagePromptWas.trim()) {
+  if (imagePrompt !== imagePromptWas.trim() || (sheetFields && !saved.sheetRow)) {
     try {
       const { inst, steps: base } = await ensureInstance({ funnel, driveId: String(driveId), name });
-      const steps = patchStep(base, 'transcript', { artifacts: { imagePrompt } });
+      let steps = patchStep(base, 'transcript', { artifacts: { imagePrompt, ...(sheetFields ? { headline: sheetFields.headline, subhead: sheetFields.subhead } : {}) } });
+      if (sheetFields) steps = patchStep(steps, 'images', { artifacts: { sheetRow } });
       await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
     } catch (err) {
       log.warn({ err: err.message, driveId }, 'image prompt not saved (still returned)');
     }
   }
+  if (sheetRow && !sheetFields) await tellSheetEmpty({ funnel, resolved, providers, text: thumbError });
   return { copy, transcript, costs, thumbs, sizes, thumbError, instanceId, imagePrompt, imagePromptWas, stage: 'review' };
+}
+
+/**
+ * The next Ready row of the funnel's content sheet for a thumbnail: { tab, key,
+ * rowNumber, matchColName, fields }, or { error } when there is none to use.
+ * null when the funnel has no sheet.
+ */
+async function nextSheetRow({ funnel, resolved, providers }) {
+  if (!resolved.sheetId) return null;
+  try {
+    const tab = await poster.tabFor(providers.sheets, resolved);
+    const rows = await providers.sheets.readTab(resolved.sheetId, tab, { fresh: true });
+    const pick = pickReadyRow(rows, await instanceRepo.openSheetRefs(funnel.id, funnel.tenant_id));
+    if (!pick) return { error: sheetEmptyText(sheetStock(rows)) };
+    const { imagePrompt, headline, subhead, lockedSpecs, matchColName } = pick.fields;
+    return { tab, key: pick.key, rowNumber: pick.rowNumber, matchColName, fields: { imagePrompt, headline, subhead, lockedSpecs } };
+  } catch (err) {
+    log.warn({ err: err.message, funnel: funnel.name }, 'content sheet not readable');
+    return { error: `The content sheet could not be read: ${err.message}` };
+  }
+}
+
+/** No row to make a thumbnail from: say so. The video still goes, with its first frame. */
+async function tellSheetEmpty({ funnel, resolved, providers, text }) {
+  const to = resolved.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
+  if (!to) return;
+  await providers.mail.send({
+    to,
+    subject: `🟡 ${funnel.name}: no thumbnail, the content sheet needs you`,
+    html: `<p>${String(text).replace(/[&<>]/g, '')}</p><p>Until then, videos use their first frame as the thumbnail.</p>`,
+  }).catch((err) => log.warn({ err: err.message }, 'sheet empty email failed'));
 }
 
 /**
@@ -470,13 +513,17 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
  * the funnel's platforms need with the operator's headline. Never throws: a
  * failure comes back as thumbError. Image costs are pushed onto `costs`.
  */
-async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessToken = '', costs, imagePrompt, text, sub = '', comparison = null }) {
+async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessToken = '', costs, imagePrompt, text, sub = '', comparison = null, sheetRow = null, note = '' }) {
   const ffmpeg = createFfmpegProvider({}, log);
   let video = null; // downloaded only when a non-public file needs it for the frame
   const getVideo = async () => video || (video = await driveFor(providers, accessToken).download(driveId));
   let thumbs = {};
   let sizes = [];
   let thumbError = '';
+  const videoFrame = () => (video
+    ? ffmpeg.extractFrame({ videoBuffer: video, ext })
+    : ffmpeg.extractFrame({ url: publicDlUrl(driveId) }).catch(async () => ffmpeg.extractFrame({ videoBuffer: await getVideo(), ext })));
+  if (sheetRow && !sheetRow.fields) return { thumbs, sizes, thumbError: sheetRow.error };
   try {
     const platforms = thumbPlatforms(resolved);
     // A comparison is drawn from its facts: no AI picture, no cost, no people.
@@ -488,6 +535,24 @@ async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessTok
       return { thumbs, sizes, thumbError };
     }
     const imageModel = /^gpt-image/.test(String(providers.resolved.openai?.imageModel || '')) ? providers.resolved.openai.imageModel : 'gpt-image-1';
+    // From the sheet: one image per size, made at its own shape, with the row's words.
+    if (sheetRow) {
+      const { fields } = sheetRow;
+      const draw = async (spec) => {
+        const size = nativeArtSize(spec);
+        try {
+          const image = await providers.llm.generateImage({ prompt: sheetThumbPrompt(fields, spec.label, note), size, model: imageModel });
+          costs.push({ step: 'images', ...costImages({ count: 1, size, model: imageModel }) });
+          return await sharp(image).resize(spec.w, spec.h, { fit: 'cover' }).jpeg({ quality: 90 }).toBuffer();
+        } catch (err) {
+          log.warn({ err: err.message, size: spec.label }, 'thumbnail image failed (using a video frame)');
+          thumbError = `${spec.label}: ${err.message}`;
+          return composeThumb(await videoFrame(), spec, { text: fields.headline, sub: fields.subhead });
+        }
+      };
+      ({ thumbs, sizes } = await renderThumbs({ providers, platforms, draw }));
+      return { thumbs, sizes, thumbError };
+    }
     let base = null;
     try {
       base = await providers.llm.generateImage({ prompt: thumbImagePrompt(imagePrompt, providers.resolved.prompts?.thumbnail, text), size: THUMB_ART_SIZE, model: imageModel });
@@ -496,11 +561,7 @@ async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessTok
       log.warn({ err: err.message }, 'thumbnail artwork failed (using a video frame)');
       thumbError = `artwork: ${err.message}`;
     }
-    if (!base) {
-      base = video
-        ? await ffmpeg.extractFrame({ videoBuffer: video, ext })
-        : await ffmpeg.extractFrame({ url: publicDlUrl(driveId) }).catch(async () => ffmpeg.extractFrame({ videoBuffer: await getVideo(), ext }));
-    }
+    if (!base) base = await videoFrame();
     // The operator's headline + sub-head (typed at the transcript stage) go on the image.
     ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text, sub }));
   } catch (err) {
@@ -1002,7 +1063,7 @@ const sleep = (ms) => new Promise((r) => { setTimeout(r, ms).unref?.(); });
  * the original (Clean off, or it failed: note says why, for router_days and
  * the approval email).
  */
-export async function cleanForRouter({ funnelId, driveId, name = '' }) {
+export async function cleanForRouter({ funnelId, driveId, name = '', subs = false }) {
   const id = String(driveId);
   let note = '';
   try {
@@ -1023,7 +1084,11 @@ export async function cleanForRouter({ funnelId, driveId, name = '' }) {
         note = `auto-check failed (${String(err.message).slice(0, 120)}), used the funnel's zoom and cut`;
       }
     }
-    if (!opts.zoomPct && !opts.trimEndSec && !opts.endSec) return { clean: null, note: [note, 'nothing to clean, the original video is used'].filter(Boolean).join('; ') };
+    if (subs) {
+      Object.assign(opts, await subtitlePlan({ funnel, providers, driveId: id, trimEndSec: opts.trimEndSec, name, source: null }));
+      if (opts.subsNote) note = [note, opts.subsNote].filter(Boolean).join('; ');
+    }
+    if (!opts.zoomPct && !opts.trimEndSec && !opts.endSec && !opts.subs) return { clean: null, note: [note, 'nothing to clean, the original video is used'].filter(Boolean).join('; ') };
     let job = cleanJobs.get(id);
     if (!job || job.state !== 'running') {
       const where = normalizeRunner((providers.resolved.clean || {}).runner);

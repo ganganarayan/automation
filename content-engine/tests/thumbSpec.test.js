@@ -1,5 +1,6 @@
+import { sheetThumbPrompt } from '../src/utils/postCompose.js';
 import { describe, it, expect } from 'vitest';
-import { THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, thumbSvg, thumbImagePrompt, DEFAULT_THUMB_RULES, thumbMedia } from '../src/utils/thumbSpec.js';
+import { nativeArtSize, THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, thumbSvg, thumbImagePrompt, DEFAULT_THUMB_RULES, thumbMedia } from '../src/utils/thumbSpec.js';
 import { platformConfigsFor } from '../src/utils/aiCopySpec.js';
 
 describe('thumbSpec', () => {
@@ -113,5 +114,21 @@ describe('thumbSvg keeps the text on top and the picture prominent', () => {
     // Inside the centre 3:4 that the Instagram grid shows.
     expect(thumbBox(spec).y0).toBeGreaterThan((1920 - 1440) / 2);
     expect(art.top + art.h).toBeLessThanOrEqual((1920 + 1440) / 2);
+  });
+});
+
+describe('thumbnails from the content sheet', () => {
+  const fields = { imagePrompt: '9:16 graphic of a drop', headline: 'Find the second', subhead: 'Exactly', lockedSpecs: '' };
+  it('uses the row word for word, and names the size being made', () => {
+    const p = sheetThumbPrompt(fields, '16:9');
+    expect(p).toContain('9:16 graphic of a drop');
+    expect(p).toContain('HEADLINE (render exactly and verbatim): "Find the second"');
+    expect(p).toContain('SUBHEAD (render exactly and verbatim): "Exactly"');
+    expect(p).toContain('Format of this version: 16:9');
+  });
+  it('asks for an image close to each size', () => {
+    expect(nativeArtSize(THUMB_SIZES.landscape)).toBe('1536x1024');
+    expect(nativeArtSize(THUMB_SIZES.portrait)).toBe('1024x1536');
+    expect(nativeArtSize(THUMB_SIZES.feed)).toBe('1024x1536');
   });
 });

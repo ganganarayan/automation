@@ -13,7 +13,7 @@
  * fail-safe); 'none' when nothing could be lined up for that day.
  */
 import { DateTime } from 'luxon';
-import { extractRow, locate } from './postCompose.js';
+import { extractRow } from './postCompose.js';
 
 const ZONE = 'Asia/Kolkata';
 
@@ -22,10 +22,6 @@ export const LANES = ['ready_video', 'ai_video', 'image', 'none'];
 /** Instance status while a Lane 3 image waits for the operator's approval. */
 export const IMAGE_REVIEW = 'image_review';
 
-/** Below this many Ready rows the sheet is topped up with REFILL_COUNT new ones. */
-export const REFILL_BELOW = 2;
-export const REFILL_COUNT = 7;
-
 /** Columns the router keeps on the sheet (created when missing). */
 export const PFM_COL = 'pfm_post_id';
 /** The live post links, one per line in the cell, written when the post goes live. */
@@ -33,7 +29,7 @@ export const LINKS_COL = 'posted links';
 /** Columns only an appended "already posted" row needs (the video lanes). */
 export const TITLE_COL = 'title';
 export const POSTED_AT_COL = 'posted at';
-export const SOURCE_COL = 'source';
+/** Rows the retired AI refill wrote carry this in the source column: never used. */
 export const AUTO_SOURCE = 'Auto';
 
 /** Sheet statuses, in order. */
@@ -185,9 +181,30 @@ export function readyRows(rows = []) {
   const out = [];
   for (let i = 1; i < rows.length; i += 1) {
     const fields = extractRow(rows[0], rows[i] || []);
-    if (fields.hasSchema && fields.isReady && fields.imagePrompt) out.push({ fields, rowNumber: i + 1, key: rowKey(fields, i + 1) });
+    if (fields.hasSchema && fields.isReady && fields.imagePrompt && norm(fields.source) !== norm(AUTO_SOURCE)) out.push({ fields, rowNumber: i + 1, key: rowKey(fields, i + 1) });
   }
   return out;
+}
+
+/**
+ * What the sheet holds, for the message when it runs out: rows you filled that
+ * are Posted, and rows with no status yet.
+ */
+export function sheetStock(rows = []) {
+  const stock = { posted: 0, blank: 0 };
+  if (!Array.isArray(rows)) return stock;
+  for (const r of rows.slice(1)) {
+    const f = extractRow(rows[0], r || []);
+    if (!f.imagePrompt || norm(f.source) === norm(AUTO_SOURCE)) continue;
+    if (norm((r || [])[colIndex(rows[0], 'status')]) === norm(SHEET_STATUS.posted)) stock.posted += 1;
+    else if (!norm((r || [])[colIndex(rows[0], 'status')])) stock.blank += 1;
+  }
+  return stock;
+}
+
+/** The sheet ran out: what to do about it. */
+export function sheetEmptyText({ posted = 0, blank = 0 } = {}) {
+  return `The content sheet has no Ready row: ${posted} posted, ${blank} with no status. Change Posted to Ready, or add new rows, and it carries on.`;
 }
 
 /** The next Ready row not attached to an open instance (by key), or null. */
@@ -201,7 +218,7 @@ export function pickReadyRow(rows = [], openKeys = []) {
  * numeric (Post # / day), else a dated "auto-…" key. [] when the sheet has no
  * key column (rows are then found by row number).
  */
-export function nextMatchKeys(rows = [], count = REFILL_COUNT, now = DateTime.now().setZone(ZONE)) {
+export function nextMatchKeys(rows = [], count = 1, now = DateTime.now().setZone(ZONE)) {
   const fields = extractRow((rows && rows[0]) || [], []);
   if (!fields.matchColName) return [];
   const idx = colIndex(rows[0], fields.matchColName);
@@ -284,112 +301,6 @@ export function instanceHistoryLine(row = {}) {
   const caption = (art('publish').request || {}).caption || art('publish').caption || copy.description || art('script').text || '';
   const title = String(row.title || '').replace(/\s·\s\d{2}-\d{2}-\d{4}$/, '');
   return [copy.title || title, String(caption).slice(0, 160)].filter(Boolean).join(' · ');
-}
-
-/** The sheet's existing rows as history lines (headline · caption · prompt). */
-export function sheetHistory(rows = []) {
-  if (!Array.isArray(rows) || rows.length < 2) return [];
-  return rows.slice(1).reverse().map((r) => {
-    const f = extractRow(rows[0], r || []);
-    return [f.headline, f.captionShort || f.caption || f.captionFull, f.imagePrompt].filter(Boolean).join(' · ');
-  });
-}
-
-/** Which content columns this sheet has (so the LLM only writes what fits). */
-export function sheetColumns(rawHeader = []) {
-  const h = rawHeader.map(norm);
-  return {
-    prompt: locate(h, ['image_prompt', 'prompt'], ['image prompt']) !== -1,
-    caption: locate(h, ['caption']) !== -1,
-    captionFull: locate(h, ['caption_full', 'full caption'], ['linkedin long caption']) !== -1,
-    captionShort: locate(h, ['caption_short'], ['short caption']) !== -1,
-    headline: locate(h, ['headline']) !== -1,
-    subhead: locate(h, ['subhead', 'subheadline']) !== -1,
-    hashtags: locate(h, ['hashtags']) !== -1,
-  };
-}
-
-/**
- * The refill prompt: write `count` new image posts for this funnel from its
- * landing page and post history, none repeating a past topic or angle.
- * Returns { system, user } for llm.generateJson.
- */
-export function refillPrompt({ funnelName = '', landingUrl = '', landingText = '', history = [], examples = [], columns = {}, count = REFILL_COUNT }) {
-  const fields = ['"imagePrompt": a detailed prompt for an image model (scene, subject, mood, light, colours, composition)'];
-  if (columns.headline) fields.push('"headline": 3-8 words the image shows verbatim');
-  if (columns.subhead) fields.push('"subhead": one short supporting line shown under the headline');
-  if (columns.caption || columns.captionFull || !columns.captionShort) fields.push('"caption": the full post caption (3-6 short paragraphs, a hook first, a clear call to action last)');
-  if (columns.captionShort) fields.push('"captionShort": a short caption (1-3 sentences) for the other channels');
-  if (columns.hashtags) fields.push('"hashtags": 3-6 relevant hashtags in one line');
-  const system = [
-    `You plan daily social media image posts for the brand/funnel "${funnelName}".`,
-    'Each post must be NEW: a different topic, angle and format from every past post listed, no repeats, no near-duplicates, and the set itself must vary (e.g. a tip, a story, a myth vs fact, a question, a quote, a checklist, a before/after).',
-    'Stay true to what the landing page offers and who it is for. Do not invent prices, guarantees or facts that are not on it.',
-    'Do not put links in captions (the link is added separately).',
-    `Return ONLY a JSON object: {"posts": [ ${count} objects ]}, each object with:`,
-    ...fields.map((f) => `- ${f}`),
-  ].join('\n');
-  const user = [
-    landingLine(landingUrl),
-    landingText ? `Landing page text:\n${landingText}` : '',
-    examples.length ? `Image prompts already used on this sheet (match their style, not their topics):\n${examples.map((e) => `- ${e}`).join('\n')}` : '',
-    history.length ? `Past posts (do NOT repeat these topics or angles):\n${history.map((e) => `- ${e}`).join('\n')}` : 'Past posts: none yet.',
-    `Write ${count} new posts.`,
-  ].filter(Boolean).join('\n\n');
-  return { system, user };
-}
-
-/** The LLM's reply → up to `count` clean posts (each with an imagePrompt). */
-export function normalizeRefill(data, count = REFILL_COUNT) {
-  const list = Array.isArray(data) ? data : (data && Array.isArray(data.posts) ? data.posts : []);
-  const s = (v) => String(v ?? '').trim();
-  return list
-    .map((p) => ({
-      imagePrompt: s(p && (p.imagePrompt || p.image_prompt || p.prompt)),
-      headline: s(p && p.headline),
-      subhead: s(p && p.subhead),
-      caption: s(p && (p.caption || p.captionFull)),
-      captionShort: s(p && p.captionShort),
-      hashtags: Array.isArray(p && p.hashtags) ? p.hashtags.map(s).join(' ') : s(p && p.hashtags),
-    }))
-    .filter((p) => p.imagePrompt)
-    .slice(0, count);
-}
-
-/**
- * New posts → sheet rows aligned to `rawHeader` (which already has the status
- * and source columns): status Ready, source Auto, the match key when the sheet
- * has one. Columns the sheet doesn't have are dropped.
- */
-export function rowsForSheet(rawHeader = [], posts = [], keys = []) {
-  const h = rawHeader.map(norm);
-  const at = {
-    status: locate(h, ['status']),
-    match: locate(h, ['post #', 'post no', 'post number', 'day', 'id']),
-    prompt: locate(h, ['image_prompt', 'prompt'], ['image prompt']),
-    caption: locate(h, ['caption']),
-    full: locate(h, ['caption_full', 'full caption'], ['linkedin long caption']),
-    short: locate(h, ['caption_short'], ['short caption']),
-    headline: locate(h, ['headline']),
-    subhead: locate(h, ['subhead', 'subheadline']),
-    hashtags: locate(h, ['hashtags']),
-    source: colIndex(rawHeader, SOURCE_COL),
-  };
-  return posts.map((p, i) => {
-    const row = rawHeader.map(() => '');
-    const put = (idx, v) => { if (idx !== -1 && v) row[idx] = v; };
-    put(at.status, SHEET_STATUS.ready);
-    put(at.match, keys[i] || '');
-    put(at.prompt, p.imagePrompt);
-    put(at.caption, p.caption);
-    put(at.full, p.caption);
-    put(at.short, p.captionShort || (at.caption === -1 && at.full === -1 ? p.caption : ''));
-    put(at.headline, p.headline);
-    put(at.subhead, p.subhead);
-    put(at.hashtags, p.hashtags);
-    put(at.source, AUTO_SOURCE);
-    return row;
-  });
 }
 
 // ---- Lane 1: ready video ---------------------------------------------------
@@ -651,11 +562,10 @@ export function nudgeNeeded(funnelsState = []) {
 export const NUDGE_TEXT = 'Video lanes are empty. Upload ready videos or top up the video APIs so I can create videos and auto-post.';
 
 export default {
-  LANES, IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, LINKS_COL, TITLE_COL, POSTED_AT_COL, SOURCE_COL, AUTO_SOURCE, SHEET_STATUS,
+  LANES, IMAGE_REVIEW, PFM_COL, LINKS_COL, TITLE_COL, POSTED_AT_COL, AUTO_SOURCE, SHEET_STATUS,
   CELL_NEWLINE, postedLinks, postedRowPlan,
   routerTarget, runsOn, laneForInstance, existingReason, routerClash, postAtFor, colLetter, planHeader, colIndex, rowKey,
-  readyRows, pickReadyRow, nextMatchKeys, htmlToText, landingUrls, landingLine, historyLines, instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt,
-  normalizeRefill, rowsForSheet,
+  readyRows, pickReadyRow, nextMatchKeys, htmlToText, landingUrls, landingLine, historyLines, instanceHistoryLine, sheetStock, sheetEmptyText,
   imageAccounts, VIDEO_REVIEW, pickOldestVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, VIDEO_PROVIDERS, providerOrder,
   isCreditError, creditState, creditView, chooseProvider, laneTwoVerdict, dryTransition, researchPrompt, normalizeResearch, briefTopic,
   rerunAction, nudgeNeeded, NUDGE_TEXT,

@@ -6,13 +6,14 @@
  *               goes out at the funnel's publish time (docs/daily-router-plan.md,
  *               Lane 1).
  * Responsibility:
- *               - prepare: pick the video, ✂ Clean it first when the funnel
- *                 has Clean on (readyPostService.cleanForRouter: a failed
- *                 clean falls back to the original, noted). Same-name .jpg/.png + .txt next to
+ *               - prepare: pick the video, ✂ Clean it when the funnel has Clean
+ *                 on (readyPostService.cleanForRouter: a failed clean falls back
+ *                 to the original, noted). Same-name .jpg/.png + .txt next to
  *                 it → that thumbnail + caption, scheduled with no approval.
- *                 Otherwise transcribe → AI caption + headline + thumbnail
- *                 (readyPostService, the transcript gate passed by the router)
- *                 → one approval email. Throws LaneSkip when there's no video.
+ *                 Otherwise transcribe → Clean with subtitles → AI caption +
+ *                 the thumbnail (readyPostService, the next Ready sheet row when
+ *                 the funnel has a sheet; the transcript gate passed by the
+ *                 router) → one approval email. Throws LaneSkip when there's no video.
  *               - approve: schedule through readyPostService.postSelections at
  *                 scheduled_for, or now if that has passed (D2).
  *               - rework: write the copy again and re-send the approval.
@@ -122,11 +123,15 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog, skipped 
   const at = scheduledFor.toJSDate();
   const side = sidecarsFor(files, video);
   // ✂ Clean (funnel setting): posting then uses the cleaned copy; a failure keeps the original.
-  const { clean, note } = await readyPost.cleanForRouter({ funnelId: funnel.id, driveId: video.id, name: video.name });
-  if (note) log.info({ video: video.name, cleaned: !!clean, note }, 'ready video clean');
+  const cleanIt = async (subs) => {
+    const out = await readyPost.cleanForRouter({ funnelId: funnel.id, driveId: video.id, name: video.name, subs });
+    if (out.note) log.info({ video: video.name, cleaned: !!out.clean, note: out.note }, 'ready video clean');
+    return out;
+  };
 
   // Thumbnail + caption made by you: schedule straight away.
   if (side.thumb && side.caption) {
+    const { note } = await cleanIt(false);
     const text = (await drive.download(side.caption.id)).toString('utf8');
     const copy = copyFromCaption(text);
     if (!copy.description) throw new Error(`${side.caption.name} is empty`);
@@ -148,6 +153,8 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog, skipped 
     return prepare({ funnelRow, scheduledFor, log, skipped: [...skipped, video.id] });
   }
   await instanceRepo.setMeta(t.instanceId, { scheduledFor: at, title: `${video.name} · ${formatIst(at, { withTime: false })}` });
+  // After the transcript, because the subtitles Clean burns in come from its timings.
+  const { clean, note } = await cleanIt(true);
   try {
     await readyPost.generateCopy({ funnelId: funnel.id, driveId: video.id, name: video.name });
     const inst = await instanceRepo.get(t.instanceId);

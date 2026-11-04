@@ -64,6 +64,16 @@ export function addCostToSteps(steps, stepKey, costEntry) {
   );
 }
 
+/** The content-sheet row a video's thumbnail came from, or null. */
+export function sheetRowOf(steps) {
+  let list = steps;
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list); } catch { list = []; }
+  }
+  const images = (Array.isArray(list) ? list : []).find((s) => s && s.key === 'images');
+  return (images && images.artifacts && images.artifacts.sheetRow) || null;
+}
+
 /** Merge a patch into a step (status / artifacts / error / timestamps). */
 export function patchStep(steps, stepKey, patch = {}) {
   return (Array.isArray(steps) ? steps : []).map((s) => {

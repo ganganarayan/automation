@@ -399,9 +399,14 @@ export async function liveOnDate(funnelId, dateKey, tenantId = 'default') {
 export async function openSheetRefs(funnelId, tenantId = 'default') {
   if (!funnelId) return [];
   const { rows } = await query(
-    `SELECT DISTINCT source_ref FROM instances
+    `SELECT source_ref FROM instances
       WHERE tenant_id = $1 AND funnel_id = $2 AND source_type = 'sheet'
-        AND source_ref IS NOT NULL AND status NOT IN ('posted', 'failed', 'superseded')`,
+        AND source_ref IS NOT NULL AND status NOT IN ('posted', 'partial', 'failed', 'superseded')
+     UNION
+     SELECT s->'artifacts'->'sheetRow'->>'key' FROM instances i
+       CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(i.steps) = 'array' THEN i.steps ELSE '[]'::jsonb END) s
+      WHERE i.tenant_id = $1 AND i.funnel_id = $2 AND s->>'key' = 'images'
+        AND s->'artifacts'->'sheetRow'->>'key' IS NOT NULL AND i.status NOT IN ('posted', 'partial', 'failed', 'superseded')`,
     [tenantId, funnelId],
   );
   return rows.map((r) => r.source_ref);
