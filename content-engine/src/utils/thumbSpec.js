@@ -6,9 +6,7 @@
  *               three sizes with the AI "thumbText" hook as the headline. Each
  *               platform uses the size that fits it. A platform without a
  *               thumbnail falls back to the video's first frame
- *               (thumbnail_timestamp_ms 0). A funnel with a content sheet skips
- *               all of this: each size is its own image from the next Ready row
- *               (postCompose.sheetThumbPrompt), with the row's words on it.
+ *               (thumbnail_timestamp_ms 0).
  * Responsibility:
  *               - THUMB_SIZES: size -> { w, h, label, layout }
  *               - PLATFORM_SIZE: platform -> size; THUMB_SPECS: platform -> its size spec
@@ -152,11 +150,6 @@ export function thumbSvg({ w, h, text, sub = '', layout = 'top', accent = '#FFFF
 <text text-anchor="middle" ${font} font-weight="800" font-size="${size}" fill="#FFFFFF" ${stroke(size)}>${tspans}</text>${subText}</svg>`;
 }
 
-/** The image size to ask for, for a thumbnail made at its own shape. */
-export function nativeArtSize({ w, h }) {
-  return w > h ? '1536x1024' : '1024x1536';
-}
-
 /** The rules added after every image prompt. Editable under System prompts. */
 export const DEFAULT_THUMB_RULES = 'Clear, bright, sharply lit marketing image in landscape format, understood in one second on a phone. Show exactly what is described above, and show it large: the main subject fills the frame below the top 30% and stays inside the centre 65% of the width, with nothing important cut off at the edges. Keep the top 30% of the frame a plain, uncluttered continuation of the background, because the headline goes there. No silhouettes, no dark moody scene, no dramatic shadows, and no person unless one is described. Text only where it belongs to something shown, such as the labels and numbers on a chart or screen described above: no headline, caption, logo or watermark.';
 
@@ -180,4 +173,4 @@ export function thumbMedia(videoUrl, thumbUrl) {
   return thumbUrl ? { url: videoUrl, thumbnail_url: thumbUrl } : { url: videoUrl, thumbnail_timestamp_ms: 0 };
 }
 
-export default { THUMB_ART_SIZE, nativeArtSize, THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, thumbSvg, DEFAULT_THUMB_RULES, thumbImagePrompt, thumbMedia };
+export default { THUMB_ART_SIZE, THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, thumbSvg, DEFAULT_THUMB_RULES, thumbImagePrompt, thumbMedia };

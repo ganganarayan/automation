@@ -6,9 +6,9 @@
  *               the same instance → Post for Me → post check → go-live email
  *               path as every other lane (docs/daily-router-plan.md, Lane 3).
  * Responsibility:
- *               - prepare: pick the next Ready row no open instance holds (the
- *                 sheet is yours: none left is a failure that tells you to
- *                 set rows back to Ready), create the instance
+ *               - prepare: top the sheet up (fewer than 2 Ready rows → 7 new
+ *                 rows from the landing page + post history), pick the next
+ *                 Ready row no open instance holds, create the instance
  *                 (source_type 'sheet', source_ref = the row's key), generate
  *                 the image, send the approval email.
  *               - approve: sheet row → Approved; ONE Post for Me post to all
@@ -42,9 +42,10 @@ import { patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpe
 import { costImages } from '../utils/pricing.js';
 import { formatIst } from '../utils/time.js';
 import {
-  IMAGE_REVIEW, PFM_COL, LINKS_COL, SHEET_STATUS,
+  IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, LINKS_COL, SOURCE_COL, SHEET_STATUS,
   CELL_NEWLINE, postedLinks, imageAccounts,
-  readyRows, pickReadyRow, sheetStock, sheetEmptyText, htmlToText, landingUrls, postAtFor,
+  readyRows, pickReadyRow, planHeader, colLetter, nextMatchKeys, htmlToText, landingUrls, historyLines,
+  instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt, normalizeRefill, rowsForSheet, postAtFor,
 } from '../utils/routerSpec.js';
 import { childLogger } from '../core/logger.js';
 
@@ -78,6 +79,30 @@ export async function landingText(raw, log) {
   }));
   if (urls.length === 1) return pages[0];
   return urls.map((u, i) => (pages[i] ? `[${u}]\n${pages[i]}` : '')).filter(Boolean).join('\n\n');
+}
+
+/**
+ * Write REFILL_COUNT new Ready rows (source = Auto) researched from the
+ * funnel's landing page and post history. Returns the sheet re-read.
+ */
+async function refill({ f, providers, tab, rows, log }) {
+  const [page, recent] = await Promise.all([
+    landingText(f.landingPageUrl, log),
+    instanceRepo.recentForFunnel(f.id, f.tenantId, 40).catch(() => []),
+  ]);
+  const history = historyLines([...recent.map(instanceHistoryLine), ...sheetHistory(rows)], 60);
+  const examples = rows.slice(1).map((r) => extractRow(rows[0], r || []).imagePrompt).filter(Boolean).slice(-3);
+  const { system, user } = refillPrompt({
+    funnelName: f.name, landingUrl: f.landingPageUrl, landingText: page, history, examples,
+    columns: sheetColumns(rows[0]), count: REFILL_COUNT,
+  });
+  const posts = normalizeRefill(await providers.llm.generateJson({ system, user, maxTokens: 8000 }), REFILL_COUNT);
+  if (!posts.length) throw new Error('the AI wrote no usable rows');
+  const plan = planHeader(rows[0], [SOURCE_COL]);
+  for (const a of plan.added) await providers.sheets.updateCells(f.sheetId, `${tab}!${colLetter(a.index)}1`, [[a.name]]);
+  await providers.sheets.appendRows(f.sheetId, tab, rowsForSheet(plan.header, posts, nextMatchKeys(rows, posts.length)));
+  log.info({ added: posts.length, landing: !!page, history: history.length }, 'image sheet topped up');
+  return providers.sheets.readTab(f.sheetId, tab, { fresh: true });
 }
 
 /**
@@ -173,13 +198,23 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
   if (!imageAccounts(f.accounts, f.accountMap).length) throw new LaneError('only YouTube is ticked on this funnel, and YouTube takes no image posts');
   const providers = await buildProviders(f.tenantId);
   const tab = await poster.tabFor(providers.sheets, f);
-  const rows = await providers.sheets.readTab(f.sheetId, tab, { fresh: true });
+  let rows = await providers.sheets.readTab(f.sheetId, tab, { fresh: true });
   if (!rows.length) throw new LaneError('the content sheet is empty (no header row)');
   if (!extractRow(rows[0], []).hasSchema) throw new LaneError('the content sheet needs a Status and an image prompt column');
 
   const open = await instanceRepo.openSheetRefs(f.id, f.tenantId);
+  const free = readyRows(rows).filter((r) => !open.includes(r.key));
+  let refillSpan = null;
+  if (free.length < REFILL_BELOW) {
+    const from = new Date().toISOString();
+    rows = await refill({ f, providers, tab, rows, log }).catch((err) => {
+      log.warn({ err: err.message }, 'image sheet refill failed (using what is there)');
+      return rows;
+    });
+    refillSpan = [from, new Date().toISOString()];
+  }
   const pick = pickReadyRow(rows, open);
-  if (!pick) throw new LaneError(sheetEmptyText(sheetStock(rows)));
+  if (!pick) throw new LaneError('no Ready row in the content sheet, and the refill wrote none');
 
   const inst = await instanceService.createForFunnel({
     tenantId: f.tenantId,
@@ -190,6 +225,7 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
     sourceType: 'sheet',
     sourceRef: pick.key,
   });
+  if (refillSpan) await stepLog.span(inst.id, 'refill', refillSpan[0], refillSpan[1]);
   const sheet = { tab, matchColName: pick.fields.matchColName, key: pick.key, rowNumber: pick.rowNumber };
   try {
     await renderAndSend({ instanceId: inst.id, f, providers, fields: pick.fields, sheet, log });

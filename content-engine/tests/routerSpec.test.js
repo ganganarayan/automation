@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { DateTime } from 'luxon';
 import {
   routerTarget, runsOn, laneForInstance, existingReason, postAtFor, colLetter, planHeader, readyRows,
-  pickReadyRow, nextMatchKeys, htmlToText, historyLines, instanceHistoryLine, sheetStock, sheetEmptyText,
+  pickReadyRow, nextMatchKeys, htmlToText, historyLines, instanceHistoryLine, sheetHistory, sheetColumns,
+  refillPrompt, normalizeRefill, rowsForSheet, REFILL_COUNT,
 } from '../src/utils/routerSpec.js';
 
 const ist = (iso) => DateTime.fromISO(iso, { zone: 'Asia/Kolkata' });
@@ -87,15 +88,21 @@ describe('sheet helpers', () => {
     expect(nextMatchKeys(named, 2, ist('2026-11-01T16:00'))).toEqual(['auto-20261101-1600-1', 'auto-20261101-1600-2']);
     expect(nextMatchKeys([['image_prompt', 'status']], 2)).toEqual([]);
   });
-  it('rows the retired AI refill wrote are never used', () => {
-    const r = [['day', 'image_prompt', 'status', 'source'], ['1', 'mine', 'Posted', ''], ['auto-1', 'ai', 'Ready', 'Auto'], ['2', 'also mine', 'Ready', '']];
-    expect(readyRows(r).map((x) => x.key)).toEqual(['2']);
-    expect(pickReadyRow(r, ['2'])).toBeNull();
+  it('sheetColumns reports what the sheet can hold', () => {
+    expect(sheetColumns(header)).toMatchObject({ prompt: true, caption: true, headline: true, hashtags: false, captionShort: false });
   });
-  it('sheetStock counts your rows only, so the message says what to do', () => {
-    const r = [['day', 'image_prompt', 'status', 'source'], ['1', 'p', 'Posted', ''], ['2', 'p', 'Posted', ''], ['3', 'p', '', ''], ['auto-1', 'ai', 'Ready', 'Auto'], ['auto-2', '', 'Posted', '']];
-    expect(sheetStock(r)).toEqual({ posted: 2, blank: 1 });
-    expect(sheetEmptyText(sheetStock(r))).toContain('2 posted, 1 with no status');
+});
+
+describe('rowsForSheet', () => {
+  it('fills only existing columns, status Ready, source Auto, the key', () => {
+    const h = ['day', 'image_prompt', 'caption', 'headline', 'status', 'source'];
+    const out = rowsForSheet(h, [{ imagePrompt: 'p', caption: 'c', headline: 'H', hashtags: '#x', captionShort: '' }], ['9']);
+    expect(out).toEqual([['9', 'p', 'c', 'H', 'Ready', 'Auto']]);
+  });
+  it('maps the caption to full + short on a Corporate-style sheet', () => {
+    const h = ['Post #', 'image prompt', 'LinkedIn Long Caption (full post)', 'Short Caption (other 6 channels, optional)', 'Hashtags', 'Status', 'source'];
+    const [row] = rowsForSheet(h, [{ imagePrompt: 'p', caption: 'long', captionShort: 'short', hashtags: '#a #b' }], ['13']);
+    expect(row).toEqual(['13', 'p', 'long', 'short', '#a #b', 'Ready', 'Auto']);
   });
 });
 
@@ -112,5 +119,27 @@ describe('research input', () => {
     const row = { title: 'Image post · 02-11-2026', steps: JSON.stringify([{ key: 'script', artifacts: { copy: { title: 'Rise' } } }, { key: 'publish', artifacts: { request: { caption: 'cap' } } }]) };
     expect(instanceHistoryLine(row)).toBe('Rise · cap');
     expect(instanceHistoryLine({ title: 'Ready video · 01-11-2026', steps: [] })).toBe('Ready video');
+  });
+  it('sheetHistory lists rows newest first', () => {
+    expect(sheetHistory(rows.slice(0, 3))).toEqual(['Rise · cap two · a mountain', 'Flow · cap one · a river']);
+  });
+  it('refillPrompt asks for the sheet columns and includes landing page + history', () => {
+    const { system, user } = refillPrompt({
+      funnelName: 'Gita', landingUrl: 'https://x.co', landingText: 'Calm mind course', history: ['Rise · cap two'],
+      examples: ['a mountain'], columns: sheetColumns(header),
+    });
+    expect(system).toContain(`${REFILL_COUNT} objects`);
+    expect(system).toContain('"headline"');
+    expect(system).not.toContain('"hashtags"');
+    expect(user).toContain('Calm mind course');
+    expect(user).toContain('- Rise · cap two');
+    expect(user).toContain('- a mountain');
+  });
+  it('normalizeRefill keeps posts with a prompt, joins hashtag arrays, caps the count', () => {
+    const data = { posts: [{ imagePrompt: 'p1', hashtags: ['#a', '#b'] }, { caption: 'no prompt' }, { image_prompt: 'p2' }, { prompt: 'p3' }] };
+    const out = normalizeRefill(data, 2);
+    expect(out.map((p) => p.imagePrompt)).toEqual(['p1', 'p2']);
+    expect(out[0].hashtags).toBe('#a #b');
+    expect(normalizeRefill(null)).toEqual([]);
   });
 });
