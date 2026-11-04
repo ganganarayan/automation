@@ -499,9 +499,12 @@ export function register(ctx) {
   router.post('/admin/instances/:id/approve', async (req, res) => {
     try {
       if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to approve' });
-      const { row, approval } = await approvalFor(req);
+      const { row, steps, approval } = await approvalFor(req);
       if (!row) return res.status(404).json({ ok: false, error: 'instance not found' });
       if (!approval) return res.status(409).json({ ok: false, error: 'this is no longer waiting for approval' });
+      if (row.status === 'script_review' && !scriptArtifacts(steps).text) {
+        return res.status(409).json({ ok: false, error: 'There is no script to approve. Type one and press Save, or use Retry in the Library.' });
+      }
       const r = await approvalService.approveById(approval.id);
       if (!r.ok) return res.status(409).json({ ok: false, error: 'already approved or sent back (maybe from the email)' });
       log.info({ instance: row.id, approval: approval.id, kind: r.kind }, 'approved from the app');

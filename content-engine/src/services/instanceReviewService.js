@@ -89,6 +89,9 @@ export async function requestReview({ tenantId = 'default', instanceId, checkpoi
   if (!instance) throw new Error(`instance ${instanceId} not found`);
 
   const steps = instanceService.parseSteps(instance);
+  // Nothing to look at: an email now would only be an empty box with an Approve button.
+  if (checkpoint === 'script' && !stepArtifact(steps, 'script', 'text')) throw new Error('No script yet, so there is nothing to review. Use Retry in the Library.');
+  if (checkpoint === 'final' && !finalVideoId(steps)) throw new Error('No final video yet, so there is nothing to review.');
   const providers = await buildProviders(instance.tenant_id || tenantId);
   const approvalEmail = await recipientFor(instance, providers.resolved);
 
@@ -145,6 +148,11 @@ export async function onApprove(approval) {
   }
 
   if (p.checkpoint === 'script') {
+    // An old email can approve a script that was never written: spend nothing on it.
+    if (!stepArtifact(instanceService.parseSteps(current), 'script', 'text')) {
+      log.warn({ instance: instanceId }, 'approval for an empty script; ignored');
+      return;
+    }
     await instanceService.updateStep(instanceId, 'script', { status: 'done' });
     await instanceRepo.setStatus(instanceId, 'running');
     log.info({ instance: instanceId, round: p.round }, 'script approved: instance running');

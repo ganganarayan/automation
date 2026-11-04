@@ -36,7 +36,9 @@ export function retryAction(row, steps, now = Date.now()) {
   if (['partial', 'failed'].includes(r.status) && (step('publish').artifacts?.channels || []).some((c) => c.state === 'failed')) return 'channels';
   if (r.post_status === 'post_failed') return 'open';
   if (r.status === 'manual' && list.some((s) => s.status === 'failed')) return 'open';
-  if (r.status !== 'failed' && !isStuck(r, now)) return '';
+  // A script review with no script (sent by hand while it was stuck) has nothing to approve.
+  const noScript = r.status === 'script_review' && !step('script').artifacts?.text;
+  if (r.status !== 'failed' && !isStuck(r, now) && !noScript) return '';
   const lane = laneOf(r);
   if (lane === 'image') return 'image';
   // 'generated' is what the router and the scheduler save their AI videos as.

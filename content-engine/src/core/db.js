@@ -34,14 +34,40 @@ pool.on('error', (err) => {
   logger.error({ err: err.message }, 'idle postgres client error');
 });
 
+// Network errors on opening a connection, as just after the app wakes from sleep.
+const CONNECT_ERRORS = ['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN'];
+const CONNECT_RETRY_MS = [500, 1500, 3000];
+
+/** Get a connection, trying again on a network error. Nothing has run yet, so this is always safe. */
+async function connect() {
+  for (let i = 0; ; i += 1) {
+    try {
+      return await pool.connect();
+    } catch (err) {
+      if (i >= CONNECT_RETRY_MS.length || !CONNECT_ERRORS.includes(err.code)) throw err;
+      logger.warn({ code: err.code, attempt: i + 1 }, 'postgres connect failed, trying again');
+      await new Promise((resolve) => { setTimeout(resolve, CONNECT_RETRY_MS[i]); });
+    }
+  }
+}
+
 /** Run a parameterized query. */
-export function query(text, params) {
-  return pool.query(text, params);
+export async function query(text, params) {
+  const client = await connect();
+  let failure;
+  try {
+    return await client.query(text, params);
+  } catch (err) {
+    failure = err;
+    throw err;
+  } finally {
+    client.release(failure); // as pool.query does: a client that errored is not reused
+  }
 }
 
 /** Run a function inside a transaction, committing on success. */
 export async function withTransaction(fn) {
-  const client = await pool.connect();
+  const client = await connect();
   try {
     await client.query('BEGIN');
     const result = await fn(client);
@@ -57,7 +83,7 @@ export async function withTransaction(fn) {
 
 /** Lightweight connectivity check for readiness probes. */
 export async function ping() {
-  await pool.query('SELECT 1');
+  await query('SELECT 1');
   return true;
 }
 
