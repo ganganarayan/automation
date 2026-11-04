@@ -44,6 +44,7 @@ jobs:
           sparse-checkout: |
             content-engine/scripts
             content-engine/src/utils
+            content-engine/src/core/errors.js
 
       - uses: actions/setup-node@v4
         with:
