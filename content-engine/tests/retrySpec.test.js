@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { retryAction } from '../src/utils/retrySpec.js';
+import { retryAction, isStuck, RETRY_STUCK_MS } from '../src/utils/retrySpec.js';
 import { parseSheetId, parseDriveFolderId, isStorageQuotaError } from '../src/utils/readyPostSpec.js';
 import { isCreditError } from '../src/utils/routerSpec.js';
 
 const script = { key: 'script', status: 'done', artifacts: { text: 'hello' } };
-const failed = (status, extra = {}) => ({ id: 'i1', status, source_type: 'router', ...extra });
+// 'generated' is the source type the router and the scheduler really save.
+const failed = (status, extra = {}) => ({ id: 'i1', status, source_type: 'generated', ...extra });
 
 describe('retryAction', () => {
   it('re-posts only the failed channels', () => {
@@ -31,6 +32,28 @@ describe('retryAction', () => {
     expect(retryAction(failed('failed', { source_type: 'sheet' }), [])).toBe('image');
     expect(retryAction(failed('failed', { source_type: 'drive_folder' }), [])).toBe('open');
     expect(retryAction(failed('draft', { post_status: 'post_failed' }), [])).toBe('open');
+  });
+
+  it('covers every render stage, whichever one failed', () => {
+    for (const key of ['images', 'animate', 'voiceover', 'transcript', 'stitch']) {
+      expect(retryAction(failed('failed'), [script, { key, status: 'failed' }])).toBe('stages');
+    }
+  });
+
+  it('offers a stuck instance once it has gone quiet, not while it works', () => {
+    const now = Date.parse('2026-11-04T12:00:00Z');
+    const old = new Date(now - RETRY_STUCK_MS - 1000).toISOString();
+    const fresh = new Date(now - 60000).toISOString();
+    expect(isStuck(failed('running', { updated_at: old }), now)).toBe(true);
+    expect(isStuck(failed('running', { updated_at: fresh }), now)).toBe(false);
+    expect(retryAction(failed('running', { updated_at: old }), [script, { key: 'animate', status: 'running' }], now)).toBe('stages');
+    expect(retryAction(failed('running', { updated_at: fresh }), [script], now)).toBe('');
+    expect(retryAction(failed('running', { updated_at: old, source_type: 'sheet' }), [], now)).toBe('image');
+  });
+
+  it('a manual run retries from its own page', () => {
+    expect(retryAction(failed('manual'), [{ key: 'images', status: 'failed' }])).toBe('open');
+    expect(retryAction(failed('manual'), [script])).toBe('');
   });
 
   it('offers nothing when nothing failed or it is locked', () => {

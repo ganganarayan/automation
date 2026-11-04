@@ -169,11 +169,12 @@ async function takeDay(row, action) {
 export async function retry({ instanceId, action }) {
   const row = await instanceRepo.get(instanceId);
   if (!row) throw new Error('instance not found');
-  if (!(await instanceRepo.transition(row.id, 'failed', 'running'))) throw new Error('this is not failed any more (already retrying?)');
+  // From failed, or from running when it was found stuck (this also restarts its quiet clock).
+  if (!(await instanceRepo.transition(row.id, row.status, 'running'))) throw new Error('this has moved on (already retrying?)');
   try {
     await takeDay(row, action);
   } catch (err) {
-    await instanceRepo.setStatus(row.id, 'failed');
+    await instanceRepo.setStatus(row.id, row.status);
     throw err;
   }
   const log = baseLog.child({ instance: row.id });

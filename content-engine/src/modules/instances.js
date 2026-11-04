@@ -46,7 +46,7 @@ import { postedLinks } from '../utils/routerSpec.js';
 import { keyOk, currentSession, canApprove } from '../services/accessService.js';
 import * as approvalService from '../services/approvalService.js';
 import * as approvalsRepo from '../repositories/approvalRepository.js';
-import { retryAction } from '../utils/retrySpec.js';
+import { retryAction, isStuck } from '../utils/retrySpec.js';
 import { pendingByInstance, approvalButtons, reviewFields, applyReviewEdit } from '../utils/approvalButtons.js';
 
 const MANUAL_JOB = 'manual_stage';
@@ -586,10 +586,11 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
       const retry = ra === 'open'
         ? `<div class="apbtns"><a class="act big" href="/api/v1/admin/instances/${esc(r.id)}">↻ Retry</a></div>`
         : ra ? `<div class="apbtns"><button class="act big" onclick="retryRow(this,'${esc(r.id)}')">↻ Retry</button></div>` : '';
+      const stuck = isStuck(r) ? '<div class="hint">🟡 No progress for a while: the run was probably lost. Retry carries on from where it stopped.</div>' : '';
       const why = r.status === 'failed' && r.note ? `<div class="hint">🔴 ${esc(String(r.note).slice(0, 200))}</div>` : '';
       return `<tr>
         <td><a href="/api/v1/admin/instances/${esc(r.id)}">${esc(shortId(r.id))}</a></td>
-        <td class="ttl">${esc(r.title || '-')}${why}${approve}${retry}</td>
+        <td class="ttl">${esc(r.title || '-')}${why}${stuck}${approve}${retry}</td>
         <td>${esc(r.funnel_name || '-')}</td>
         <td>${r.duration_seconds != null ? esc(formatDuration(r.duration_seconds)) : '-'}</td>
         <td>${esc(usd(r.cost_usd))}</td>

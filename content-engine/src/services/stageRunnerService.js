@@ -191,8 +191,11 @@ async function runImages(ctx) {
   return images;
 }
 
-/** Animate each still into a clip, upload to Drive, record animation cost. */
-async function runAnimate(ctx, images) {
+/**
+ * Animate each still into a clip, upload to Drive, record animation cost. Each
+ * clip is saved as it lands: `done` (clips kept by a retry) are not paid for again.
+ */
+async function runAnimate(ctx, images, done = []) {
   const { instance, cfg, resolved, providers } = ctx;
   const folder = cfg.drive_folder_id || resolved.driveFolder || '';
   // The router picked the provider with credit (in the funnel's order).
@@ -202,13 +205,14 @@ async function runAnimate(ctx, images) {
   const stamp = Date.now().toString(36);
 
   await instanceService.updateStep(instance.id, 'animate', { status: 'running', startedAt: new Date().toISOString(), artifacts: { provider: anim.provider } });
-  const clips = [];
-  for (let i = 0; i < images.length; i += 1) {
+  const clips = [...done];
+  for (let i = clips.length; i < images.length; i += 1) {
     const prompt = router ? `${images[i].prompt}\n${NO_LIP_SYNC}` : images[i].prompt;
     const clipUrl = await anim.animateAndWait({ imageUrl: images[i].url, prompt });
     const buf = await fetchBuffer(clipUrl);
     const up = await providers.storage.uploadMedia(folder, buildMediaName('clip', stamp, i, 'mp4'), 'video/mp4', buf);
     clips.push({ driveId: up.id, url: up.downloadUrl, sourceImageId: images[i].driveId });
+    await instanceService.updateStep(instance.id, 'animate', { artifacts: { clips } });
   }
   await instanceService.updateStep(instance.id, 'animate', { status: 'done', artifacts: { clips }, finishedAt: new Date().toISOString() });
   await instanceService.recordCost(instance.id, 'animate', costAnimation({ provider: anim.provider, seconds: totalClipSeconds(cfg.clip_length, clips.length, anim.provider) }));
@@ -301,18 +305,30 @@ export async function runStages({ instanceId, resume = false }) {
   let step = 'images';
   try {
     ctx = await loadContext(instanceId);
-    const kept = (key) => {
-      const s = resume ? instanceService.parseSteps(ctx.instance).find((x) => x.key === key) : null;
-      return s && s.status === 'done' ? (s.artifacts || {}) : {};
-    };
-    const images = kept('images').images || await runImages(ctx);
+    // A stage that runs again makes what comes after it stale, so nothing later is kept.
+    let keep = resume;
+    const stepOf = (key) => instanceService.parseSteps(ctx.instance).find((x) => x.key === key) || {};
+    const kept = (key) => (keep && stepOf(key).status === 'done' ? (stepOf(key).artifacts || {}) : {});
+    let images = kept('images').images;
+    if (!images) { images = await runImages(ctx); keep = false; }
     step = 'animate';
-    const clips = kept('animate').clips || await runAnimate(ctx, images);
+    let clips = kept('animate').clips;
+    if (!clips) {
+      const partial = keep ? (stepOf('animate').artifacts || {}).clips : null;
+      clips = await runAnimate(ctx, images, Array.isArray(partial) ? partial : []);
+      keep = false;
+    }
     step = 'voiceover';
     const audio = kept('voiceover').audio;
-    const { audioBuffer, audioDriveId } = audio && audio.driveId
-      ? { audioBuffer: await ctx.providers.storage.download(audio.driveId), audioDriveId: audio.driveId }
-      : await runVoiceover(ctx);
+    let audioBuffer;
+    let audioDriveId;
+    if (audio && audio.driveId) {
+      audioBuffer = await ctx.providers.storage.download(audio.driveId);
+      audioDriveId = audio.driveId;
+    } else {
+      ({ audioBuffer, audioDriveId } = await runVoiceover(ctx));
+      keep = false;
+    }
     step = 'transcript';
     const doneCues = kept('transcript').cues;
     const { cues } = doneCues ? { cues: doneCues } : await runTranscript(ctx, audioBuffer, audioDriveId);
