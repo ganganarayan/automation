@@ -100,14 +100,37 @@ export async function calendarInstances({ tenantId = 'default', fromUtc, toUtc }
   return rows;
 }
 
-/** Total real AI cost and run count since `fromUtc`. */
+/** Total real AI cost and run count since `fromUtc`, deleted runs included. */
 export async function costSince({ tenantId = 'default', fromUtc }) {
   const { rows } = await query(
-    `SELECT COALESCE(sum(cost_usd), 0)::float AS total, count(*)::int AS runs
-       FROM instances WHERE tenant_id = $1 AND created_at >= $2`,
+    `SELECT COALESCE(sum(cost_usd), 0)::float AS total, count(*)::int AS runs,
+            COALESCE(sum(cost_usd) FILTER (WHERE deleted), 0)::float AS deleted
+       FROM (SELECT cost_usd, false AS deleted FROM instances WHERE tenant_id = $1 AND created_at >= $2
+             UNION ALL
+             SELECT cost_usd, true FROM deleted_instances WHERE tenant_id = $1 AND created_at >= $2) t`,
     [tenantId, fromUtc],
   );
-  return rows[0] || { total: 0, runs: 0 };
+  return rows[0] || { total: 0, runs: 0, deleted: 0 };
 }
 
-export default { needsYou, pendingImageApprovals, liveCounts, readyLeft, routerDays, calendarInstances, costSince };
+/** The deleted-instance log, newest first. */
+export async function deletedRows({ tenantId = 'default', limit = 200 }) {
+  const { rows } = await query(
+    `SELECT id, title, funnel_name, status, cost_usd, steps, created_at, deleted_at
+       FROM deleted_instances WHERE tenant_id = $1 ORDER BY deleted_at DESC LIMIT $2`,
+    [tenantId, limit],
+  );
+  return rows;
+}
+
+/** All-time cost and count of deleted instances, optionally for one funnel. */
+export async function deletedTotal({ tenantId = 'default', funnelId = null }) {
+  const { rows } = await query(
+    `SELECT COALESCE(sum(cost_usd), 0)::float AS total, count(*)::int AS n
+       FROM deleted_instances WHERE tenant_id = $1 AND ($2::bigint IS NULL OR funnel_id = $2::bigint)`,
+    [tenantId, funnelId],
+  );
+  return rows[0] || { total: 0, n: 0 };
+}
+
+export default { needsYou, pendingImageApprovals, liveCounts, readyLeft, routerDays, calendarInstances, costSince, deletedRows, deletedTotal };

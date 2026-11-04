@@ -241,10 +241,30 @@ export async function markPostFailed(id, error) {
   return rowCount > 0;
 }
 
-/** Delete an instance. A locked (posted) instance is never deleted. */
+/** The title of a + Sample instance: its costs are made up, so they never count as spend. */
+export const SAMPLE_TITLE = 'SAMPLE: delete me';
+
+/**
+ * Delete an instance and log it in one statement, so its cost is never lost.
+ * A locked (posted) instance is never deleted.
+ */
 export async function remove(id) {
-  const { rowCount } = await query('DELETE FROM instances WHERE id = $1 AND locked = false', [id]);
-  return rowCount > 0;
+  const { rows } = await query(
+    `WITH gone AS (
+       DELETE FROM instances WHERE id = $1 AND locked = false RETURNING *
+     ), logged AS (
+       INSERT INTO deleted_instances (id, tenant_id, funnel_id, funnel_name, title, status, cost_usd, steps, created_at)
+       SELECT id, tenant_id, funnel_id, funnel_name, title, status,
+              CASE WHEN title = $2 THEN 0 ELSE cost_usd END,
+              CASE WHEN title = $2 THEN '[]'::jsonb ELSE steps END,
+              created_at
+         FROM gone
+       RETURNING id
+     )
+     SELECT count(*)::int AS n FROM gone`,
+    [id, SAMPLE_TITLE],
+  );
+  return rows[0].n > 0;
 }
 
 /**

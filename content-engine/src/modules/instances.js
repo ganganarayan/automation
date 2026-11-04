@@ -40,6 +40,7 @@ import { MANUAL_STAGES, STAGE_LABEL, inputKind, canExecute } from '../utils/manu
 import { navSlot, fillNav, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { LIBRARY_LABELS, libraryStatus, rowStatus, latestAt } from '../utils/libraryStatus.js';
 import { formatIst } from '../utils/time.js';
+import * as views from '../repositories/workViewRepository.js';
 import { defaultSlotsIso, parseDriveFolderId, parsePickedFiles } from '../utils/readyPostSpec.js';
 import { driveThumbUrl } from '../utils/reviewSpec.js';
 import { postedLinks } from '../utils/routerSpec.js';
@@ -71,16 +72,17 @@ export function register(ctx) {
       await readyPost.refreshScheduled({ tenantId: req.tenantId }).catch((err) => log.warn({ err: err.message }, 'scheduled refresh failed'));
       // Label / funnel chips filter in memory over a wider page; an old ?status=
       // bookmark still filters in SQL.
-      const [all, funnelList, approver] = await Promise.all([
+      const [all, funnelList, approver, deleted] = await Promise.all([
         instances.list({ tenantId: req.tenantId, status, limit: 300 }),
         funnelsRepo.listByTenant(req.tenantId).catch(() => []),
         canApprove(req),
+        views.deletedTotal({ tenantId: req.tenantId, funnelId: Number(funnel) || null }).catch(() => null),
       ]);
       // Waiting on the user: the open approval per instance, for Review / Approve.
       const pending = approver
         ? pendingByInstance(await approvalsRepo.openForInstances({ tenantId: req.tenantId }).catch(() => []))
         : new Map();
-      await sendPage(req, res, listPage(all, { status, label, funnel, funnelList, pending, approver }));
+      await sendPage(req, res, listPage(all, { status, label, funnel, funnelList, pending, approver, deleted }));
     } catch (err) {
       next(err);
     }
@@ -559,7 +561,7 @@ function finalVideoId(steps) {
   return stitch && stitch.artifacts && stitch.artifacts.video ? stitch.artifacts.video.driveId : '';
 }
 
-function listPage(all, { status = null, label = '', funnel = '', funnelList = [], pending = new Map(), approver = false } = {}) {
+function listPage(all, { status = null, label = '', funnel = '', funnelList = [], pending = new Map(), approver = false, deleted = null } = {}) {
   // Replaced (superseded) runs are hidden unless asked for by an old ?status= link.
   const visible = (all || []).filter((r) => status === 'superseded' || !libraryStatus(r.status).hidden);
   const inFunnel = visible.filter((r) => !funnel || String(r.funnel_id) === funnel);
@@ -580,7 +582,7 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
     ? [`<a class="chip${!funnel ? ' on' : ''}" href="${link({ funnel: '' })}">All funnels</a>`,
       ...funnelList.map((f) => `<a class="chip${funnel === String(f.id) ? ' on' : ''}" href="${link({ funnel: String(f.id) })}">${esc(f.name)}</a>`)].join('')
     : '';
-  const spentChip = `<span class="chip spent" title="Total cost of the ${rows.length} instance(s) shown">💲 Spent ${esc(usd(spent))}</span>`;
+  const spentChip = `<span class="chip spent" title="Total cost of the ${rows.length} instance(s) shown">💲 Spent ${esc(usd(spent))}</span>${deleted && deleted.n && !label ? ` <a class="chip spent" href="/api/v1/admin/log#deleted" title="Not in Spent: ${deleted.n} deleted instance(s). Open the log.">🗑 Deleted ${esc(usd(deleted.total))}</a>` : ''}`;
 
   const body = (rows || [])
     .map((r) => {
@@ -644,7 +646,7 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
       try{ const r=await fetch('/api/v1/admin/instances/'+id+'/approve',{method:'POST'}); const j=await r.json(); if(j.ok){ b.textContent='🟢 Approved'; setTimeout(()=>location.reload(), 900); } else { b.disabled=false; b.textContent=t; alert(j.error||'failed'); } }
       catch(e){ b.disabled=false; b.textContent=t; alert(e.message); }
     }
-    async function del(id){ if(!confirm('Delete this instance?')) return; const r=await fetch('/api/v1/admin/instances/'+id+'/delete',{method:'POST'}); const j=await r.json(); if(j.ok) location.reload(); else alert(j.error||'failed'); }
+    async function del(id){ if(!confirm('Delete this instance? Its cost stays in the deleted log.')) return; const r=await fetch('/api/v1/admin/instances/'+id+'/delete',{method:'POST'}); const j=await r.json(); if(j.ok) location.reload(); else alert(j.error||'failed'); }
     ${posting ? 'setTimeout(()=>location.reload(), 8000); // a post is on its way to Post for Me' : ''}
   `, 'instances');
 }

@@ -27,6 +27,7 @@ import { libraryStatus, statusText, NEEDS_YOU_STATUSES } from '../utils/libraryS
 import { laneOf, channelText } from '../utils/laneSpec.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS, HOME_PATH } from '../utils/adminNav.js';
 import { nowIst, formatIst, todayKeyIst, ZONE } from '../utils/time.js';
+import { costBreakdown } from '../utils/instanceSpec.js';
 import { keyOk, currentSession } from '../services/accessService.js';
 import { DateTime } from 'luxon';
 
@@ -92,12 +93,14 @@ export function register(ctx) {
       if (!(await guardHtml(req, res))) return;
       const tenantId = req.tenantId || 'default';
       const monthStart = nowIst().startOf('month');
-      const [session, rows, month] = await Promise.all([
+      const [session, rows, month, deleted, deletedAll] = await Promise.all([
         currentSession(req),
         instances.list({ tenantId, limit: 30 }),
         views.costSince({ tenantId, fromUtc: monthStart.toUTC().toISO() }).catch(() => null),
+        views.deletedRows({ tenantId }).catch(() => []),
+        views.deletedTotal({ tenantId }).catch(() => null),
       ]);
-      res.type('html').send(logPage({ session, rows, month, monthStart }));
+      res.type('html').send(logPage({ session, rows, month, monthStart, deleted, deletedAll }));
     } catch (err) {
       next(err);
     }
@@ -232,7 +235,20 @@ function calendarPage({ today, from, to, session, rows, funnels, decisions }) {
   `, { current: 'calendar', session });
 }
 
-function logPage({ session, rows, month, monthStart }) {
+function logPage({ session, rows, month, monthStart, deleted = [], deletedAll = null }) {
+  const deletedBody = deleted
+    .map((r) => {
+      const parts = Object.entries(costBreakdown(instances.parseSteps(r))).filter(([, c]) => Number(c) > 0);
+      return `<tr>
+        <td class="hint">${esc(formatIst(r.deleted_at))}</td>
+        <td class="hint">${esc(formatIst(r.created_at))}</td>
+        <td>${esc(r.title || 'Untitled')}<div class="hint">${esc(r.funnel_name || '-')} · ${esc(String(r.id).slice(0, 8))}</div></td>
+        <td>${esc(statusText(r.status))}</td>
+        <td>${esc(usd(r.cost_usd))}${parts.length ? `<div class="hint">${esc(parts.map(([k, c]) => `${k} ${usd(c)}`).join(', '))}</div>` : ''}</td>
+      </tr>`;
+    })
+    .join('');
+
   const body = (rows || [])
     .map((r) => {
       const steps = instances.parseSteps(r);
@@ -255,12 +271,19 @@ function logPage({ session, rows, month, monthStart }) {
       <div class="toprow"><a class="act" href="/api/v1/dashboard">Delivery dashboard (older feeds, tracking-bridge)</a></div>
     </div>
     <div class="tiles">
-      ${tile(`Cost since ${formatIst(monthStart, { withTime: false })}`, month ? usd(month.total) : '-', 'this month, all funnels')}
-      ${tile('Runs this month', month ? String(month.runs) : '-', 'instances created')}
+      ${tile(`Cost since ${formatIst(monthStart, { withTime: false })}`, month ? usd(month.total) : '-', `this month, all funnels, ${month ? usd(month.deleted) : '-'} of it on deleted runs`)}
+      ${tile('Runs this month', month ? String(month.runs) : '-', 'instances created, deleted ones included')}
+      ${tile('Deleted, all time', deletedAll ? usd(deletedAll.total) : '-', deletedAll ? `${deletedAll.n} deleted instance(s)` : 'log not readable')}
     </div>
     <table>
       <thead><tr><th>Created</th><th>Video</th><th>Status</th><th>Cost</th><th>Delivery</th></tr></thead>
       <tbody>${body || '<tr><td colspan="5" class="hint">No runs yet.</td></tr>'}</tbody>
+    </table>
+    <h2 id="deleted">Deleted instances</h2>
+    <div class="sub">A permanent record of the money spent on deleted runs. Nothing here can be restored. Shows the latest 200; the totals above count them all.</div>
+    <table>
+      <thead><tr><th>Deleted</th><th>Created</th><th>Video</th><th>Status when deleted</th><th>Cost</th></tr></thead>
+      <tbody>${deletedBody || '<tr><td colspan="5" class="hint">Nothing deleted yet.</td></tr>'}</tbody>
     </table>
   `, { current: 'log', session });
 }
