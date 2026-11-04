@@ -24,7 +24,7 @@ import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import * as instances from '../services/instanceService.js';
 import { reviewPath } from '../services/approvalService.js';
 import { libraryStatus, statusText, NEEDS_YOU_STATUSES } from '../utils/libraryStatus.js';
-import { laneOf, channelText } from '../utils/laneSpec.js';
+import { laneOf, channelText, commentStatus } from '../utils/laneSpec.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS, HOME_PATH } from '../utils/adminNav.js';
 import { nowIst, formatIst, todayKeyIst, ZONE } from '../utils/time.js';
 import { costBreakdown } from '../utils/instanceSpec.js';
@@ -100,7 +100,8 @@ export function register(ctx) {
         views.deletedRows({ tenantId }).catch(() => []),
         views.deletedTotal({ tenantId }).catch(() => null),
       ]);
-      res.type('html').send(logPage({ session, rows, month, monthStart, deleted, deletedAll }));
+      const comments = await views.commentsForPosts({ tenantId, refs: rows.flatMap(postRefsOf) }).catch(() => []);
+      res.type('html').send(logPage({ session, rows, month, monthStart, deleted, deletedAll, comments }));
     } catch (err) {
       next(err);
     }
@@ -235,7 +236,19 @@ function calendarPage({ today, from, to, session, rows, funnels, decisions }) {
   `, { current: 'calendar', session });
 }
 
-function logPage({ session, rows, month, monthStart, deleted = [], deletedAll = null }) {
+function postRefsOf(r) {
+  return (Array.isArray(r.post_refs) ? r.post_refs : []).filter(Boolean);
+}
+
+/** One channel's line in the log: did it post, its live link, its first comment. */
+function deliveryLine(c, jobs) {
+  const link = /^https?:\/\//i.test(String(c.url || ''))
+    ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">Open post</a>`
+    : c.state === 'ok' ? '<span class="hint">🟡 no link yet</span>' : '';
+  return `<div>${[esc(channelText(c)), link, esc(commentStatus(c, jobs))].filter(Boolean).join(' · ')}</div>`;
+}
+
+function logPage({ session, rows, month, monthStart, deleted = [], deletedAll = null, comments = [] }) {
   const deletedBody = deleted
     .map((r) => {
       const parts = Object.entries(costBreakdown(instances.parseSteps(r))).filter(([, c]) => Number(c) > 0);
@@ -260,7 +273,7 @@ function logPage({ session, rows, month, monthStart, deleted = [], deletedAll = 
         <td><a href="/api/v1/admin/instances/${esc(r.id)}">${esc(r.title || 'Untitled')}</a><div class="hint">${esc(r.funnel_name || '-')}</div></td>
         <td>${esc(statusText(r.status))}</td>
         <td>${esc(usd(r.cost_usd))}</td>
-        <td class="chans">${esc(chans.map(channelText).join(', ')) || '<span class="hint">-</span>'}</td>
+        <td class="chans">${chans.map((c) => deliveryLine(c, comments.filter((j) => postRefsOf(r).includes(j.postforme_post_id)))).join('') || '<span class="hint">-</span>'}</td>
       </tr>`;
     })
     .join('');

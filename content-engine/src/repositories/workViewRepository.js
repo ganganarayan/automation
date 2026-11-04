@@ -133,4 +133,15 @@ export async function deletedTotal({ tenantId = 'default', funnelId = null }) {
   return rows[0] || { total: 0, n: 0 };
 }
 
-export default { needsYou, pendingImageApprovals, liveCounts, readyLeft, routerDays, calendarInstances, costSince, deletedRows, deletedTotal };
+/** First-comment jobs for these Post for Me posts. */
+export async function commentsForPosts({ tenantId = 'default', refs = [] }) {
+  if (!refs.length) return [];
+  const { rows } = await query(
+    `SELECT postforme_post_id, status, done FROM first_comments
+      WHERE tenant_id = $1 AND postforme_post_id = ANY($2::text[])`,
+    [tenantId, refs],
+  );
+  return rows;
+}
+
+export default { needsYou, pendingImageApprovals, liveCounts, readyLeft, routerDays, calendarInstances, costSince, deletedRows, deletedTotal, commentsForPosts };

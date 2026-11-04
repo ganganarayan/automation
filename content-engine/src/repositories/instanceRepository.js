@@ -241,6 +241,27 @@ export async function markPostFailed(id, error) {
   return rowCount > 0;
 }
 
+/** Posted instances with a ✅ channel that has no live link yet (given up on after 3 tries). */
+export async function missingLinks(tenantId = 'default', limit = 10) {
+  const { rows } = await query(
+    `SELECT * FROM instances i
+      WHERE tenant_id = $1 AND status IN ('posted', 'partial')
+        AND EXISTS (SELECT 1 FROM jsonb_array_elements(i.steps) s,
+                                  jsonb_array_elements(s->'artifacts'->'channels') c
+                     WHERE s->>'key' = 'publish' AND c->>'state' = 'ok'
+                       AND COALESCE(c->>'url', '') = ''
+                       AND COALESCE((c->>'linkTries')::int, 0) < 3)
+      ORDER BY posted_at DESC NULLS LAST LIMIT $2`,
+    [tenantId, limit],
+  );
+  return rows;
+}
+
+/** Save fetched links. The one write allowed on a locked instance: a link changes nothing about the post. */
+export async function saveLinks(id, steps) {
+  await query('UPDATE instances SET steps = $2 WHERE id = $1', [id, JSON.stringify(steps)]);
+}
+
 /** The title of a + Sample instance: its costs are made up, so they never count as spend. */
 export const SAMPLE_TITLE = 'SAMPLE: delete me';
 
@@ -422,5 +443,5 @@ export async function recentForFunnel(funnelId, tenantId = 'default', limit = 40
 export default {
   create, get, list, logRows, saveSteps, setStatus, transition, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, moveFunnel, unschedule, scheduledDue, retryDue, setPostStatus, markPosting, markPostFailed, remove,
   existsForFunnelOnDate, videoOnDate, postedDriveIds, draftsByDriveIds, liveOnDate, openSheetRefs, recentForFunnel,
-  routerHeldDriveIds, releaseSlot, supersede,
+  routerHeldDriveIds, releaseSlot, supersede, missingLinks, saveLinks,
 };

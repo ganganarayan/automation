@@ -1482,12 +1482,47 @@ export function refreshAllTenants() {
   return refreshing;
 }
 
+/**
+ * Ask Post for Me again for live links we don't have (posted before they were
+ * shown, or not ready at the first check). Each channel gets 3 tries, so one
+ * that never gives a link stops costing calls.
+ */
+async function fillMissingLinks({ tenantId = 'default' } = {}) {
+  const rows = await instanceRepo.missingLinks(tenantId);
+  if (!rows.length) return;
+  const providers = await buildProviders(tenantId);
+  if (!providers.resolved.postformeKey) return;
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log);
+  for (const row of rows) {
+    try {
+      const refs = (Array.isArray(row.post_refs) ? row.post_refs : JSON.parse(row.post_refs || '[]')).filter(Boolean);
+      const urls = {};
+      for (const ref of refs) {
+        for (const r of await publish.postResults(ref)) {
+          const url = r.success && r.platform_data && (r.platform_data.url || r.platform_data.permalink);
+          if (url) urls[r.social_account_id] = url;
+        }
+      }
+      const steps = instanceService.parseSteps(row);
+      const pub = ((steps.find((x) => x.key === 'publish') || {}).artifacts) || {};
+      const channels = (pub.channels || []).map((c) => {
+        if (c.state !== 'ok' || c.url) return c;
+        return urls[c.id] ? { ...c, url: urls[c.id] } : { ...c, linkTries: (Number(c.linkTries) || 0) + 1 };
+      });
+      await instanceRepo.saveLinks(row.id, patchStep(steps, 'publish', { artifacts: { channels } }));
+    } catch (err) {
+      log.warn({ err: err.message, instance: row.id }, 'post link fill failed (will retry)');
+    }
+  }
+}
+
 async function refreshAllTenantsOnce() {
   const list = await tenantRepo.list().catch(() => [{ id: 'default' }]);
   let n = 0;
   for (const t of list) {
     n += await refreshScheduled({ tenantId: t.id }).catch(() => 0);
     n += await autoRetryDue({ tenantId: t.id }).catch(() => 0);
+    await fillMissingLinks({ tenantId: t.id }).catch((err) => log.warn({ err: err.message }, 'post link fill failed'));
     await firstComment.runDue({ tenantId: t.id }).catch((err) => log.warn({ err: err.message }, 'first comment run failed'));
   }
   return n;

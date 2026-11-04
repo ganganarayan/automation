@@ -159,7 +159,7 @@ export function istToInputValue(text) {
 }
 
 export default {
-  postOutcome, istToInputValue, mergeChannels, channelOutcome, channelText, channelIcon,
+  postOutcome, istToInputValue, mergeChannels, channelOutcome, channelText, channelIcon, commentStatus,
   SOURCE_TYPES, READY_STAGES, TRANSCRIPT_REVIEW, laneOf, transcriptApproved, canGenerateCopy, readyStage, stageLabel,
   isSrt, srtToText, prepareTranscript, glossaryTerms, whisperPrompt, isRecoverableError, nextAutoRetry, requestFromPost,
 };
@@ -197,6 +197,23 @@ export function channelIcon(c = {}) {
 /** One channel as "✅ youtube Ganga" / "❌ x (error)" / "⏳ threads name". */
 export function channelText(c = {}) {
   return `${channelIcon(c)} ${[c.platform, c.name].filter(Boolean).join(' ')}${c.state === 'failed' && c.error ? ` (${c.error})` : ''}`;
+}
+
+/**
+ * A posted channel's first comment, as text for the log; '' for a channel that
+ * did not post. `jobs` are the post's first_comments rows ({ status, done }),
+ * where done is keyed by account id. A retried post has one job per attempt.
+ */
+export function commentStatus(c = {}, jobs = []) {
+  if (c.state !== 'ok') return '';
+  const list = Array.isArray(jobs) ? jobs : [];
+  const tries = list.map((j) => (j.done || {})[c.id]).filter(Boolean);
+  const hit = tries.find((t) => t.state === 'ok') || tries[0];
+  if (hit && hit.state === 'ok') return '🟢 Comment posted';
+  if (hit && hit.state === 'skipped') return `⚪ No comment: ${hit.error || 'skipped'}`;
+  if (hit && hit.state === 'failed') return `🔴 Comment failed: ${hit.error || 'unknown error'}`;
+  if (hit || list.some((j) => j.status === 'pending')) return '⏳ Comment waiting';
+  return list.length ? '🟡 Comment not recorded' : '⚪ No comment queued';
 }
 
 /** Minutes to wait before each automatic retry of the ❌ channels (5 tries, ~2 days). */
