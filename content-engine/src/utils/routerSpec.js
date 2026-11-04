@@ -82,6 +82,11 @@ export function postAtFor(scheduledFor, now = new Date()) {
   return at.getTime() > new Date(now).getTime() ? at.toISOString() : null;
 }
 
+/** The accounts an image post can go to: YouTube takes only videos. */
+export function imageAccounts(accounts, accountMap = {}) {
+  return (Array.isArray(accounts) ? accounts : []).filter((id) => !/youtube/i.test(String((accountMap[id] || {}).platform || '')));
+}
+
 /** A1 column letter for a 0-based index (0 → A, 26 → AA). */
 export function colLetter(index0) {
   let n = index0;
@@ -651,7 +656,7 @@ export default {
   routerTarget, runsOn, laneForInstance, existingReason, routerClash, postAtFor, colLetter, planHeader, colIndex, rowKey,
   readyRows, pickReadyRow, nextMatchKeys, htmlToText, landingUrls, landingLine, historyLines, instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt,
   normalizeRefill, rowsForSheet,
-  VIDEO_REVIEW, pickOldestVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, VIDEO_PROVIDERS, providerOrder,
+  imageAccounts, VIDEO_REVIEW, pickOldestVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, VIDEO_PROVIDERS, providerOrder,
   isCreditError, creditState, creditView, chooseProvider, laneTwoVerdict, dryTransition, researchPrompt, normalizeResearch, briefTopic,
   rerunAction, nudgeNeeded, NUDGE_TEXT,
 };

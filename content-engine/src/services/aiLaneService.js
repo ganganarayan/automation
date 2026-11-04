@@ -32,6 +32,7 @@ import * as stepLog from './stepLogService.js';
 import * as heartbeat from '../core/heartbeat.js';
 import { buildProviders } from './providerFactory.js';
 import { researchPrompt, normalizeResearch, historyLines, instanceHistoryLine, isCreditError, rerunAction } from '../utils/routerSpec.js';
+import { retitleForDate } from '../utils/retrySpec.js';
 import { formatIst, ZONE } from '../utils/time.js';
 import { DateTime } from 'luxon';
 import { childLogger } from '../core/logger.js';
@@ -143,9 +144,40 @@ export async function onStageFailed(instanceId, stepKey, err) {
   }
 }
 
+const dayTaken = (message) => Object.assign(new Error(message), { dayTaken: true });
+
+/**
+ * A retry for a new date: that date must be free, since nothing was approved to be
+ * replaced there. Holds the date against the router, moves the row and its router
+ * mark, and frees the old date if this row held it.
+ */
+async function moveToDate(row, action, moved) {
+  const { router } = stageRunner.routerInfo(row);
+  if (row.funnel_id) {
+    const taken = `${moved.text} already has a post for this funnel. Pick another date.`;
+    const live = await instanceRepo.liveOnDate(row.funnel_id, moved.postDate, row.tenant_id);
+    if (live && String(live.id) !== String(row.id)) throw dayTaken(taken);
+    const day = await routerDays.get(row.funnel_id, moved.postDate);
+    const fields = { lane: action === 'image' ? 'image' : 'ai_video', reason: 'retried from the Library for this date', instanceId: row.id };
+    if (day) {
+      const other = day.instance_id && String(day.instance_id) !== String(row.id) ? await instanceRepo.get(day.instance_id) : null;
+      if (other && !['failed', 'superseded'].includes(other.status)) throw dayTaken(taken);
+      await routerDays.update(day.id, fields);
+    } else {
+      await routerDays.claim({ tenantId: row.tenant_id, funnelId: row.funnel_id, postDate: moved.postDate, ...fields });
+    }
+    const was = (router && router.postDate) || (row.scheduled_for ? DateTime.fromJSDate(new Date(row.scheduled_for)).setZone(ZONE).toFormat('yyyy-MM-dd') : '');
+    const old = was && was !== moved.postDate ? await routerDays.get(row.funnel_id, was) : null;
+    if (old && String(old.instance_id) === String(row.id)) await routerDays.release(row.funnel_id, was);
+  }
+  await instanceRepo.setMeta(row.id, { scheduledFor: moved.at, title: retitleForDate(row.title, moved.text) || undefined });
+  if (router) await instanceService.updateStep(row.id, 'script', { artifacts: { router: { ...router, postDate: moved.postDate } } });
+}
+
 /**
  * A retried instance takes its router day back, so a funnel never posts twice:
- * a replacement still waiting is replaced, one already approved stops the retry.
+ * a replacement still waiting is replaced, one already approved stops the retry
+ * and asks for a new date.
  */
 async function takeDay(row, action) {
   const { router } = stageRunner.routerInfo(row);
@@ -157,7 +189,7 @@ async function takeDay(row, action) {
     const other = await instanceRepo.get(day.instance_id);
     const act = rerunAction(other);
     if (act === 'keep' && !['failed', 'superseded'].includes(other.status)) {
-      throw new Error('another post for this day is already approved, so a retry would post twice. Delete that one first');
+      throw dayTaken(`${formatIst(row.scheduled_for, { withTime: false })} already has an approved post for this funnel, so this one needs its own date.`);
     }
     if (act === 'supersede') await instanceRepo.supersede(other.id, 'replaced by a retry');
     if (act === 'release') await instanceRepo.releaseSlot(other.id);
@@ -169,14 +201,15 @@ async function takeDay(row, action) {
  * ↻ Retry a failed instance on the same id (action from utils/retrySpec):
  * script, stages (keeps what is done), final (back to the final review) or
  * image. Claims it now, runs in the background; a failure reads Failed again.
+ * moved (utils/retrySpec parseRetryDate) runs it for a new date instead of its own.
  */
-export async function retry({ instanceId, action }) {
+export async function retry({ instanceId, action, moved = null }) {
   const row = await instanceRepo.get(instanceId);
   if (!row) throw new Error('instance not found');
   // From failed, or from running when it was found stuck (this also restarts its quiet clock).
   if (!(await instanceRepo.transition(row.id, row.status, 'running'))) throw new Error('this has moved on (already retrying?)');
   try {
-    await takeDay(row, action);
+    await (moved ? moveToDate(row, action, moved) : takeDay(row, action));
   } catch (err) {
     await instanceRepo.setStatus(row.id, row.status);
     throw err;

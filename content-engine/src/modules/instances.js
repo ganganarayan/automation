@@ -48,7 +48,7 @@ import { postedLinks } from '../utils/routerSpec.js';
 import { keyOk, currentSession, canApprove } from '../services/accessService.js';
 import * as approvalService from '../services/approvalService.js';
 import * as approvalsRepo from '../repositories/approvalRepository.js';
-import { retryAction, isStuck } from '../utils/retrySpec.js';
+import { retryAction, isStuck, parseRetryDate, retryDateDefaults, RETRY_PICK_SCRIPT } from '../utils/retrySpec.js';
 import { buildTimeline, stepTotals, currentStep, formatSpan, LIVE_STEPS_SCRIPT } from '../utils/stepTimeSpec.js';
 import { pendingByInstance, approvalButtons, reviewFields, applyReviewEdit } from '../utils/approvalButtons.js';
 
@@ -429,7 +429,16 @@ export function register(ctx) {
       if (!action) return res.status(409).json({ ok: false, error: 'nothing failed on this instance' });
       if (action === 'open') return res.status(409).json({ ok: false, error: 'open it and post it again' });
       if (action === 'channels') return res.json({ ok: true, ...(await readyPost.retryFailed({ instanceId: row.id })) });
-      res.json({ ok: true, ...(await aiLane.retry({ instanceId: row.id, action })) });
+      // The retry's day is taken: the page asks for a date and calls back with it.
+      const picker = { pickDate: true, ...retryDateDefaults(row) };
+      const asked = req.body?.postAt;
+      const moved = asked ? parseRetryDate(asked) : null;
+      if (asked && !moved) return res.status(400).json({ ok: false, error: 'Pick a date and time still to come.', ...picker });
+      try {
+        res.json({ ok: true, ...(await aiLane.retry({ instanceId: row.id, action, moved })) });
+      } catch (err) {
+        res.status(err.dayTaken ? 409 : 400).json({ ok: false, error: err.message, ...(err.dayTaken ? picker : {}) });
+      }
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -697,9 +706,10 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
     ${previewModal()}
   `, `
     async function sample(){ const r=await fetch('/api/v1/admin/instances/sample',{method:'POST'}); const j=await r.json(); if(j.ok) location.reload(); else alert(j.error||'failed'); }
-    async function retryRow(b, id){
+    ${RETRY_PICK_SCRIPT}
+    async function retryRow(b, id, postAt){
       b.disabled=true; const t=b.textContent; b.textContent='Retrying…';
-      try{ const r=await fetch('/api/v1/admin/instances/'+id+'/retry',{method:'POST'}); const j=await r.json(); if(j.ok){ b.textContent='🟢 Started'; setTimeout(()=>location.reload(), 900); } else { b.disabled=false; b.textContent=t; alert(j.error||'failed'); } }
+      try{ const r=await fetch('/api/v1/admin/instances/'+id+'/retry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(postAt?{postAt}:{})}); const j=await r.json(); if(j.ok){ b.textContent='🟢 Started'; setTimeout(()=>location.reload(), 900); } else { b.disabled=false; b.textContent=t; if(j.pickDate) retryPick(b,id,j); else alert(j.error||'failed'); } }
       catch(e){ b.disabled=false; b.textContent=t; alert(e.message); }
     }
     async function approveRow(b, id, label){
@@ -1733,6 +1743,7 @@ ${NAV_CSS}
  table.lib td .act.big{padding:.55rem 1rem}
  .act.approve{background:#0a7d32}
  .apbtns{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.45rem}
+ .rtpick{flex-basis:100%;display:flex;flex-direction:column;gap:.4rem;font-weight:400}
  .rvplayer{width:100%;height:65vh;border:0;border-radius:10px;background:#000;margin-bottom:.8rem}
  .rvimg{display:block;max-width:100%;max-height:60vh;border-radius:8px;margin:0 auto .8rem}
  .rvf{display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:#9a9ab0;margin-bottom:.8rem}

@@ -43,7 +43,7 @@ import { costImages } from '../utils/pricing.js';
 import { formatIst } from '../utils/time.js';
 import {
   IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, LINKS_COL, SOURCE_COL, SHEET_STATUS,
-  CELL_NEWLINE, postedLinks,
+  CELL_NEWLINE, postedLinks, imageAccounts,
   readyRows, pickReadyRow, planHeader, colLetter, nextMatchKeys, htmlToText, landingUrls, historyLines,
   instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt, normalizeRefill, rowsForSheet, postAtFor,
 } from '../utils/routerSpec.js';
@@ -195,6 +195,7 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
   const f = await funnels.resolve(funnelRow);
   if (!f.sheetId) throw new LaneError('no content sheet on this funnel');
   if (!(f.accounts || []).length) throw new LaneError('no Post for Me accounts ticked on this funnel');
+  if (!imageAccounts(f.accounts, f.accountMap).length) throw new LaneError('only YouTube is ticked on this funnel, and YouTube takes no image posts');
   const providers = await buildProviders(f.tenantId);
   const tab = await poster.tabFor(providers.sheets, f);
   let rows = await providers.sheets.readTab(f.sheetId, tab, { fresh: true });
@@ -270,8 +271,8 @@ export async function approve(approval) {
   const img = art(steps, 'images');
   const full = script.captionFull || '';
   const short = script.captionShort || '';
-  const accounts = f.accounts || [];
   const accountMap = f.accountMap || {};
+  const accounts = imageAccounts(f.accounts, accountMap);
   const postAt = postAtFor(row.scheduled_for); // D2: null = it's late, post now
   const configs = buildPlatformConfigs(full, short);
   const req = { caption: short || full, mediaUrl: (img.image || {}).url || p.mediaUrl, ...(configs ? { platformConfigurations: configs } : {}) };
