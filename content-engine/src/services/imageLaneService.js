@@ -30,6 +30,7 @@ import * as funnels from '../repositories/funnelsRepository.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
 import * as instanceService from './instanceService.js';
 import * as approvalService from './approvalService.js';
+import * as stepLog from './stepLogService.js';
 import { setStatus as setApprovalStatus } from '../repositories/approvalRepository.js';
 import * as poster from './funnelPosterService.js';
 import * as firstComment from './firstCommentService.js';
@@ -113,9 +114,17 @@ async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '
   if (!inst) throw new Error(`instance ${instanceId} not found`);
   const { full, short } = composeCaptions(fields, { ctaLink: f.ctaLink, audiencePrefix: f.audiencePrefix });
   const prompt = composePrompt(fields, note);
-  const image = await poster.generate(providers, prompt, f.imageSize, f.imageKey);
-  const upload = await providers.storage.uploadPng(f.driveFolder, `${poster.slug(f.name)}-${poster.slug(sheet.key)}-r${inst.round || 1}.png`, image);
-  if (!upload || !upload.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
+  await stepLog.start(instanceId, 'images');
+  let upload;
+  try {
+    const image = await poster.generate(providers, prompt, f.imageSize, f.imageKey);
+    upload = await providers.storage.uploadPng(f.driveFolder, `${poster.slug(f.name)}-${poster.slug(sheet.key)}-r${inst.round || 1}.png`, image);
+    if (!upload || !upload.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
+  } catch (err) {
+    await stepLog.fail(instanceId, 'images');
+    throw err;
+  }
+  await stepLog.end(instanceId, 'images');
 
   const { id: approvalId, reviewUrl } = await approvalService.createRequest({
     tenantId: f.tenantId,
@@ -143,7 +152,10 @@ async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '
 
   // It waits on the Library's Approve either way, so an email problem fails nothing.
   const to = recipient(f, providers);
-  if (!to) return log.warn({ instance: instanceId }, 'no approval email address: approve it from the Library');
+  if (!to) {
+    await stepLog.start(instanceId, 'review_image', { email: 'none' });
+    return log.warn({ instance: instanceId }, 'no approval email address: approve it from the Library');
+  }
   const when = inst.scheduled_for ? `${formatIst(inst.scheduled_for)} IST` : '';
   try {
     await providers.mail.send({
@@ -151,8 +163,10 @@ async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '
       subject: `${note ? 'Reworked' : 'Approve'} ${f.name} image post${when ? ` for ${when}` : ''}`,
       html: poster.approvalEmail(f.name, upload.thumbnailUrl, full, short, reviewUrl, when),
     });
+    await stepLog.start(instanceId, 'review_image', { email: 'sent' });
     log.info({ instance: instanceId, row: sheet.key, round: inst.round }, 'image approval email sent');
   } catch (err) {
+    await stepLog.start(instanceId, 'review_image', { email: 'failed' });
     log.warn({ err: err.message, instance: instanceId }, 'image approval email failed: approve it from the Library');
   }
   return null;
@@ -189,11 +203,14 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
 
   const open = await instanceRepo.openSheetRefs(f.id, f.tenantId);
   const free = readyRows(rows).filter((r) => !open.includes(r.key));
+  let refillSpan = null;
   if (free.length < REFILL_BELOW) {
+    const from = new Date().toISOString();
     rows = await refill({ f, providers, tab, rows, log }).catch((err) => {
       log.warn({ err: err.message }, 'image sheet refill failed (using what is there)');
       return rows;
     });
+    refillSpan = [from, new Date().toISOString()];
   }
   const pick = pickReadyRow(rows, open);
   if (!pick) throw new LaneError('no Ready row in the content sheet, and the refill wrote none');
@@ -207,6 +224,7 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
     sourceType: 'sheet',
     sourceRef: pick.key,
   });
+  if (refillSpan) await stepLog.span(inst.id, 'refill', refillSpan[0], refillSpan[1]);
   const sheet = { tab, matchColName: pick.fields.matchColName, key: pick.key, rowNumber: pick.rowNumber };
   try {
     await renderAndSend({ instanceId: inst.id, f, providers, fields: pick.fields, sheet, log });
@@ -239,6 +257,8 @@ export async function approve(approval) {
   if (!(await instanceRepo.transition(row.id, IMAGE_REVIEW, 'approved'))) {
     return log.info({ status: row.status }, 'image post is not awaiting approval; ignored');
   }
+  await stepLog.end(row.id, 'review_image', { by: 'approved' });
+  await stepLog.start(row.id, 'publish');
   const ctx = await sheetFor(row);
   if (!ctx) return instanceRepo.setStatus(row.id, 'failed', 'funnel not found');
   const { f, providers, sheet, tab } = ctx;
@@ -264,6 +284,7 @@ export async function approve(approval) {
     if (!ref) throw new Error('Post for Me did not return a post id');
   } catch (err) {
     log.error({ err: err.message }, 'image post could not be created');
+    await stepLog.fail(row.id, 'publish');
     steps = patchStep(steps, 'publish', { status: 'failed', error: err.message });
     await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
     await instanceRepo.setStatus(row.id, 'failed', `Post for Me: ${err.message}`);
@@ -289,6 +310,7 @@ export async function approve(approval) {
   const channels = accounts.map((id) => ({ id, platform: (accountMap[id] || {}).platform || '', name: (accountMap[id] || {}).account_name || id, state: 'waiting' }));
   steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: [ref], caption: req.caption, channels, request: req } });
   await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
+  await stepLog.end(row.id, 'publish');
   await instanceRepo.markScheduled(row.id, { postRefs: [ref], scheduledFor: postAt ? new Date(postAt) : null, postNow: !postAt });
   await poster.markSheetRow(providers.sheets, f.sheetId, tab, { ...where, extra: { [PFM_COL]: ref } }, log);
   await setApprovalStatus(approval.id, 'published');
@@ -305,6 +327,7 @@ export async function rework(approval, note) {
   if (!(await instanceRepo.transition(row.id, IMAGE_REVIEW, 'running', note || null))) {
     return log.info({ status: row.status }, 'image post is not awaiting approval; rework ignored');
   }
+  await stepLog.end(row.id, 'review_image', { by: 'rework' });
   await instanceRepo.bumpRound(row.id);
   const ctx = await sheetFor(row);
   if (!ctx) return instanceRepo.setStatus(row.id, 'failed', 'funnel not found');

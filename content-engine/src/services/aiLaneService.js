@@ -28,6 +28,7 @@ import * as credit from './creditService.js';
 import * as stageRunner from './stageRunnerService.js';
 import * as review from './instanceReviewService.js';
 import * as imageLane from './imageLaneService.js';
+import * as stepLog from './stepLogService.js';
 import * as heartbeat from '../core/heartbeat.js';
 import { buildProviders } from './providerFactory.js';
 import { researchPrompt, normalizeResearch, historyLines, instanceHistoryLine, isCreditError, rerunAction } from '../utils/routerSpec.js';
@@ -53,6 +54,7 @@ export async function prepare({ funnelRow, scheduledFor, postDate, log = baseLog
   if (!verdict.ok) throw new LaneSkip(`AI video lane out: ${verdict.missing.join(', ')}`);
 
   const providers = await buildProviders(f.tenantId);
+  const researchFrom = new Date().toISOString();
   const [page, recent] = await Promise.all([
     imageLane.landingText(f.landingPageUrl, log),
     instanceRepo.recentForFunnel(f.id, f.tenantId, 40).catch(() => []),
@@ -61,6 +63,7 @@ export async function prepare({ funnelRow, scheduledFor, postDate, log = baseLog
     funnelName: f.name, landingUrl: f.landingPageUrl, landingText: page, history: historyLines(recent.map(instanceHistoryLine), 40),
   });
   const brief = normalizeResearch(await providers.llm.generateJson({ system, user, maxTokens: 2000 }));
+  const researchTo = new Date().toISOString();
 
   const inst = await instanceService.createForFunnel({
     tenantId: f.tenantId,
@@ -70,6 +73,7 @@ export async function prepare({ funnelRow, scheduledFor, postDate, log = baseLog
     status: 'running',
     sourceType: 'generated',
   });
+  await stepLog.span(inst.id, 'research', researchFrom, researchTo);
   await instanceService.updateStep(inst.id, 'script', { artifacts: { brief, router: { lane: 'ai_video', provider: verdict.provider, postDate } } });
   try {
     await stageRunner.generateScript({ instanceId: inst.id });

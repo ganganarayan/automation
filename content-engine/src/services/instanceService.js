@@ -12,6 +12,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import * as repo from '../repositories/instanceRepository.js';
+import * as stepLog from './stepLogService.js';
 import { buildInitialSteps, addCostToSteps, patchStep, sumInstanceCost, costBreakdown } from '../utils/instanceSpec.js';
 import { costText, costImages, costAnimation, costTts, costTranscript } from '../utils/pricing.js';
 import { childLogger } from '../core/logger.js';
@@ -65,6 +66,9 @@ export async function updateStep(instanceId, stepKey, patch = {}) {
   const steps = patchStep(parseSteps(instance), stepKey, patch);
   const total = sumInstanceCost(steps);
   await repo.saveSteps(instanceId, steps, total);
+  // Every stage that stamps a start or finish here gets its time logged.
+  if (patch.startedAt) await stepLog.start(instanceId, stepKey, { at: patch.startedAt });
+  if (patch.finishedAt) await (patch.status === 'failed' ? stepLog.fail : stepLog.end)(instanceId, stepKey, { at: patch.finishedAt });
   return steps;
 }
 

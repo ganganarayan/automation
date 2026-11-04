@@ -27,6 +27,7 @@ import * as readyPost from './readyPostService.js';
 import * as approvalService from './approvalService.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
 import * as instanceService from './instanceService.js';
+import * as stepLog from './stepLogService.js';
 import { setStatus as setApprovalStatus } from '../repositories/approvalRepository.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { publicDlUrl } from '../providers/publicDriveProvider.js';
@@ -76,7 +77,10 @@ async function sendApproval({ inst, funnel, resolved, providers, video, log, cle
   await instanceRepo.setStatus(inst.id, VIDEO_REVIEW);
   // It waits on the Library's Approve either way, so an email problem fails nothing.
   const to = recipient(resolved, providers);
-  if (!to) return log.warn({ instance: inst.id }, 'no approval email address: approve it from the Library');
+  if (!to) {
+    await stepLog.start(inst.id, 'review_copy', { email: 'none' });
+    return log.warn({ instance: inst.id }, 'no approval email address: approve it from the Library');
+  }
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const sent = providers.mail.send({
     to,
@@ -91,8 +95,10 @@ async function sendApproval({ inst, funnel, resolved, providers, video, log, cle
   });
   try {
     await sent;
+    await stepLog.start(inst.id, 'review_copy', { email: 'sent' });
     log.info({ instance: inst.id, video: video.name }, 'ready video approval email sent');
   } catch (err) {
+    await stepLog.start(inst.id, 'review_copy', { email: 'failed' });
     log.warn({ err: err.message, instance: inst.id }, 'ready video approval email failed: approve it from the Library');
   }
   return null;
@@ -160,6 +166,8 @@ export async function approve(approval) {
   if (!(await instanceRepo.transition(row.id, VIDEO_REVIEW, 'draft'))) {
     return log.info({ status: row.status }, 'ready video is not awaiting approval; ignored');
   }
+  await stepLog.end(row.id, 'review_copy', { by: 'approved' });
+  await stepLog.start(row.id, 'publish');
   const steps = instanceService.parseSteps(row);
   const script = art(steps, 'script');
   try {
@@ -167,9 +175,11 @@ export async function approve(approval) {
       funnelId: row.funnel_id, video: { id: p.driveId, name: p.name }, copy: script.copy || {},
       thumbs: art(steps, 'images').thumbs || {}, ctaLink: script.ctaLink || '', scheduledFor: row.scheduled_for,
     });
+    await stepLog.end(row.id, 'publish');
     await setApprovalStatus(approval.id, 'published');
     log.info('approved ready video handed to Post for Me');
   } catch (err) {
+    await stepLog.fail(row.id, 'publish');
     log.error({ err: err.message }, 'approved ready video could not be scheduled');
     await instanceRepo.setStatus(row.id, 'failed', `Post for Me: ${err.message}`);
   }
@@ -182,6 +192,7 @@ export async function rework(approval) {
   const log = baseLog.child({ instance: p.instanceId });
   const row = p.instanceId ? await instanceRepo.get(p.instanceId) : null;
   if (!row || !(await instanceRepo.transition(row.id, VIDEO_REVIEW, 'draft'))) return log.info('ready video rework ignored');
+  await stepLog.end(row.id, 'review_copy', { by: 'rework' });
   try {
     await readyPost.generateCopy({ funnelId: row.funnel_id, driveId: p.driveId, name: p.name });
     const { funnel, resolved, providers } = await readyPost.folderFiles({ funnelId: row.funnel_id }).catch(() => ({}));

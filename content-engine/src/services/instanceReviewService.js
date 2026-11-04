@@ -25,6 +25,7 @@ import * as approvalService from './approvalService.js';
 import * as instanceService from './instanceService.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
 import * as funnels from '../repositories/funnelsRepository.js';
+import * as stepLog from './stepLogService.js';
 import { buildProviders } from './providerFactory.js';
 import { childLogger } from '../core/logger.js';
 import {
@@ -51,6 +52,8 @@ let pipeline = {};
 export function setPipelineHooks(hooks) {
   pipeline = hooks || {};
 }
+
+const reviewStep = (checkpoint) => (checkpoint === 'final' ? 'review_final' : 'review_script');
 
 // ---- artifact extraction ---------------------------------------------------
 
@@ -112,6 +115,7 @@ export async function requestReview({ tenantId = 'default', instanceId, checkpoi
   // Reflect the open checkpoint on the instance.
   await instanceRepo.setStatus(instance.id, checkpoint === 'script' ? 'script_review' : 'final_review');
 
+  let email = 'none';
   if (approvalEmail) {
     try {
       await providers.mail.send({
@@ -119,15 +123,18 @@ export async function requestReview({ tenantId = 'default', instanceId, checkpoi
         subject: subjectFor(payload),
         html: reviewEmailHtml(payload, reviewUrl),
       });
+      email = 'sent';
       log.info({ instance: instance.id, checkpoint, round: payload.round, to: approvalEmail }, 'review email sent');
     } catch (err) {
       // Don't fail the request if SMTP is unset/misconfigured, the hosted review
       // link still works; surface the reason in logs.
+      email = 'failed';
       log.warn({ err: err.message, instance: instance.id, checkpoint }, 'review email failed');
     }
   } else {
     log.warn({ instance: instance.id, checkpoint }, 'no approval email configured, review link not emailed');
   }
+  await stepLog.start(instance.id, reviewStep(checkpoint), { email });
 
   return { id, reviewUrl, approvalEmail };
 }
@@ -153,6 +160,7 @@ export async function onApprove(approval) {
       log.warn({ instance: instanceId }, 'approval for an empty script; ignored');
       return;
     }
+    await stepLog.end(instanceId, reviewStep('script'), { by: 'approved' });
     await instanceService.updateStep(instanceId, 'script', { status: 'done' });
     await instanceRepo.setStatus(instanceId, 'running');
     log.info({ instance: instanceId, round: p.round }, 'script approved: instance running');
@@ -166,6 +174,7 @@ export async function onApprove(approval) {
     }
   } else if (p.checkpoint === 'final') {
     const postedAt = p.scheduledFor ? new Date(p.scheduledFor) : new Date();
+    await stepLog.end(instanceId, reviewStep('final'), { by: 'approved' });
     try {
       // Dispatch the reel to Post-for-Me (at scheduled_for, or now if that has
       // passed). It stays 'scheduled' until the post check sees it live, marks
@@ -180,6 +189,7 @@ export async function onApprove(approval) {
       const ok = await instanceRepo.markScheduled(instanceId, { postRefs: refs, postNow });
       log.info({ instance: instanceId, scheduled: ok, refs: refs.length, postNow }, 'final approved: handed to Post for Me');
     } catch (err) {
+      await stepLog.fail(instanceId, 'publish');
       await instanceRepo.setStatus(instanceId, 'failed', `post failed: ${err.message}`);
       log.error({ err: err.message, instance: instanceId }, 'final post failed: not locked');
     }
@@ -197,6 +207,7 @@ export async function onRework(approval, note) {
 
   const correction = normalizeNote(note);
   const { status } = rejectTransition(p.checkpoint);
+  await stepLog.end(instanceId, reviewStep(p.checkpoint), { by: 'rework' });
   await instanceRepo.setStatus(instanceId, status, correction);
   const round = await instanceRepo.bumpRound(instanceId);
   log.info({ instance: instanceId, checkpoint: p.checkpoint, round, correction }, 'rework requested');

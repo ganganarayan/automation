@@ -13,6 +13,7 @@
  *         GET  /api/v1/admin/instances/prepare    a funnel's sources + ready videos, per-video stage panels
  *         GET  /api/v1/admin/instances/:id        the instance view: stage panels for a ready video or a
  *                                                 generated run, read-only detail once posted
+ *         GET  /api/v1/admin/instances/live?ids=  JSON: the current step + step times of those rows
  *         GET  /api/v1/admin/instances/:id/data   JSON (instance + cost)
  *         POST /api/v1/admin/instances/sample      seed a sample (dev)
  *         POST /api/v1/admin/instances/:id/delete  delete (if not locked)
@@ -48,6 +49,7 @@ import { keyOk, currentSession, canApprove } from '../services/accessService.js'
 import * as approvalService from '../services/approvalService.js';
 import * as approvalsRepo from '../repositories/approvalRepository.js';
 import { retryAction, isStuck } from '../utils/retrySpec.js';
+import { buildTimeline, stepTotals, currentStep, formatSpan, LIVE_STEPS_SCRIPT } from '../utils/stepTimeSpec.js';
 import { pendingByInstance, approvalButtons, reviewFields, applyReviewEdit } from '../utils/approvalButtons.js';
 
 const MANUAL_JOB = 'manual_stage';
@@ -281,6 +283,18 @@ export function register(ctx) {
       res.json({ ok: true, durations: await readyPost.videoDurations(req.body?.ids) });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // The Library's live step updates: only the rows the page asks about.
+  router.get('/admin/instances/live', async (req, res, next) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
+      const ids = String(req.query.ids || '').split(',').filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)).slice(0, 100);
+      const rows = await instanceRepo.byIds({ tenantId: req.tenantId, ids });
+      res.json({ items: rows.map((r) => liveItem(r, instances.parseSteps(r))) });
+    } catch (err) {
+      next(err);
     }
   });
 
@@ -548,6 +562,52 @@ function statusPill(status, row = null) {
   return `<span class="pill ${cls}" title="${esc(STATUS_LABEL[status] || status)}">${st.dot} ${esc(st.label)}${st.note ? ` (${esc(st.note)})` : ''}</span>`;
 }
 
+// The step a row is on, in place of the plain label. A clock that is still going
+// carries data-since for the page's tick.
+function stepPill(r, steps, now = Date.now()) {
+  const cur = currentStep(r, steps, r.step_log, now);
+  const cls = { '🟢': 'ok', '🟡': 'warn', '🔴': 'bad', '🔵': 'info' }[cur.dot] || 'mut';
+  const clock = cur.since ? ` · <span data-since="${esc(cur.since)}">${esc(formatSpan(now - new Date(cur.since).getTime()))}</span>` : '';
+  return { cur, html: `<span class="pill step ${cls}" title="${esc(STATUS_LABEL[r.status] || r.status)}">${cur.dot} ${esc(cur.label)}${cur.note ? ` (${esc(cur.note)})` : ''}${clock}</span>` };
+}
+
+// Nothing timed yet reads "-", not a confident 0s.
+const workText = (t) => formatSpan(t.workMs || !t.unknown ? t.workMs : null);
+const totalText = (t) => `work ${workText(t)}`;
+
+// One row per step: working time, or a wait that stays out of the total. Older rows
+// show what was recorded and "-" for the rest.
+function stepListHtml(entries, now = Date.now()) {
+  const t = stepTotals(entries);
+  const rows = entries.map((e) => {
+    const live = e.state === 'running' || e.state === 'waiting';
+    const time = e.kind === 'mark' ? ''
+      : live && e.ms !== null ? `<span data-since="${esc(e.startedAt)}">${esc(formatSpan(now - new Date(e.startedAt).getTime()))}</span>`
+        : esc(formatSpan(e.ms));
+    const word = { failed: ' 🔴', lost: ' 🟡 not finished', running: ' 🔵' }[e.state] || '';
+    return `<div class="stepi ${e.kind}"><span class="stepn">${esc(e.label)}${word}</span><span class="stept">${time}${e.kind === 'wait' ? ' wait' : ''}</span><span class="stepa">${e.at ? esc(formatIst(e.at)) : '-'}</span></div>`;
+  }).join('');
+  return `${rows}<div class="stepf">Work ${esc(workText(t))}${t.unknown ? ` (${t.unknown} step${t.unknown > 1 ? 's' : ''} with no time recorded)` : ''}${t.waitMs ? ` · waiting on you ${esc(formatSpan(t.waitMs))}, not counted` : ''}</div>`;
+}
+
+const rowKey = (r) => `${r.status}|${r.post_status || ''}`;
+
+// A Library status cell: the current step, and the step times behind a tap.
+function stepCell(r, steps, now = Date.now()) {
+  const { cur, html } = stepPill(r, steps, now);
+  const entries = buildTimeline(r, steps, r.step_log, now);
+  const list = entries.length
+    ? `<details class="stepd"><summary>Steps · <span class="steptot">${esc(totalText(stepTotals(entries)))}</span></summary><div class="stepl">${stepListHtml(entries, now)}</div></details>`
+    : '';
+  return `<div class="stepcell" data-id="${esc(r.id)}" data-key="${esc(rowKey(r))}" data-active="${cur.active ? 1 : 0}" data-open="${cur.open ? 1 : 0}"><span class="stepnow">${html}</span>${list}</div>`;
+}
+
+function liveItem(r, steps, now = Date.now()) {
+  const { cur, html } = stepPill(r, steps, now);
+  const entries = buildTimeline(r, steps, r.step_log, now);
+  return { id: r.id, key: rowKey(r), active: cur.active, open: cur.open, now: html, total: totalText(stepTotals(entries)), list: stepListHtml(entries, now) };
+}
+
 // The Library's two views: every instance, or the ready videos by funnel source
 // (the page that used to be Prepare).
 function libraryTabs(active) {
@@ -573,7 +633,6 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
   const first = (r) => (['posting', 'post_failed'].includes(r.post_status) ? 0 : 1);
   const rows = [...filtered].sort((a, b) => first(a) - first(b) || latestAt(b) - latestAt(a));
   const spent = rows.reduce((t, r) => t + (Number(r.cost_usd) || 0), 0);
-  const posting = rows.some((r) => rowStatus(r).posting);
   const link = (q) => {
     const p = new URLSearchParams(Object.entries({ label, funnel, ...q }).filter(([, v]) => v));
     return `/api/v1/admin/instances${p.toString() ? `?${p}` : ''}`;
@@ -611,7 +670,7 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
         <td>${esc(r.funnel_name || '-')}</td>
         <td>${r.duration_seconds != null ? esc(formatDuration(r.duration_seconds)) : '-'}</td>
         <td>${esc(usd(r.cost_usd))}</td>
-        <td>${statusPill(r.status, r)}${['draft', 'transcript_review'].includes(r.status) && !String(r.post_status || '').startsWith('post') && laneOf(r) === 'ready' ? `<div class="hint">next: ${esc(stageLabel(readyStage(r, steps)))}</div>` : ''}</td>
+        <td>${stepCell(r, steps)}${['draft', 'transcript_review'].includes(r.status) && !String(r.post_status || '').startsWith('post') && laneOf(r) === 'ready' ? `<div class="hint">next: ${esc(stageLabel(readyStage(r, steps)))}</div>` : ''}</td>
         <td class="when"><div title="Scheduled">📅 ${r.scheduled_for ? esc(formatIst(r.scheduled_for)) : '-'}</div><div title="Posted">✅ ${r.posted_at && ['posted', 'partial'].includes(r.status) ? esc(formatIst(r.posted_at)) : '-'}</div></td>
         <td class="actions">${preview} <a class="act" href="/api/v1/admin/instances/${esc(r.id)}">Open</a> ${del}</td>
         <td class="chans">${channelsOf(steps).map((c) => `<span class="ch" title="${esc(channelText(c))}">${channelIcon(c)} ${esc(c.platform || c.name || '?')}</span>`).join(' ') || '<span class="hint">-</span>'}</td>
@@ -650,13 +709,14 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
       catch(e){ b.disabled=false; b.textContent=t; alert(e.message); }
     }
     async function del(id){ if(!confirm('Delete this instance? Its cost stays in the deleted log.')) return; const r=await fetch('/api/v1/admin/instances/'+id+'/delete',{method:'POST'}); const j=await r.json(); if(j.ok) location.reload(); else alert(j.error||'failed'); }
-    ${posting ? 'setTimeout(()=>location.reload(), 8000); // a post is on its way to Post for Me' : ''}
+    ${LIVE_STEPS_SCRIPT}
   `, 'instances');
 }
 
 function detailPage(row, steps) {
   const bd = costBreakdown(steps);
   const total = sumInstanceCost(steps);
+  const timeline = buildTimeline(row, steps, row.step_log);
 
   const stepRows = INSTANCE_STEPS.map((def) => {
     const s = steps.find((x) => x.key === def.key) || { status: 'pending', artifacts: {} };
@@ -696,7 +756,7 @@ function detailPage(row, steps) {
         <div class="sub">${esc(row.funnel_name || '-')} · instance ${esc(shortId(row.id))} · round ${esc(String(row.round || 1))}</div>
       </div>
       <div class="toprow">
-        ${statusPill(row.status)}
+        ${stepPill(row, steps).html}
         ${row.locked ? '<span class="pill ok">🔒 locked</span>' : ''}
         <a class="act" href="/api/v1/admin/instances">← Library</a>
       </div>
@@ -713,6 +773,8 @@ function detailPage(row, steps) {
       <tbody>${stepRows}</tbody>
       <tfoot><tr><td colspan="3" class="tot">Total AI cost</td><td class="tot">${esc(usd(total))}</td><td></td></tr></tfoot>
     </table>
+
+    ${timeline.length ? `<h3>Time per step</h3><div class="stepl steppage">${stepListHtml(timeline)}</div>` : ''}
 
     <p class="meta">Created ${esc(formatIst(row.created_at))}${row.posted_at ? ` · posted ${esc(formatIst(row.posted_at))}` : ''}</p>
     ${previewModal()}
@@ -1592,6 +1654,13 @@ ${NAV_CSS}
  table.lib .pill{white-space:nowrap}
  .chip.spent{color:#8ff0b0;border-color:#1f6b38}
  .pill.info{background:#12263b;border-color:#1f4f7a;color:#8fc4ff}
+ table.lib .pill.step,.pill.step{white-space:normal;display:inline-block}
+ .stepd{margin-top:.25rem;font-size:.76rem;color:#9a9ab0}.stepd summary{cursor:pointer;white-space:nowrap}
+ .stepl{margin-top:.3rem;min-width:300px}.steppage{max-width:640px;font-size:.84rem;margin-bottom:.8rem}
+ .stepi{display:flex;flex-wrap:wrap;gap:.1rem .6rem;padding:.25rem 0;border-top:1px solid #1e1e2c;color:#c7c7d9}
+ .stepn{flex:1 1 150px}.stept{font-variant-numeric:tabular-nums;white-space:nowrap}.stepa{flex-basis:100%;color:#6f6f88;font-size:.72rem}
+ .stepi.wait{color:#8a8aa2;font-style:italic}.stepi.mark{color:#8ff0b0}
+ .stepf{border-top:1px solid #24243a;padding-top:.3rem;font-weight:600;color:#c7c7d9}
  .ro{color:#8a8aa2;font-size:.85rem;margin:.2rem 0 1rem}
  .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.4rem 0 1rem}
  .steps .stepname{display:flex;align-items:center;gap:.5rem}
@@ -1680,6 +1749,7 @@ ${NAV_CSS}
   table.lib td.actions,table.lib td.when div{white-space:normal}
   table.lib td.chans{max-width:none}
   .apbtns .act.big{flex:1 1 0}
+  .stepl{min-width:0}
  }
 </style>
 <div class="layout">

@@ -53,6 +53,21 @@ export async function list({ tenantId = 'default', status = null, limit = 100 })
   return rows;
 }
 
+/** A few instances by id, for the Library's live step updates. */
+export async function byIds({ tenantId = 'default', ids = [] }) {
+  if (!ids.length) return [];
+  const { rows } = await query('SELECT * FROM instances WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
+  return rows;
+}
+
+/**
+ * Add step log events (atomic: a write to the steps column can't lose them). A locked
+ * row still takes them, and updated_at stays, because keeping time is not progress.
+ */
+export async function appendStepLog(id, events) {
+  await query('UPDATE instances SET step_log = step_log || $2::jsonb WHERE id = $1', [id, JSON.stringify(events)]);
+}
+
 /** Compact rows for the posted log / instances table. */
 export async function logRows({ tenantId = 'default', limit = 200 }) {
   const { rows } = await query(

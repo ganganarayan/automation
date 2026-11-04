@@ -26,6 +26,7 @@
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as instanceService from '../services/instanceService.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
+import * as stepLog from './stepLogService.js';
 import * as routerDays from '../repositories/routerDaysRepository.js';
 import { routerClash, rerunAction } from '../utils/routerSpec.js';
 import { DateTime } from 'luxon';
@@ -258,15 +259,39 @@ async function ensureInstance({ funnel, driveId, name = '', title = 'Ready video
   return { inst, steps, existing: false };
 }
 
+/** Run one step of a known instance, logging its time. fn calls begin(instanceId) once it knows the row. */
+async function timedStep(key, fn) {
+  let id = null;
+  const begin = (instanceId) => {
+    id = instanceId;
+    return stepLog.start(instanceId, key);
+  };
+  try {
+    const out = await fn(begin);
+    if (id) await stepLog.end(id, key);
+    return out;
+  } catch (err) {
+    if (id) await stepLog.fail(id, key);
+    throw err;
+  }
+}
+
 /**
  * Stage 2a: transcribe one ready video (Whisper, with the glossary as its
  * prompt) and stop: the instance waits in 'transcript_review' until the
  * operator approves the text. Nothing paid runs after this.
  */
-export async function transcribeVideo({ tenantId = 'default', funnelId, driveId, name = '', accessToken = '', source = null }) {
+export async function transcribeVideo(args) {
+  return timedStep('transcript', (begin) => transcribeBody(args, begin));
+}
+
+async function transcribeBody({ tenantId = 'default', funnelId, driveId, name = '', accessToken = '', source = null }, begin) {
   if (!driveId) throw new Error('driveId required');
   const id = String(driveId);
   const { funnel } = await loadFunnel(funnelId);
+  const startedAt = new Date().toISOString();
+  const prior = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [id]).catch(() => ({})))[id];
+  if (prior) await begin(prior.id);
   const providers = await buildProviders(funnel.tenant_id || tenantId);
   const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
   const ffmpeg = createFfmpegProvider({}, log);
@@ -294,6 +319,8 @@ export async function transcribeVideo({ tenantId = 'default', funnelId, driveId,
   if (cost) steps = addCostToSteps(steps, 'transcript', { ...cost, costUsd: Number(cost.costUsd) || 0 });
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   await instanceRepo.setStatus(inst.id, TRANSCRIPT_REVIEW);
+  await (prior ? stepLog.end(inst.id, 'transcript') : stepLog.span(inst.id, 'transcript', startedAt));
+  await stepLog.start(inst.id, 'review_transcript');
   const durationSec = durationCache.get(id) || 0;
   if (durationSec) await instanceRepo.setMeta(inst.id, { durationSeconds: durationSec });
   log.info({ funnel: funnel.name, driveId: id, words: text.split(/\s+/).filter(Boolean).length }, 'ready video transcribed (awaiting approval)');
@@ -366,6 +393,7 @@ export async function saveTranscript({ funnelId, driveId, name = '', text = '', 
   const status = approvedAt ? 'draft' : TRANSCRIPT_REVIEW;
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   await instanceRepo.setStatus(inst.id, status);
+  if (approve) await stepLog.end(inst.id, 'review_transcript', { by: 'approved' });
   return {
     instanceId: inst.id, transcript: next.text, srt: !!srt, timed: !!transcriptSrt({ srt, cues: unchanged ? prev.cues : [] }), approved: !!approvedAt,
     approvedIst: approvedAt ? formatIst(approvedAt) : '', stage: readyStage({ status }, steps),
@@ -380,12 +408,17 @@ export async function saveTranscript({ funnelId, driveId, name = '', text = '', 
  * are kept as they are. Returns { copy, transcript, costs, ... }: costs are
  * the real token / image costs, recorded on the instance.
  */
-export async function generateCopy({ tenantId = 'default', funnelId, driveId, name = '', accessToken = '', accounts: pickedAccounts = null, withThumbs = true }) {
+export async function generateCopy(args) {
+  return timedStep('copy', (begin) => writeCopy(args, begin));
+}
+
+async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', accessToken = '', accounts: pickedAccounts = null, withThumbs = true }, begin) {
   if (!driveId) throw new Error('driveId required');
   const { funnel, resolved, cfg } = await loadFunnel(funnelId, pickedAccounts);
   const draft = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [String(driveId)]))[String(driveId)];
   const draftSteps = draft ? instanceService.parseSteps(draft) : [];
   if (!draft || !canGenerateCopy(draftSteps)) throw new Error('Approve the transcript first: the copy is written only from an approved transcript');
+  await begin(draft.id);
   const tArt = ((draftSteps.find((x) => x.key === 'transcript') || {}).artifacts) || {};
   const transcript = String(tArt.text || '');
   const providers = await buildProviders(funnel.tenant_id || tenantId);
@@ -938,6 +971,8 @@ async function saveClean(funnel, driveId, clean, { name = '', source = null } = 
   steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: { ...videoArt(steps, driveId, clean.durationSec), clean } } });
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   await instanceRepo.setMeta(inst.id, { durationSeconds: clean.durationSec || undefined });
+  const job = cleanJobs.get(String(driveId));
+  if (job && job.startedAt) await stepLog.span(inst.id, 'clean', new Date(job.startedAt).toISOString());
 }
 
 const AUTO_CHECK_SYSTEM = 'You check frames of a short video. Frame 1 is from the start, the others are its last seconds, in order. For each frame say: '
@@ -1345,19 +1380,23 @@ export async function startPost({ tenantId = 'default', funnelId, selections, ac
   }
   for (const item of items) {
     await instanceRepo.markPosting(item.instanceId, { scheduledFor: item.scheduledIso ? new Date(item.scheduledIso) : null });
+    await stepLog.start(item.instanceId, 'publish');
     postJobs.set(item.driveId, { state: 'running', instanceId: item.instanceId, scheduledIso: item.scheduledIso, startedAt: Date.now() });
   }
 
   const fail = async (item, why) => {
     postJobs.set(item.driveId, { state: 'failed', instanceId: item.instanceId, error: why });
+    await stepLog.fail(item.instanceId, 'publish');
     await instanceRepo.markPostFailed(item.instanceId, why).catch((err) => log.warn({ err: err.message, instance: item.instanceId }, 'could not save the post failure'));
   };
   heartbeat.during('post', () => postSelections({ tenantId, funnelId, selections: clean, accessToken, accounts: pickedAccounts }))
     .then(async (out) => {
       for (const item of items) {
         const r = (out.results || []).find((x) => x.driveId === item.driveId);
-        if (r && r.ok) postJobs.set(item.driveId, { state: 'done', instanceId: r.instanceId || item.instanceId, scheduledIso: r.scheduledIso });
-        else await fail(item, (r && r.error) || 'not posted');
+        if (r && r.ok) {
+          postJobs.set(item.driveId, { state: 'done', instanceId: r.instanceId || item.instanceId, scheduledIso: r.scheduledIso });
+          await stepLog.end(item.instanceId, 'publish');
+        } else await fail(item, (r && r.error) || 'not posted');
       }
     })
     .catch(async (err) => {
@@ -1709,6 +1748,7 @@ export async function approveTranscriptAuto({ funnelId, driveId, name = '' }) {
   const steps = patchStep(base, 'transcript', { artifacts: { approvedAt: new Date().toISOString(), approvedBy: 'router' } });
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   await instanceRepo.setStatus(inst.id, 'draft');
+  await stepLog.end(inst.id, 'review_transcript', { by: 'router' });
   return inst.id;
 }
 

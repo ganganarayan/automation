@@ -24,6 +24,7 @@ import * as funnels from '../repositories/funnelsRepository.js';
 import * as instanceService from '../services/instanceService.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
 import * as review from './instanceReviewService.js';
+import * as stepLog from './stepLogService.js';
 import { buildProviders } from './providerFactory.js';
 import { createTtsProvider } from '../providers/ttsProvider.js';
 import { createTranscriptProvider } from '../providers/transcriptProvider.js';
@@ -348,6 +349,7 @@ export async function postInstance({ instanceId, captionOverride = '' }) {
   const stitch = steps.find((s) => s.key === 'stitch');
   const videoId = stitch && stitch.artifacts && stitch.artifacts.video ? stitch.artifacts.video.driveId : '';
   if (!videoId) throw new Error('no final reel to post');
+  await stepLog.start(instanceId, 'publish');
 
   const accountIds = Array.isArray(resolved.accounts) ? resolved.accounts : [];
   const postformeKey = providers.resolved.postformeKey || '';
