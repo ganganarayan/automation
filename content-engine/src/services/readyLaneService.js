@@ -74,10 +74,11 @@ async function sendApproval({ inst, funnel, resolved, providers, video, log, cle
     },
   });
   await instanceRepo.setStatus(inst.id, VIDEO_REVIEW);
+  // It waits on the Library's Approve either way, so an email problem fails nothing.
   const to = recipient(resolved, providers);
-  if (!to) throw new Error('no email address to send the approval to (set Settings → Emails → Notification)');
+  if (!to) return log.warn({ instance: inst.id }, 'no approval email address: approve it from the Library');
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  await providers.mail.send({
+  const sent = providers.mail.send({
     to,
     subject: `Approve ${funnel.name} ready video${when ? ` for ${when}` : ''}`,
     html: `<p>The next ready video for <b>${esc(funnel.name)}</b>: <b>${esc(video.name)}</b>${when ? `, posting ${esc(when)}` : ''}.</p>
@@ -88,7 +89,13 @@ async function sendApproval({ inst, funnel, resolved, providers, video, log, cle
       <p><a href="${esc(reviewUrl)}" style="background:#0a7d32;color:#fff;padding:.6rem 1rem;border-radius:6px;text-decoration:none;display:inline-block">Approve &amp; schedule, or ask for new copy</a></p>
       <p style="color:#666">Approved after its time, it posts at once.</p>`,
   });
-  log.info({ instance: inst.id, video: video.name }, 'ready video approval email sent');
+  try {
+    await sent;
+    log.info({ instance: inst.id, video: video.name }, 'ready video approval email sent');
+  } catch (err) {
+    log.warn({ err: err.message, instance: inst.id }, 'ready video approval email failed: approve it from the Library');
+  }
+  return null;
 }
 
 /**

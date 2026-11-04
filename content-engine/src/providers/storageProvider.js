@@ -18,9 +18,15 @@
  */
 import { Readable } from 'node:stream';
 import { google } from 'googleapis';
+import { parseDriveFolderId, isStorageQuotaError } from '../utils/readyPostSpec.js';
 
 const thumbUrl = (id) => `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
 const dlUrl = (id) => `https://drive.google.com/uc?export=download&id=${id}`;
+
+// A pasted folder link works as well as a bare ID.
+const folderOf = (input) => parseDriveFolderId(input) || input;
+
+const NO_STORAGE = 'This Drive folder is in a personal My Drive, where the service account cannot add files. Connect Google Drive under Setup → Settings → Google, or use a folder on a shared drive';
 
 const NOT_CONNECTED = 'Google Drive is not connected, use 📂 Pick from Drive (Sign in with Google), or paste the service-account JSON under Setup → Settings → Google (Sheets & Drive access)';
 
@@ -66,12 +72,25 @@ export function createGoogleDriveProvider(cfg, log) {
   return {
     /** Upload any media buffer (mp3 / mp4 / png / …) and share it. */
     async uploadMedia(folderId, name, mimeType, buffer) {
-      const res = await drive.files.create({
-        requestBody: { name, parents: folderId ? [folderId] : undefined },
-        media: { mimeType: mimeType || 'application/octet-stream', body: Readable.from(buffer) },
-        fields: 'id',
-      });
-      const id = res.data.id;
+      const folder = folderOf(folderId);
+      let id;
+      try {
+        const res = await drive.files.create({
+          requestBody: { name, parents: folder ? [folder] : undefined },
+          media: { mimeType: mimeType || 'application/octet-stream', body: Readable.from(buffer) },
+          fields: 'id',
+          supportsAllDrives: true,
+        });
+        id = res.data.id;
+      } catch (err) {
+        if (!isStorageQuotaError(err.message)) throw err;
+        // A service account owns no storage: keep the file in the connected
+        // Google account instead (cfg.ownerUpload shares it itself).
+        if (!cfg.ownerUpload) throw new Error(NO_STORAGE);
+        id = await cfg.ownerUpload(name, mimeType, buffer);
+        log.info({ name }, 'service account has no storage: uploaded to the connected Google Drive');
+        return { id, thumbnailUrl: thumbUrl(id), downloadUrl: dlUrl(id) };
+      }
       await this.shareAnyone(id);
       return { id, thumbnailUrl: thumbUrl(id), downloadUrl: dlUrl(id) };
     },
@@ -91,7 +110,7 @@ export function createGoogleDriveProvider(cfg, log) {
 
     async listFiles(folderId) {
       const res = await drive.files.list({
-        q: `'${folderId}' in parents and trashed = false`,
+        q: `'${folderOf(folderId)}' in parents and trashed = false`,
         fields: 'files(id, name, createdTime, mimeType)',
         orderBy: 'createdTime',
         pageSize: 200,

@@ -16,6 +16,7 @@
  * the service boots for local smoke tests.
  */
 import { google } from 'googleapis';
+import { parseSheetId } from '../utils/readyPostSpec.js';
 
 const CACHE_TTL_MS = 2 * 60 * 1000;
 
@@ -68,7 +69,7 @@ export function createGoogleSheetsProvider(cfg, log) {
 
   const norm = (s) => String(s || '').trim().toLowerCase().replace(/[\s_]+/g, '_');
 
-  return {
+  const methods = {
     readTab,
 
     /** Title of the first (leftmost) tab: used when a funnel sets no tab name. */
@@ -162,6 +163,9 @@ export function createGoogleSheetsProvider(cfg, log) {
       cache.clear();
     },
   };
+
+  // Every method takes the sheet first: a pasted sheet link works as well as an ID.
+  return Object.fromEntries(Object.entries(methods).map(([name, fn]) => [name, (sheet, ...rest) => fn(parseSheetId(sheet), ...rest)]));
 }
 
 export default { createGoogleSheetsProvider };

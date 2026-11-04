@@ -28,6 +28,7 @@ import * as instances from '../services/instanceService.js';
 import * as review from '../services/instanceReviewService.js';
 import * as readyPost from '../services/readyPostService.js';
 import * as stageRunner from '../services/stageRunnerService.js';
+import * as aiLane from '../services/aiLaneService.js';
 import * as jobRunner from '../core/jobRunner.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
@@ -45,6 +46,7 @@ import { postedLinks } from '../utils/routerSpec.js';
 import { keyOk, currentSession, canApprove } from '../services/accessService.js';
 import * as approvalService from '../services/approvalService.js';
 import * as approvalsRepo from '../repositories/approvalRepository.js';
+import { retryAction } from '../utils/retrySpec.js';
 import { pendingByInstance, approvalButtons, reviewFields, applyReviewEdit } from '../utils/approvalButtons.js';
 
 const MANUAL_JOB = 'manual_stage';
@@ -388,11 +390,18 @@ export function register(ctx) {
     }
   });
 
-  // ↻ Re-post to the ❌ channels only (after reconnecting them in Post for Me).
+  // ↻ Retry whatever failed: re-post to the ❌ channels only (after reconnecting
+  // them in Post for Me), or run a failed render or image post again.
   router.post('/admin/instances/:id/retry', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      res.json({ ok: true, ...(await readyPost.retryFailed({ instanceId: req.params.id })) });
+      const row = await instances.get(req.params.id);
+      if (!row) return res.status(404).json({ ok: false, error: 'instance not found' });
+      const action = retryAction(row, instances.parseSteps(row));
+      if (!action) return res.status(409).json({ ok: false, error: 'nothing failed on this instance' });
+      if (action === 'open') return res.status(409).json({ ok: false, error: 'open it and post it again' });
+      if (action === 'channels') return res.json({ ok: true, ...(await readyPost.retryFailed({ instanceId: row.id })) });
+      res.json({ ok: true, ...(await aiLane.retry({ instanceId: row.id, action })) });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -573,9 +582,14 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
       const approve = ab ? `<div class="apbtns">${ab.videoId
         ? `<button class="act big" onclick="openVideo('${esc(ab.videoId)}')">▶ Review</button>`
         : `<a class="act big" href="${esc(ab.reviewHref)}">Review</a>`}<button class="act big approve" onclick="approveRow(this,'${esc(r.id)}','${esc(ab.approveLabel)}')">${esc(ab.approveLabel)}</button></div>` : '';
+      const ra = retryAction(r, steps);
+      const retry = ra === 'open'
+        ? `<div class="apbtns"><a class="act big" href="/api/v1/admin/instances/${esc(r.id)}">↻ Retry</a></div>`
+        : ra ? `<div class="apbtns"><button class="act big" onclick="retryRow(this,'${esc(r.id)}')">↻ Retry</button></div>` : '';
+      const why = r.status === 'failed' && r.note ? `<div class="hint">🔴 ${esc(String(r.note).slice(0, 200))}</div>` : '';
       return `<tr>
         <td><a href="/api/v1/admin/instances/${esc(r.id)}">${esc(shortId(r.id))}</a></td>
-        <td class="ttl">${esc(r.title || '-')}${approve}</td>
+        <td class="ttl">${esc(r.title || '-')}${why}${approve}${retry}</td>
         <td>${esc(r.funnel_name || '-')}</td>
         <td>${r.duration_seconds != null ? esc(formatDuration(r.duration_seconds)) : '-'}</td>
         <td>${esc(usd(r.cost_usd))}</td>
@@ -606,6 +620,11 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
     ${previewModal()}
   `, `
     async function sample(){ const r=await fetch('/api/v1/admin/instances/sample',{method:'POST'}); const j=await r.json(); if(j.ok) location.reload(); else alert(j.error||'failed'); }
+    async function retryRow(b, id){
+      b.disabled=true; const t=b.textContent; b.textContent='Retrying…';
+      try{ const r=await fetch('/api/v1/admin/instances/'+id+'/retry',{method:'POST'}); const j=await r.json(); if(j.ok){ b.textContent='🟢 Started'; setTimeout(()=>location.reload(), 900); } else { b.disabled=false; b.textContent=t; alert(j.error||'failed'); } }
+      catch(e){ b.disabled=false; b.textContent=t; alert(e.message); }
+    }
     async function approveRow(b, id, label){
       if(!confirm(label+'?')) return;
       b.disabled=true; const t=b.textContent; b.textContent='Approving…';

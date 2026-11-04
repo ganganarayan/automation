@@ -27,6 +27,21 @@ export function parseDriveFolderId(input) {
 }
 
 /**
+ * The spreadsheet ID from whatever the operator pasted: a sheet link
+ * (…/spreadsheets/d/<id>/edit…) or a bare ID. Anything else comes back as is.
+ */
+export function parseSheetId(input) {
+  const s = String(input || '').trim();
+  const m = s.match(/\/spreadsheets\/d\/([\w-]{10,})/);
+  return m ? m[1] : s;
+}
+
+/** True when Drive refused a file because the service account owns no storage. */
+export function isStorageQuotaError(message = '') {
+  return /storage quota/i.test(String(message || ''));
+}
+
+/**
  * The files the operator picked with the Google Drive picker, carried in the
  * page URL as JSON [{ id, name }]. Drops anything that isn't a Drive id and
  * de-dupes; at most 50. [] when absent or malformed.
@@ -166,4 +181,4 @@ export function normalizeSelections(selections) {
 }
 
 export { ZONE };
-export default { normalizePickedAccounts, parseEmbeddedFolder, parseDriveFolderId, parsePickedFiles, filterReadyVideos, defaultSlotsIso, parseIstDateTime, postTimeIso, defaultCaption, normalizeSelections, ZONE };
+export default { normalizePickedAccounts, parseEmbeddedFolder, parseDriveFolderId, parseSheetId, isStorageQuotaError, parsePickedFiles, filterReadyVideos, defaultSlotsIso, parseIstDateTime, postTimeIso, defaultCaption, normalizeSelections, ZONE };

@@ -19,6 +19,7 @@ import { logger } from '../core/logger.js';
 
 import { createLlmProvider } from '../providers/llmProvider.js';
 import { createGoogleDriveProvider } from '../providers/storageProvider.js';
+import * as driveConnect from './driveConnectService.js';
 import { createGoogleSheetsProvider } from '../providers/sheetsProvider.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { createJson2VideoProvider } from '../providers/videoProvider.js';
@@ -55,7 +56,14 @@ export async function buildProviders(tenantId = 'default') {
 
     // Google Sheets/Drive identity: the service account configured in the app
     // (tenant_config), falling back to the env default (see tenantSettings).
-    storage: createGoogleDriveProvider({ serviceAccount: r.google.serviceAccount }, log),
+    storage: createGoogleDriveProvider({
+      serviceAccount: r.google.serviceAccount,
+      ownerUpload: async (name, mimeType, buffer) => {
+        const { connected } = await driveConnect.status(tenantId);
+        if (!connected) throw new Error('This Drive folder is in a personal My Drive, where the service account cannot add files. Connect Google Drive under Setup → Settings → Google, or use a folder on a shared drive');
+        return driveConnect.uploadMedia(tenantId, name, mimeType, buffer);
+      },
+    }, log),
     sheets: createGoogleSheetsProvider({ serviceAccount: r.google.serviceAccount }, log),
     wa: createWaGatewayClient(settings.waGateway, log), // platform service topology
 

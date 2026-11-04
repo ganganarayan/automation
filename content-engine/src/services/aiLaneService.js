@@ -28,8 +28,9 @@ import * as credit from './creditService.js';
 import * as stageRunner from './stageRunnerService.js';
 import * as review from './instanceReviewService.js';
 import * as imageLane from './imageLaneService.js';
+import * as heartbeat from '../core/heartbeat.js';
 import { buildProviders } from './providerFactory.js';
-import { researchPrompt, normalizeResearch, historyLines, instanceHistoryLine, isCreditError } from '../utils/routerSpec.js';
+import { researchPrompt, normalizeResearch, historyLines, instanceHistoryLine, isCreditError, rerunAction } from '../utils/routerSpec.js';
 import { formatIst, ZONE } from '../utils/time.js';
 import { DateTime } from 'luxon';
 import { childLogger } from '../core/logger.js';
@@ -138,4 +139,56 @@ export async function onStageFailed(instanceId, stepKey, err) {
   }
 }
 
-export default { LaneSkip, prepare, onStageFailed };
+/**
+ * A retried instance takes its router day back, so a funnel never posts twice:
+ * a replacement still waiting is replaced, one already approved stops the retry.
+ */
+async function takeDay(row, action) {
+  const { router } = stageRunner.routerInfo(row);
+  if ((action !== 'image' && !router) || !row.funnel_id || !row.scheduled_for) return;
+  const postDate = (router && router.postDate) || DateTime.fromJSDate(new Date(row.scheduled_for)).setZone(ZONE).toFormat('yyyy-MM-dd');
+  const day = await routerDays.get(row.funnel_id, postDate);
+  if (!day) return;
+  if (day.instance_id && String(day.instance_id) !== String(row.id)) {
+    const other = await instanceRepo.get(day.instance_id);
+    const act = rerunAction(other);
+    if (act === 'keep' && !['failed', 'superseded'].includes(other.status)) {
+      throw new Error('another post for this day is already approved, so a retry would post twice. Delete that one first');
+    }
+    if (act === 'supersede') await instanceRepo.supersede(other.id, 'replaced by a retry');
+    if (act === 'release') await instanceRepo.releaseSlot(other.id);
+  }
+  await routerDays.update(day.id, { lane: action === 'image' ? 'image' : 'ai_video', reason: 'retried from the Library', instanceId: row.id });
+}
+
+/**
+ * ↻ Retry a failed instance on the same id (action from utils/retrySpec):
+ * script, stages (keeps what is done), final (back to the final review) or
+ * image. Claims it now, runs in the background; a failure reads Failed again.
+ */
+export async function retry({ instanceId, action }) {
+  const row = await instanceRepo.get(instanceId);
+  if (!row) throw new Error('instance not found');
+  if (!(await instanceRepo.transition(row.id, 'failed', 'running'))) throw new Error('this is not failed any more (already retrying?)');
+  try {
+    await takeDay(row, action);
+  } catch (err) {
+    await instanceRepo.setStatus(row.id, 'failed');
+    throw err;
+  }
+  const log = baseLog.child({ instance: row.id });
+  log.info({ action }, 'retry started');
+  const run = {
+    script: () => stageRunner.runScriptAndReview({ instanceId: row.id }),
+    stages: () => stageRunner.runStages({ instanceId: row.id, resume: true }),
+    final: () => review.requestReview({ tenantId: row.tenant_id, instanceId: row.id, checkpoint: 'final' }),
+    image: () => imageLane.retry({ instanceId: row.id, log }),
+  }[action];
+  heartbeat.during('retry', run).catch(async (err) => {
+    log.error({ err: err.message, action }, 'retry failed');
+    await instanceRepo.setStatus(row.id, 'failed', `Retry: ${err.message}`).catch(() => {});
+  });
+  return { instanceId: row.id, action };
+}
+
+export default { LaneSkip, prepare, onStageFailed, retry };

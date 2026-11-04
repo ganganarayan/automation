@@ -141,15 +141,36 @@ async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '
   await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
   await instanceRepo.setStatus(instanceId, IMAGE_REVIEW);
 
+  // It waits on the Library's Approve either way, so an email problem fails nothing.
   const to = recipient(f, providers);
-  if (!to) throw new LaneError('no email address to send the approval to (set Settings → Emails → Notification)');
+  if (!to) return log.warn({ instance: instanceId }, 'no approval email address: approve it from the Library');
   const when = inst.scheduled_for ? `${formatIst(inst.scheduled_for)} IST` : '';
-  await providers.mail.send({
-    to,
-    subject: `${note ? 'Reworked' : 'Approve'} ${f.name} image post${when ? ` for ${when}` : ''}`,
-    html: poster.approvalEmail(f.name, upload.thumbnailUrl, full, short, reviewUrl, when),
-  });
-  log.info({ instance: instanceId, row: sheet.key, round: inst.round }, 'image approval email sent');
+  try {
+    await providers.mail.send({
+      to,
+      subject: `${note ? 'Reworked' : 'Approve'} ${f.name} image post${when ? ` for ${when}` : ''}`,
+      html: poster.approvalEmail(f.name, upload.thumbnailUrl, full, short, reviewUrl, when),
+    });
+    log.info({ instance: instanceId, row: sheet.key, round: inst.round }, 'image approval email sent');
+  } catch (err) {
+    log.warn({ err: err.message, instance: instanceId }, 'image approval email failed: approve it from the Library');
+  }
+  return null;
+}
+
+/** ↻ Retry a failed image post on the same instance: its sheet row again, back to approval. */
+export async function retry({ instanceId, log = baseLog }) {
+  const row = await instanceRepo.get(instanceId);
+  const funnelRow = row && row.funnel_id ? await funnels.get(row.funnel_id) : null;
+  if (!funnelRow) throw new LaneError('funnel not found');
+  const f = await funnels.resolve(funnelRow);
+  const providers = await buildProviders(f.tenantId);
+  const tab = await poster.tabFor(providers.sheets, f);
+  const rows = await providers.sheets.readTab(f.sheetId, tab, { fresh: true });
+  const pick = readyRows(rows).find((r) => r.key === row.source_ref);
+  if (!pick) throw new LaneError('its row in the content sheet is no longer Ready');
+  const sheet = { tab, matchColName: pick.fields.matchColName, key: pick.key, rowNumber: pick.rowNumber };
+  await renderAndSend({ instanceId: row.id, f, providers, fields: pick.fields, sheet, log });
 }
 
 /**
@@ -316,4 +337,4 @@ export async function onPosted(row, { refs = [], channels = [] } = {}) {
   }, baseLog);
 }
 
-export default { KIND, LaneError, landingText, prepare, approve, rework, onPosted };
+export default { KIND, LaneError, landingText, prepare, retry, approve, rework, onPosted };

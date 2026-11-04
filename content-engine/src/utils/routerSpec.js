@@ -452,6 +452,7 @@ export function providerOrder(order = '', fallback = 'kling') {
 
 /** True when a provider error means "out of credit / quota / balance". */
 export function isCreditError(message = '') {
+  if (/storage quota|My Drive/i.test(String(message || ''))) return false;
   return /insufficient|not enough (credit|balance|quota)|balance|quota|credits?\b|payment required|billing|\b402\b|account.{0,20}(arrears|overdue)|resource pack/i.test(String(message || ''));
 }
 

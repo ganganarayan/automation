@@ -291,19 +291,31 @@ export async function runScriptAndReview({ instanceId }) {
   }
 }
 
-/** Approve-script seam: run every stage, then open the final-review checkpoint. */
-export async function runStages({ instanceId }) {
+/**
+ * Approve-script seam: run every stage, then open the final-review checkpoint.
+ * resume (↻ Retry): stages already done are kept, so nothing paid for is paid
+ * for twice.
+ */
+export async function runStages({ instanceId, resume = false }) {
   let ctx;
   let step = 'images';
   try {
     ctx = await loadContext(instanceId);
-    const images = await runImages(ctx);
+    const kept = (key) => {
+      const s = resume ? instanceService.parseSteps(ctx.instance).find((x) => x.key === key) : null;
+      return s && s.status === 'done' ? (s.artifacts || {}) : {};
+    };
+    const images = kept('images').images || await runImages(ctx);
     step = 'animate';
-    const clips = await runAnimate(ctx, images);
+    const clips = kept('animate').clips || await runAnimate(ctx, images);
     step = 'voiceover';
-    const { audioBuffer, audioDriveId } = await runVoiceover(ctx);
+    const audio = kept('voiceover').audio;
+    const { audioBuffer, audioDriveId } = audio && audio.driveId
+      ? { audioBuffer: await ctx.providers.storage.download(audio.driveId), audioDriveId: audio.driveId }
+      : await runVoiceover(ctx);
     step = 'transcript';
-    const { cues } = await runTranscript(ctx, audioBuffer, audioDriveId);
+    const doneCues = kept('transcript').cues;
+    const { cues } = doneCues ? { cues: doneCues } : await runTranscript(ctx, audioBuffer, audioDriveId);
     step = 'stitch';
     if (await runStitchGithub(ctx, clips, audioDriveId, cues)) return; // its done hook opens the final review
     await runStitch(ctx, clips, audioBuffer, cues);

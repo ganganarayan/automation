@@ -15,6 +15,7 @@
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const API = 'https://www.googleapis.com/drive/v3';
+const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 
 async function json(res, what) {
   const text = await res.text();
@@ -71,6 +72,19 @@ export function createDriveOAuthClient(accessToken) {
         body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' }),
       }), 'folder create');
       return made.id;
+    },
+
+    /** Upload a buffer into a folder (resumable, so big clips work). Returns the file id. */
+    async upload(folderId, name, mimeType, buffer) {
+      const type = mimeType || 'application/octet-stream';
+      const start = await fetch(`${UPLOAD_API}/files?uploadType=resumable&fields=id`, {
+        method: 'POST',
+        headers: { ...auth, 'Content-Type': 'application/json', 'X-Upload-Content-Type': type, 'X-Upload-Content-Length': String(buffer.length) },
+        body: JSON.stringify({ name, parents: folderId ? [folderId] : undefined }),
+      });
+      if (!start.ok) await json(start, 'upload start');
+      const put = await fetch(start.headers.get('location'), { method: 'PUT', headers: { 'Content-Type': type }, body: buffer });
+      return (await json(put, 'upload')).id;
     },
 
     async makePublic(fileId) {

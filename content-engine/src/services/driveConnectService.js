@@ -29,6 +29,8 @@ const K = {
   secret: 'clean_hook_secret',
 };
 
+const MEDIA_FOLDER_NAME = 'content-engine media';
+const mediaFolders = new Map(); // tenantId -> folder id
 const tokens = new Map(); // tenantId -> { token, until }
 
 export const redirectUri = (baseUrl) => `${String(baseUrl).replace(/\/+$/, '')}/api/v1/admin/drive/callback`;
@@ -117,4 +119,18 @@ export async function drive(tenantId = 'default') {
   return { token, folderId, client: d };
 }
 
-export default { FOLDER_NAME, redirectUri, hookSecret, connectUrl, stateTenant, finishConnect, disconnect, status, accessToken, drive };
+/**
+ * Keep generated media in the connected account (its own app folder, apart from
+ * the clean runner's) and share it by link. Returns the file id; throws when
+ * Drive is not connected.
+ */
+export async function uploadMedia(tenantId, name, mimeType, buffer) {
+  const client = createDriveOAuthClient(await accessToken(tenantId));
+  const folderId = await client.ensureFolder(MEDIA_FOLDER_NAME, mediaFolders.get(tenantId) || '');
+  mediaFolders.set(tenantId, folderId);
+  const id = await client.upload(folderId, name, mimeType, buffer);
+  await client.makePublic(id);
+  return id;
+}
+
+export default { FOLDER_NAME, uploadMedia, redirectUri, hookSecret, connectUrl, stateTenant, finishConnect, disconnect, status, accessToken, drive };
