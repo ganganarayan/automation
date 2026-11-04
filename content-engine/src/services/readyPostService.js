@@ -44,7 +44,7 @@ import * as firstCommentsRepo from '../repositories/firstCommentsRepository.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
 import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey, nextImagePrompt } from '../utils/aiCopySpec.js';
-import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, thumbSvg, thumbArt, pickTextSide, thumbImagePrompt } from '../utils/thumbSpec.js';
+import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt } from '../utils/thumbSpec.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
 import sharp from 'sharp';
@@ -490,8 +490,8 @@ async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessTok
     const imageModel = /^gpt-image/.test(String(providers.resolved.openai?.imageModel || '')) ? providers.resolved.openai.imageModel : 'gpt-image-1';
     let base = null;
     try {
-      base = await providers.llm.generateImage({ prompt: thumbImagePrompt(imagePrompt, providers.resolved.prompts?.thumbnail), size: '1024x1024', model: imageModel });
-      costs.push({ step: 'images', ...costImages({ count: 1, size: '1024x1024', model: imageModel }) });
+      base = await providers.llm.generateImage({ prompt: thumbImagePrompt(imagePrompt, providers.resolved.prompts?.thumbnail, text), size: THUMB_ART_SIZE, model: imageModel });
+      costs.push({ step: 'images', ...costImages({ count: 1, size: THUMB_ART_SIZE, model: imageModel }) });
     } catch (err) {
       log.warn({ err: err.message }, 'thumbnail artwork failed (using a video frame)');
       thumbError = `artwork: ${err.message}`;
@@ -553,11 +553,10 @@ async function renderThumbs({ providers, platforms, base, text, sub = '', draw =
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
   const thumbs = {};
   const sizes = [];
-  const side = draw ? 'right' : await textSide(base);
   for (const [size, spec] of Object.entries(THUMB_SIZES)) {
     const users = platforms.filter((k) => PLATFORM_SIZE[k] === size);
     if (!users.length) continue;
-    const jpg = draw ? await draw(spec) : await composeThumb(base, spec, { text, sub, side });
+    const jpg = draw ? await draw(spec) : await composeThumb(base, spec, { text, sub });
     const url = await publish.uploadMedia(jpg, 'image/jpeg');
     for (const k of users) thumbs[k] = url;
     sizes.push({ size, label: spec.label, url, platforms: users });
@@ -629,36 +628,21 @@ export async function silentDriveIds({ funnel, resolved, files = [] }) {
   }).map((f) => String(f.id));
 }
 
-/** Which side of the artwork is calmer (less detail), so the text goes there and the face stays clear. */
-async function textSide(base) {
-  try {
-    const { data, info } = await sharp(base).greyscale().resize(240, 240, { fit: 'fill' }).raw().toBuffer({ resolveWithObject: true });
-    return pickTextSide(data, info.width, info.height);
-  } catch {
-    return 'right';
-  }
-}
-
 /**
- * One size: 'side' crops the artwork to fill the frame (keeping the subject's
- * side when it has to cut), 'stack' lays the whole square artwork under the text
- * band on a blurred, darkened copy of itself. Then the text overlay on top.
+ * One size. A full-frame size crops the picture to fill it. A narrow one puts
+ * the picture on a panel under the headline, over a soft blurred copy of itself.
  */
-async function composeThumb(base, spec, { text, sub = '', side = 'right' }) {
-  const overlay = { input: Buffer.from(thumbSvg({ ...spec, side, accent: THUMB_ACCENT, text, sub })) };
+async function composeThumb(base, spec, { text, sub = '' }) {
+  const overlay = { input: Buffer.from(thumbSvg({ ...spec, accent: THUMB_ACCENT, text, sub })) };
   const art = thumbArt(spec);
-  if (!art) {
-    // A tall frame cuts the sides: keep the subject's side whole.
-    const position = spec.h > spec.w ? (side === 'right' ? 'left' : 'right') : 'attention';
-    return sharp(base).resize(spec.w, spec.h, { fit: 'cover', position }).composite([overlay]).jpeg({ quality: 86 }).toBuffer();
-  }
-  const panel = await sharp(base).resize(art.size, art.size, { fit: 'cover', position: 'attention' }).toBuffer();
+  if (!art) return sharp(base).resize(spec.w, spec.h, { fit: 'cover' }).composite([overlay]).jpeg({ quality: 90 }).toBuffer();
+  const panel = await sharp(base).resize(art.w, art.h, { fit: 'cover' }).toBuffer();
   return sharp(base)
     .resize(spec.w, spec.h, { fit: 'cover' })
     .blur(40)
-    .modulate({ brightness: 0.45 })
-    .composite([{ input: panel, top: art.top, left: Math.round((spec.w - art.size) / 2) }, overlay])
-    .jpeg({ quality: 86 })
+    .modulate({ brightness: 0.75 })
+    .composite([{ input: panel, top: art.top, left: 0 }, overlay])
+    .jpeg({ quality: 90 })
     .toBuffer();
 }
 

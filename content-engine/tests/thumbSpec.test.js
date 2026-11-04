@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, pickTextSide, thumbSvg, thumbImagePrompt, thumbMedia } from '../src/utils/thumbSpec.js';
+import { THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, thumbSvg, thumbImagePrompt, DEFAULT_THUMB_RULES, thumbMedia } from '../src/utils/thumbSpec.js';
 import { platformConfigsFor } from '../src/utils/aiCopySpec.js';
 
 describe('thumbSpec', () => {
@@ -28,8 +28,22 @@ describe('thumbSpec', () => {
     expect(svg).toContain('Fear &amp;');
     expect(svg).toContain('&lt;Faith&gt;');
   });
-  it('image prompt forbids text in the artwork', () => {
-    expect(thumbImagePrompt('A lotus at dawn')).toMatch(/^A lotus at dawn[\s\S]*square[\s\S]*no text/i);
+  it('the image prompt keeps the headline out of the picture, but tells the model what it must prove', () => {
+    const p = thumbImagePrompt('A retention chart', '', 'Where Your VSL Leaks');
+    expect(p).toMatch(/^A retention chart/);
+    expect(p).toContain('headline going over this image is "Where Your VSL Leaks"');
+    expect(p).toContain('Do not write the headline');
+    expect(thumbImagePrompt('x')).not.toContain('headline going over');
+  });
+  it('asks for a clear picture with room for the headline on top, never the old dark split', () => {
+    expect(DEFAULT_THUMB_RULES).toMatch(/top 30%/);
+    expect(DEFAULT_THUMB_RULES).toMatch(/No silhouettes, no dark moody scene/);
+    expect(DEFAULT_THUMB_RULES).not.toMatch(/LEFT|RIGHT|cinematic/);
+  });
+  it('your own Settings rules win; the old default saved in Settings does not', () => {
+    expect(thumbImagePrompt('x', 'My rules')).toBe('x\n\nMy rules');
+    const old = 'Thumbnail artwork, square composition. Show only what is described above: no person or face unless it asks for one. Place the main subject on the LEFT side of the frame (the left 55%), whole and well lit, with room around it. Keep the RIGHT 45% of the frame calm and empty: a plain dark wall, a soft out-of-focus background or sky, nothing important there, so a headline can sit on it. Bold cinematic lighting, high contrast, one clear focal subject. Absolutely no text, letters, words, captions, logos or watermarks.';
+    expect(thumbImagePrompt('x', old)).toBe(`x\n\n${DEFAULT_THUMB_RULES}`);
   });
   it('media item: designed thumbnail, else the first frame', () => {
     expect(thumbMedia('https://v', 'https://t')).toEqual({ url: 'https://v', thumbnail_url: 'https://t' });
@@ -69,56 +83,35 @@ describe('thumbSvg fits the whole headline', () => {
     expect(f.size * 1.15 * f.lines.length).toBeLessThanOrEqual(300);
     expect(fitText('', { boxW: 100, boxH: 100, maxSize: 50 })).toEqual({ lines: [], size: 0 });
   });
-  it('puts the sub-head on a solid accent box with dark text', () => {
-    const svg = thumbSvg({ ...THUMB_SIZES.landscape, accent: '#FFC400', text: 'Hi', sub: 'Read me' });
-    expect(svg).toMatch(/<rect [^>]*fill="#FFC400"/);
-    expect(svg).toContain('fill="#111111"');
-  });
 });
 
-describe('thumbSvg keeps the face clear', () => {
+describe('thumbSvg keeps the text on top and the picture prominent', () => {
   const text = 'Internally Exhausted? On the verge of giving up?';
   const sub = 'Holidays, self help & surface level methods could not fix';
-  const xs = (svg) => [...svg.matchAll(/<tspan x="(\d+)"/g)].map((m) => Number(m[1]));
   const ys = (svg) => [...svg.matchAll(/<tspan x="\d+" y="(\d+)"/g)].map((m) => Number(m[1]));
-  const headSize = (svg) => Number(svg.match(/font-weight="800" font-size="(\d+)"/)[1]);
 
-  it('puts the text in a side column, right by default, left when asked', () => {
-    for (const size of ['landscape', 'feed']) {
-      const spec = THUMB_SIZES[size];
-      expect(spec.layout).toBe('side');
-      const right = thumbSvg({ ...spec, text, sub });
-      for (const x of xs(right)) expect(x).toBeGreaterThan(spec.w * 0.5);
-      expect(right).toContain('text-anchor="start"');
-      const left = thumbSvg({ ...spec, text, sub, side: 'left' });
-      for (const x of xs(left)) expect(x).toBeLessThan(spec.w * 0.2);
+  it('every size keeps all its text inside the top 30%, centred', () => {
+    for (const spec of Object.values(THUMB_SIZES)) {
+      const svg = thumbSvg({ ...spec, text, sub });
+      for (const y of ys(svg)) expect(y).toBeLessThanOrEqual(spec.h * 0.3);
+      expect(svg).toContain('text-anchor="middle"');
+      expect(svg).not.toContain('text-anchor="start"');
     }
   });
-  it('keeps the headline moderate', () => {
-    expect(headSize(thumbSvg({ ...THUMB_SIZES.landscape, text: 'Hi' }))).toBeLessThanOrEqual(Math.round(720 * 0.085));
-    expect(headSize(thumbSvg({ ...THUMB_SIZES.portrait, text: 'Hi' }))).toBeLessThanOrEqual(Math.round(1080 * 0.08));
+  it('16:9 hazes out over the full-frame picture, with no solid patch', () => {
+    const svg = thumbSvg({ ...THUMB_SIZES.landscape, text, sub });
+    expect(thumbArt(THUMB_SIZES.landscape)).toBeNull();
+    expect(svg).toContain('stop-opacity="0"');
+    expect(svg).not.toMatch(/stop-opacity="\.[7-9]/);
   });
-  it('9:16 stacks the text above a whole square artwork panel', () => {
+  it('narrow sizes put the picture on a panel under the text', () => {
+    expect(thumbArt(THUMB_SIZES.feed)).toEqual({ top: 378, w: 1080, h: 972 });
     const spec = THUMB_SIZES.portrait;
     const art = thumbArt(spec);
-    expect(art).toEqual({ top: Math.round(1920 * 0.34), size: 1080 });
-    expect(thumbArt(THUMB_SIZES.landscape)).toBeNull();
-    const svg = thumbSvg({ ...spec, text, sub });
-    for (const y of ys(svg)) expect(y).toBeLessThan(art.top);
+    expect(art).toEqual({ top: 576, w: 1080, h: 960 });
+    for (const y of ys(thumbSvg({ ...spec, text, sub }))) expect(y).toBeLessThan(art.top);
     // Inside the centre 3:4 that the Instagram grid shows.
     expect(thumbBox(spec).y0).toBeGreaterThan((1920 - 1440) / 2);
-  });
-  it('picks the calmer side for the text', () => {
-    const w = 30; const h = 10;
-    const img = (busyLeft) => Uint8Array.from({ length: w * h }, (_, i) => {
-      const x = i % w; const busy = busyLeft ? x < 10 : x >= 20;
-      return busy ? (i % 2 ? 250 : 10) : 40;
-    });
-    expect(pickTextSide(img(true), w, h)).toBe('right');
-    expect(pickTextSide(img(false), w, h)).toBe('left');
-    expect(pickTextSide(new Uint8Array(w * h).fill(9), w, h)).toBe('right');
-  });
-  it('asks the artwork for the subject on one side and calm space on the other', () => {
-    expect(thumbImagePrompt('x')).toMatch(/subject on the LEFT[\s\S]*RIGHT 45% of the frame calm and empty/);
+    expect(art.top + art.h).toBeLessThanOrEqual((1920 + 1440) / 2);
   });
 });

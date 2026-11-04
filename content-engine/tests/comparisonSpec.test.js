@@ -88,7 +88,7 @@ describe('copy', () => {
 describe('image rules', () => {
   it('no longer ask for a face, and Settings text replaces them', () => {
     expect(thumbImagePrompt('A chart')).not.toMatch(/face clearly visible/);
-    expect(thumbImagePrompt('A chart')).toMatch(/no person or face unless/);
+    expect(thumbImagePrompt('A chart')).toMatch(/no person unless/);
     expect(thumbImagePrompt('A chart', 'MY RULES')).toBe('A chart\n\nMY RULES');
   });
 });

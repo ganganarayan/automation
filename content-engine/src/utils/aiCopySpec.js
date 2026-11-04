@@ -47,7 +47,7 @@ export const DEFAULT_COPY_PROMPT = [
   '  "igCaption": an Instagram caption: hook line, 2-4 short lines of value, a call to action (when a comment keyword is given below, tell people to comment that keyword to get the link in their DMs; otherwise "link in bio"), then 8-15 relevant hashtags. No links.',
   '  "short": one punchy post for X and Threads, max 220 characters, at most 2 hashtags. No links.',
   '  "thumbText": the thumbnail hook: 2 to 6 bold, curiosity-driven words drawn from the video. No hashtags, no emojis, no quotes.',
-  '  "thumbPrompt": an English prompt for an image model to create the thumbnail artwork: describe one vivid scene that shows the core idea of the video (subject, setting, mood, lighting, colours, camera angle). Include a person only when the video is about that person. No text, letters or logos in the image.',
+  '  "thumbPrompt": an English prompt for an image model: describe the one literal visual that proves the point of the video, what is on it, its shape, its labels and its key number.',
   'Stay faithful to what is actually said in the video; never invent claims, numbers or names.',
   'Write in the same language as the transcript.',
 ].join('\n');
@@ -58,7 +58,7 @@ export function copySystemPrompt({ brief = '', audience = '', keyword = '', base
     String(base || '').trim() || DEFAULT_COPY_PROMPT,
     comparison ? String(comparisonPrompt || '').trim() || DEFAULT_COMPARISON_PROMPT : '',
     'Return ONLY a JSON object with exactly these string keys: "title", "description", "igCaption", "short", "thumbText", "thumbPrompt".',
-    comparison ? '' : 'The title, description, thumbText and thumbPrompt must all make the same one point. thumbPrompt must picture that exact point concretely, so someone reading thumbText over the image gets it at once: show the specific thing the post is about, never a generic mood scene.',
+    comparison ? '' : 'The title, description, thumbText and thumbPrompt must all make the same one point. thumbPrompt must show that point literally, whatever shows it most directly: a chart, a product screen, a before and after, a diagram, or a real close-up of the exact thing. Example, for viewers leaving a video: a retention line chart, horizontal axis 0% to 100% of the video, the line falling sharply at 68% with a bold red marker labelled "68%". Illustrative numbers on a chart are allowed. Clean, bright, product-marketing look. Never a metaphor, never someone at a desk, never silhouettes, and no mood, lighting or camera directions.',
     'Never use em dashes or en dashes anywhere. Use a comma, a full stop or a colon instead.',
     keyword ? `Comment keyword: tell people to comment "${keyword}" to get the link in their DMs.` : '',
     brief ? `Brand / voice brief:\n${brief}` : '',
