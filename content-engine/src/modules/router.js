@@ -60,7 +60,8 @@ export function register(ctx) {
   });
   approvalService.onKind(readyLane.KIND, {
     onApprove: (a) => readyLane.approve(a),
-    onRework: (a) => readyLane.rework(a),
+    onRework: (a, note) => readyLane.rework(a, note),
+    reviewFacts: (a) => readyLane.reviewFacts(a),
   });
   // Went live: the image lane marks its own sheet row; every other lane gets
   // one appended to the funnel's sheet, so all posts log their links there.

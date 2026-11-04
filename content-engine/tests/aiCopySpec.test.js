@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractAudioArgs,
+  nextImagePrompt,
+  imagePromptOf,
   copySystemPrompt,
   copyUserPrompt,
   clip,
@@ -104,5 +106,39 @@ describe('CTA: funnel default, post override, never twice', () => {
     expect(stripTrailingLink('See https://x.y inside')).toBe('See https://x.y inside');
     const out = pcf({ title: 't', description: 'Body\n\nhttps://gita.example/a', igCaption: 'i', short: 's' }, { ctaLink: 'https://corp.example/b' });
     expect(out.caption).toBe('Body\n\nhttps://corp.example/b');
+  });
+});
+
+describe('the image prompt follows the copy', () => {
+  it('replaces the prompt the copy writer wrote last time', () => {
+    expect(nextImagePrompt('old scene', 'old scene', 'new scene')).toBe('new scene');
+  });
+
+  it('never replaces a prompt you wrote', () => {
+    expect(nextImagePrompt('my scene', 'old scene', 'new scene')).toBe('my scene');
+  });
+
+  it('fills a blank, and keeps what it has when nothing new was written', () => {
+    expect(nextImagePrompt('', '', 'new scene')).toBe('new scene');
+    expect(nextImagePrompt('old scene', 'old scene', '')).toBe('old scene');
+  });
+
+  it('shows the saved prompt, else the one the copy wrote', () => {
+    const steps = (imagePrompt) => [{ key: 'transcript', artifacts: { imagePrompt } }, { key: 'script', artifacts: { copy: { thumbPrompt: 'written' } } }];
+    expect(imagePromptOf(steps('saved'))).toBe('saved');
+    expect(imagePromptOf(steps(''))).toBe('written');
+    expect(imagePromptOf(null)).toBe('');
+  });
+});
+
+describe('copy prompts', () => {
+  it('ties the picture to the post', () => {
+    expect(copySystemPrompt({})).toMatch(/same one point/);
+    expect(copySystemPrompt({ comparison: true })).not.toMatch(/same one point/);
+  });
+
+  it('carries your change request', () => {
+    expect(copyUserPrompt({ transcript: 'hi', fileName: 'a.mp4', note: 'show the heatmap' })).toMatch(/asked for this change, follow it: show the heatmap/);
+    expect(copyUserPrompt({ transcript: 'hi', fileName: 'a.mp4' })).not.toMatch(/asked for this change/);
   });
 });

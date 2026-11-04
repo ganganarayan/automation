@@ -58,6 +58,7 @@ export function copySystemPrompt({ brief = '', audience = '', keyword = '', base
     String(base || '').trim() || DEFAULT_COPY_PROMPT,
     comparison ? String(comparisonPrompt || '').trim() || DEFAULT_COMPARISON_PROMPT : '',
     'Return ONLY a JSON object with exactly these string keys: "title", "description", "igCaption", "short", "thumbText", "thumbPrompt".',
+    comparison ? '' : 'The title, description, thumbText and thumbPrompt must all make the same one point. thumbPrompt must picture that exact point concretely, so someone reading thumbText over the image gets it at once: show the specific thing the post is about, never a generic mood scene.',
     'Never use em dashes or en dashes anywhere. Use a comma, a full stop or a colon instead.',
     keyword ? `Comment keyword: tell people to comment "${keyword}" to get the link in their DMs.` : '',
     brief ? `Brand / voice brief:\n${brief}` : '',
@@ -66,11 +67,12 @@ export function copySystemPrompt({ brief = '', audience = '', keyword = '', base
 }
 
 /** User prompt: the transcript (or, for a silent video, just its file name). */
-export function copyUserPrompt({ transcript = '', fileName: rawName = '', glossary = [], comparison = null } = {}) {
+export function copyUserPrompt({ transcript = '', fileName: rawName = '', glossary = [], comparison = null, note = '' } = {}) {
   const t = String(transcript || '').trim();
   const fileName = stripCc(rawName); // CC is the operator's own marker, never part of the topic
   const terms = (Array.isArray(glossary) ? glossary : []).filter(Boolean);
-  const spell = terms.length ? `\n\nSpell these names and terms exactly as written: ${terms.join(', ')}.` : '';
+  const change = String(note || '').trim().slice(0, 1000);
+  const spell = `${terms.length ? `\n\nSpell these names and terms exactly as written: ${terms.join(', ')}.` : ''}${change ? `\n\nThe owner rejected the last version and asked for this change, follow it: ${change}` : ''}`;
   // A comparison is written from its facts: the file name stays out of it.
   if (comparison) {
     return `${comparisonCopyFacts(comparison)}\n\n${t ? `Transcript:\n${t.slice(0, 12000)}` : 'The video has no speech (music / visuals only). Write the copy from the facts and the brand brief.'}${spell}`;
@@ -180,7 +182,25 @@ export function platformConfigsFor(copy, { accountIds = [], accountMap = {}, cta
   return { caption: longText, platformConfigurations };
 }
 
+/**
+ * The image prompt for freshly written copy. A prompt you wrote stays. One the
+ * copy writer wrote last time (it still matches that copy) follows the new copy,
+ * or the picture would keep illustrating the old post.
+ */
+export function nextImagePrompt(saved, lastWritten, written) {
+  const s = String(saved || '').trim();
+  const mine = !!s && s !== String(lastWritten || '').trim();
+  return mine ? s : String(written || '').trim() || s;
+}
+
+/** The prompt behind a video's thumbnail, for showing it. */
+export function imagePromptOf(steps) {
+  const art = (key) => ((Array.isArray(steps) ? steps : []).find((x) => x.key === key) || {}).artifacts || {};
+  return String(art('transcript').imagePrompt || art('script').copy?.thumbPrompt || '').trim();
+}
+
 export default {
   LIMITS, extractAudioArgs, copySystemPrompt, copyUserPrompt, clip, normalizeCopy,
   withLink, xPost, threadsPost, platformKey, platformConfigsFor, noDashes, stripTrailingLink,
+  nextImagePrompt, imagePromptOf,
 };

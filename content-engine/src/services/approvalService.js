@@ -18,7 +18,7 @@ import * as approvals from '../repositories/approvalRepository.js';
 import { settings } from '../settings/index.js';
 import { childLogger } from '../core/logger.js';
 
-const handlers = new Map(); // kind -> { onApprove(approval, body), onRework(approval, note, body), renderReview? }
+const handlers = new Map(); // kind -> { onApprove(approval, body), onRework(approval, note, body), renderReview?, reviewFacts? }
 const log = childLogger({ module: 'approvals' });
 
 /**
@@ -32,8 +32,8 @@ const log = childLogger({ module: 'approvals' });
  *        the kind manages its own body validation (the generic note requirement
  *        is skipped) and the submitted body reaches the handlers.
  */
-export function onKind(kind, { onApprove, onRework, renderReview } = {}) {
-  handlers.set(kind, { onApprove, onRework, renderReview });
+export function onKind(kind, { onApprove, onRework, renderReview, reviewFacts } = {}) {
+  handlers.set(kind, { onApprove, onRework, renderReview, reviewFacts });
 }
 
 function sign(id) {
@@ -108,7 +108,7 @@ export function register(router) {
       const handler = handlers.get(approval.kind);
       const html = handler?.renderReview
         ? handler.renderReview(approval, req.params.token)
-        : reviewPage(req.params.token, approval);
+        : reviewPage(req.params.token, approval, await handler?.reviewFacts?.(approval)?.catch?.(() => null));
       res.type('html').send(html);
     } catch (err) {
       next(err);
@@ -161,8 +161,9 @@ function page(title, body) {
 h1{font-size:1.4rem}</style><h1>${esc(title)}</h1><p>${esc(body)}</p>`;
 }
 
-function reviewPage(token, approval) {
+function reviewPage(token, approval, facts) {
   const p = approval.payload || {};
+  const imagePrompt = (facts || {}).imagePrompt || '';
   const media = p.mediaUrl || p.thumbnailUrl || p.videoThumbnailUrl || '';
   // Funnel posts store full/short captions (no single `caption`); show one.
   const caption = p.caption || p.captionShort || p.captionFull || '';
@@ -181,6 +182,7 @@ function reviewPage(token, approval) {
 </style>
 <h1>Review: ${esc(approval.kind)}</h1>
 ${media ? `<img src="${esc(media)}" alt="preview">` : ''}
+${imagePrompt ? `<h3>Image prompt</h3><pre id="imagePrompt">${esc(imagePrompt)}</pre>` : ''}
 ${videoUrl ? `<p><a href="${esc(videoUrl)}" target="_blank" rel="noopener">Open video</a></p>` : ''}
 <h3>Caption</h3>
 ${editableCaption

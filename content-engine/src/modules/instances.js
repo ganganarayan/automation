@@ -44,6 +44,7 @@ import { formatIst } from '../utils/time.js';
 import * as views from '../repositories/workViewRepository.js';
 import { defaultSlotsIso, parseDriveFolderId, parsePickedFiles } from '../utils/readyPostSpec.js';
 import { driveThumbUrl } from '../utils/reviewSpec.js';
+import { imagePromptOf } from '../utils/aiCopySpec.js';
 import { postedLinks } from '../utils/routerSpec.js';
 import { keyOk, currentSession, canApprove } from '../services/accessService.js';
 import * as approvalService from '../services/approvalService.js';
@@ -784,6 +785,7 @@ function detailPage(row, steps) {
       <tfoot><tr><td colspan="3" class="tot">Total AI cost</td><td class="tot">${esc(usd(total))}</td><td></td></tr></tfoot>
     </table>
 
+    ${imagePromptBlock(steps)}
     ${timeline.length ? `<h3>Time per step</h3><div class="stepl steppage">${stepListHtml(timeline)}</div>` : ''}
 
     <p class="meta">Created ${esc(formatIst(row.created_at))}${row.posted_at ? ` · posted ${esc(formatIst(row.posted_at))}` : ''}</p>
@@ -804,6 +806,12 @@ function detailPage(row, steps) {
 // The in-app review screen for an instance waiting on approval: the script
 // (or copy / image) to edit + Save, or the reel at the final checkpoint, and
 // its own Approve button. Save never approves.
+/** The prompt behind a ready video's thumbnail, read-only. */
+function imagePromptBlock(steps) {
+  const prompt = imagePromptOf(steps);
+  return prompt ? `<h3>Image prompt</h3><p class="ro" style="white-space:pre-wrap">${esc(prompt)}</p><p class="hint">Settings adds its Thumbnail image rules after this. Change it in the video's Image prompt box on the ready video page.</p>` : '';
+}
+
 function reviewPage(row, steps, approval, buttons, script) {
   const back = '<a class="act" href="/api/v1/admin/instances">← Library</a>';
   const head = `<div class="top"><div><h1>${esc(row.title || 'Untitled')}</h1>
@@ -822,7 +830,7 @@ function reviewPage(row, steps, approval, buttons, script) {
   const videoLink = buttons.view !== 'video' && p.videoUrl ? `<p><a class="act" href="${esc(p.videoUrl)}" target="_blank" rel="noopener">▶ Open video</a></p>` : '';
   const form = fields.map((f) => `<label class="rvf">${esc(f.label)}<textarea name="${esc(f.key)}" rows="${f.rows}">${esc(f.value)}</textarea></label>`).join('');
   return shell('Review', `${head}
-    ${media}${videoLink}
+    ${media}${buttons.view === 'copy' ? imagePromptBlock(steps) : ''}${videoLink}
     ${form ? `<form id="rvform" onsubmit="return false">${form}</form>` : ''}
     <div class="rvbar">
       ${form ? '<button class="act big" id="savebtn" onclick="save()">Save</button>' : ''}
@@ -1415,7 +1423,8 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         const j=await post('generate', { driveId:id, name:$('nm',id).value, accounts: pickedAccounts(), accessToken: await driveToken() });
         if(!j.ok) throw new Error(j.error||'failed');
         applyGen(id, j); setStage(id, 'review'); setInst(id, j.instanceId);
-        if(!$('ip',id).value.trim() && j.imagePrompt) $('ip',id).value=j.imagePrompt;
+        const ipBox=$('ip',id).value.trim();
+        if(j.imagePrompt && (!ipBox || ipBox===String(j.imagePromptWas||'').trim())) $('ip',id).value=j.imagePrompt;
         costs[id]=(costs[id]||[]).concat(j.costs||[]);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
         $('gs',id).textContent='✓ Copy written from the approved transcript · $'+usd.toFixed(4);

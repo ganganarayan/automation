@@ -43,7 +43,7 @@ import * as firstComment from './firstCommentService.js';
 import * as firstCommentsRepo from '../repositories/firstCommentsRepository.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
-import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey } from '../utils/aiCopySpec.js';
+import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey, nextImagePrompt } from '../utils/aiCopySpec.js';
 import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, thumbSvg, thumbArt, pickTextSide, thumbImagePrompt } from '../utils/thumbSpec.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
@@ -412,7 +412,7 @@ export async function generateCopy(args) {
   return timedStep('copy', (begin) => writeCopy(args, begin));
 }
 
-async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', accessToken = '', accounts: pickedAccounts = null, withThumbs = true }, begin) {
+async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', accessToken = '', accounts: pickedAccounts = null, withThumbs = true, note = '' }, begin) {
   if (!driveId) throw new Error('driveId required');
   const { funnel, resolved, cfg } = await loadFunnel(funnelId, pickedAccounts);
   const draft = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [String(driveId)]))[String(driveId)];
@@ -428,7 +428,7 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
 
   const { data, model, usage } = await providers.llm.generateJsonDetailed({
     system: copySystemPrompt({ brief: cfg && cfg.direct_copy_brief, audience: resolved.audiencePrefix, keyword: resolved.captureKeyword, base: providers.resolved.prompts.copy, comparison: !!comparison, comparisonPrompt: providers.resolved.prompts.comparison }),
-    user: copyUserPrompt({ transcript, fileName: name, glossary: glossaryTerms(providers.resolved.prompts?.glossary), comparison }),
+    user: copyUserPrompt({ transcript, fileName: name, glossary: glossaryTerms(providers.resolved.prompts?.glossary), comparison, note }),
     maxTokens: 8000,
   });
   costs.push({ step: 'script', ...costText({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, model }) });
@@ -438,21 +438,22 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
 
   // Copy only: the thumbnails already on the instance stay as they are.
   const saved = ((draftSteps.find((x) => x.key === 'images') || {}).artifacts) || {};
+  const lastCopy = ((draftSteps.find((x) => x.key === 'script') || {}).artifacts || {}).copy || {};
+  const imagePromptWas = String(tArt.imagePrompt || '');
+  const imagePrompt = nextImagePrompt(imagePromptWas, lastCopy.thumbPrompt, copy.thumbPrompt);
   // A thumbnail failure never loses the copy; the video's first frame is used instead.
   const { thumbs, sizes, thumbError } = withThumbs
     ? await makeThumbs({
       providers, resolved, driveId, ext, accessToken, costs, comparison,
-      imagePrompt: tArt.imagePrompt || copy.thumbPrompt || copy.title, text: comparison ? tArt.headline || '' : tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '',
+      imagePrompt: imagePrompt || copy.title, text: comparison ? tArt.headline || '' : tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '',
     })
     : { thumbs: saved.thumbs || {}, sizes: saved.sizes || [], thumbError: '' };
   const instanceId = await saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, keepThumbs: !withThumbs }).catch((err) => {
     log.warn({ err: err.message, driveId }, 'draft save failed (generation still returned)');
     return null;
   });
-  // The copy also writes an image prompt: it fills a blank image prompt, never replaces one you wrote.
-  let imagePrompt = String(tArt.imagePrompt || '');
-  if (!imagePrompt.trim() && copy.thumbPrompt) {
-    imagePrompt = copy.thumbPrompt;
+  // The copy also writes an image prompt: it never replaces one you wrote.
+  if (imagePrompt !== imagePromptWas.trim()) {
     try {
       const { inst, steps: base } = await ensureInstance({ funnel, driveId: String(driveId), name });
       const steps = patchStep(base, 'transcript', { artifacts: { imagePrompt } });
@@ -461,7 +462,7 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
       log.warn({ err: err.message, driveId }, 'image prompt not saved (still returned)');
     }
   }
-  return { copy, transcript, costs, thumbs, sizes, thumbError, instanceId, imagePrompt, stage: 'review' };
+  return { copy, transcript, costs, thumbs, sizes, thumbError, instanceId, imagePrompt, imagePromptWas, stage: 'review' };
 }
 
 /**

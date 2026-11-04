@@ -32,6 +32,7 @@ import { setStatus as setApprovalStatus } from '../repositories/approvalReposito
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { publicDlUrl } from '../providers/publicDriveProvider.js';
 import { PLATFORM_SIZE } from '../utils/thumbSpec.js';
+import { imagePromptOf } from '../utils/aiCopySpec.js';
 import { VIDEO_REVIEW, pickOldestVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot } from '../utils/routerSpec.js';
 import { formatIst } from '../utils/time.js';
 import { childLogger } from '../core/logger.js';
@@ -64,6 +65,7 @@ async function sendApproval({ inst, funnel, resolved, providers, video, log, cle
   const copy = art(steps, 'script').copy || {};
   const sizes = art(steps, 'images').sizes || [];
   const thumb = (sizes[0] || {}).url || '';
+  const imagePrompt = imagePromptOf(steps);
   const when = inst.scheduled_for ? `${formatIst(inst.scheduled_for)} IST` : '';
   const videoUrl = (clean && clean.url) || publicDlUrl(video.id);
   const { reviewUrl } = await approvalService.createRequest({
@@ -87,6 +89,7 @@ async function sendApproval({ inst, funnel, resolved, providers, video, log, cle
     subject: `Approve ${funnel.name} ready video${when ? ` for ${when}` : ''}`,
     html: `<p>The next ready video for <b>${esc(funnel.name)}</b>: <b>${esc(video.name)}</b>${when ? `, posting ${esc(when)}` : ''}.</p>
       ${thumb ? `<p><img src="${esc(thumb)}" width="320" style="border-radius:8px;max-width:100%" alt="thumbnail"></p>` : ''}
+      ${imagePrompt ? `<p style="color:#666"><b>Image prompt:</b> ${esc(imagePrompt)}</p>` : ''}
       <p><b>${esc(copy.title)}</b></p><pre style="white-space:pre-wrap;background:#f5f5f5;padding:1rem;border-radius:6px">${esc(copy.description)}</pre>
       <p><a href="${esc(videoUrl)}">▶ The video${clean ? ' (cleaned)' : ''}</a></p>
       ${cleanNote ? `<p>${clean ? '🟢' : '🟡'} ${esc(cleanNote)}</p>` : ''}
@@ -186,15 +189,22 @@ export async function approve(approval) {
   return null;
 }
 
-/** Rework: write the copy + thumbnail again and re-send the approval. */
-export async function rework(approval) {
+/** What the email's review page shows beside the payload, read live so a waiting approval has it too. */
+export async function reviewFacts(approval) {
+  const id = (approval.payload || {}).instanceId;
+  const row = id ? await instanceRepo.get(id) : null;
+  return row ? { imagePrompt: imagePromptOf(instanceService.parseSteps(row)) } : {};
+}
+
+/** Rework: write the copy + thumbnail again, following your note, and re-send the approval. */
+export async function rework(approval, note = '') {
   const p = approval.payload || {};
   const log = baseLog.child({ instance: p.instanceId });
   const row = p.instanceId ? await instanceRepo.get(p.instanceId) : null;
   if (!row || !(await instanceRepo.transition(row.id, VIDEO_REVIEW, 'draft'))) return log.info('ready video rework ignored');
   await stepLog.end(row.id, 'review_copy', { by: 'rework' });
   try {
-    await readyPost.generateCopy({ funnelId: row.funnel_id, driveId: p.driveId, name: p.name });
+    await readyPost.generateCopy({ funnelId: row.funnel_id, driveId: p.driveId, name: p.name, note });
     const { funnel, resolved, providers } = await readyPost.folderFiles({ funnelId: row.funnel_id }).catch(() => ({}));
     const clean = p.videoUrl && p.videoUrl !== publicDlUrl(p.driveId) ? { url: p.videoUrl } : null;
     await sendApproval({ inst: await instanceRepo.get(row.id), funnel, resolved, providers, video: { id: p.driveId, name: p.name }, log, clean });
@@ -205,4 +215,4 @@ export async function rework(approval) {
   return null;
 }
 
-export default { KIND, LaneSkip, prepare, approve, rework };
+export default { KIND, LaneSkip, prepare, approve, rework, reviewFacts };
