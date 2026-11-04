@@ -143,10 +143,18 @@ export async function forTenant(tenantId = 'default') {
       heygenApiKey: pick('heygen_api_key', ''),
     },
     transcriptKey: pick('transcript_api_key', ''),
+    // Comparison videos. Blank = the built-in Assess360 list.
+    comparison: {
+      list: pick('comparison_list', ''),
+      brand: pick('comparison_brand', ''),
+      logo: pick('comparison_logo', ''),
+    },
     // System prompts (API Keys → System prompts). Blank = the built-in default.
     prompts: {
       global: pick('system_prompt_global', ''),
       copy: pick('system_prompt_copy', ''),
+      thumbnail: pick('system_prompt_thumbnail', ''),
+      comparison: pick('system_prompt_comparison', ''),
       script: pick('system_prompt_script', ''),
       refill: pick('system_prompt_refill', ''),
       // Names / spellings, passed to Whisper as its prompt.

@@ -182,6 +182,18 @@ export function register(ctx) {
     }
   });
 
+  // Comparison video: auto-detect, off, or a competitor from the Settings list.
+  router.post('/admin/instances/ready-ai/comparison', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const { funnelId, driveId, name, choice, source } = req.body || {};
+      if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
+      res.json({ ok: true, ...(await readyPost.setComparison({ tenantId: req.tenantId, funnelId, driveId: String(driveId), name: String(name || ''), choice: String(choice || ''), source })) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   router.post('/admin/instances/ready-ai/source/delete', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -910,7 +922,7 @@ function sourcesBar(funnel, sources = [], folder = '') {
   return `<div class="row srcbar"><b>Sources:</b> ${items}</div>`;
 }
 
-function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single = null, source = {}, funnelList = [], ...src }) {
+function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single = null, source = {}, funnelList = [], comparison = { names: [], byVideo: {} }, ...src }) {
   const cta = String((src.resolved || {}).ctaLink || '').trim();
   const cards = (videos || [])
     .map((v, i) => {
@@ -944,6 +956,8 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
             <div class="hint" id="cs-${id}">Zooms in keeping the top fixed so the bottom-right watermark leaves the frame, and cuts the outro. The end card plays after the video. Posting then uses the cleaned video.</div>
           </div>
           <div class="panel"><h4>2 · Transcript <span class="hint">check the names, then approve</span></h4>
+            <label class="fl">Comparison video: the copy and thumbnail come from the facts in Settings, with no AI picture<select id="cp-${id}" onchange="setComp('${id}')"><option value="">Auto-detect</option><option value="off">Off: normal video</option>${comparison.names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></label>
+            <div class="hint" id="ch-${id}"></div>
             <label class="fl">Edit the transcript, or paste an SRT, cue numbers and timestamps are removed before the AI reads it (the SRT itself is kept)<textarea id="tx-${id}" rows="7" oninput="txEdited('${id}')"></textarea></label>
             <label class="fl">Thumbnail headline: big text on the image (you write it)<input id="hl-${id}" maxlength="80" placeholder="e.g. Why STHIRA works"></label>
             <label class="fl">Thumbnail sub-head: smaller line under it (optional)<input id="su-${id}" maxlength="120"></label>
@@ -1129,8 +1143,28 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     }
     function setInst(id, instanceId){ const o=$('ol',id); if(!SINGLE && o && instanceId) o.innerHTML='<a class="hint" href="/api/v1/admin/instances/'+instanceId+'">Open instance ›</a>'; }
     // The gate: the copy is written only from a transcript, so ✅ Approve + generate copy is off while the box is empty.
+    const COMP = ${JSON.stringify(comparison).replace(/</g, '\\u003c')};
+    const compOn = {};
+    function showComp(id, c){
+      const a=c&&c.active;
+      compOn[id]=!!a;
+      if(!$('cp',id)) return;
+      $('cp',id).value=(c&&c.choice)||'';
+      const facts=a?a.rows.filter(r=>r.us&&!r.them).slice(0,3).map(r=>r.label).join(', '):'';
+      $('ch',id).textContent=a?('🟢 '+a.brand+' vs '+a.competitor+(a.checked?' (facts checked '+a.checked+')':'')+(facts?': '+facts:'')+'. The headline is optional here.'):'Normal video: the AI writes the copy and draws the picture from your image prompt.';
+      gateUi(id);
+    }
+    async function setComp(id){
+      $('cp',id).disabled=true;
+      try{
+        const j=await post('comparison', { driveId:id, name:$('nm',id).value, source:SOURCE, choice:$('cp',id).value });
+        if(!j.ok) throw new Error(j.error||'failed');
+        showComp(id, j); setInst(id, j.instanceId);
+      }catch(e){ $('ch',id).textContent='⚠ '+e.message; }
+      $('cp',id).disabled=false;
+    }
     function gateUi(id){
-      const empty=!$('tx',id).value.trim();
+      const empty=!$('tx',id).value.trim() && !compOn[id];
       $('gb',id).disabled = !!busy[id] || empty;
       $('gb',id).title = empty ? 'Transcribe the video, or type / paste the transcript, first' : '';
     }
@@ -1163,7 +1197,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     async function saveTx(id, approve){
       if(busy[id] && !approve) return false;
       const text=$('tx',id).value;
-      if(approve && !text.trim()){ $('tg',id).textContent='🟡 The transcript is empty: 🎙 Transcribe the video, or type / paste the text, first.'; return false; }
+      if(approve && !text.trim() && !compOn[id]){ $('tg',id).textContent='🟡 The transcript is empty: 🎙 Transcribe the video, or type / paste the text, first.'; return false; }
       $('ts',id).disabled=true;
       let ok=false;
       try{
@@ -1201,7 +1235,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     const thumbBusy = {};
     async function genThumb(id){
       if(thumbBusy[id]) return;
-      if(!$('hl',id).value.trim()){ $('gs',id).textContent='🟡 Type the thumbnail headline in step 2 first.'; $('hl',id).focus(); return; }
+      if(!$('hl',id).value.trim() && !compOn[id]){ $('gs',id).textContent='🟡 Type the thumbnail headline in step 2 first.'; $('hl',id).focus(); return; }
       thumbBusy[id]=true; $('gt',id).disabled=true; $('gs',id).textContent='🖼 Designing the thumbnail… (under a minute): your copy is not touched';
       try{
         const j=await post('thumbnail', { driveId:id, name:$('nm',id).value, source:SOURCE, accounts: pickedAccounts(), accessToken: await driveToken(), headline:$('hl',id).value, subhead:$('su',id).value, imagePrompt:$('ip',id).value });
@@ -1268,6 +1302,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         pollClean(id);
       }catch(e){ cleaning[id]=false; $('cl',id).disabled=false; bar(id, 0, false); $('cs',id).textContent='⚠ '+e.message; }
     }
+    Object.keys(COMP.byVideo).forEach(id=>{ if($('cp',id)) showComp(id, COMP.byVideo[id]); });
     Object.keys(SAVED).forEach(id=>{
       if(!$('cb',id)) return;
       const d=SAVED[id];
@@ -1277,6 +1312,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       $('hl',id).value=d.headline||''; $('su',id).value=d.subhead||''; $('ip',id).value=d.imagePrompt||'';
       approved[id]=!!d.approved; gateUi(id);
       if(d.hasTranscript) $('tg',id).textContent=d.approved?('🟢 Approved '+d.approvedIst+(d.srt?' · SRT kept':'')):'🟡 Waiting for you. Check the names, type the headline, check the image prompt, then ✅ Approve + generate copy and 🖼 Generate thumbnail.';
+      if(d.noSpeech && !compOn[id]) $('tg',id).textContent='🟡 No speech found in this video. Paste what it says, or pick its comparison above. The daily router leaves it alone until then.';
       if(d.copy){ applyGen(id, d); $('gs',id).textContent='💾 Saved draft from '+d.atIst+' · $'+Number(d.costUsd||0).toFixed(4); }
     });
     document.querySelectorAll('.cleansb').forEach(e=>subsNote(e.id.slice(3)));

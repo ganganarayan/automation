@@ -16,6 +16,9 @@
  * 'time' (HH:MM) | 'time_list' (comma list of HH:MM).
  */
 
+import { DEFAULT_THUMB_RULES } from '../utils/thumbSpec.js';
+import { DEFAULT_COMPARISON_PROMPT } from '../utils/comparisonSpec.js';
+import { DEFAULT_COMPARISONS, DEFAULT_COMPARISON_BRAND } from '../utils/comparisonFacts.js';
 import { DEFAULT_COPY_PROMPT } from '../utils/aiCopySpec.js';
 import { MAIL_PROVIDERS, DEFAULT_MAIL_PROVIDER } from '../utils/mailApis.js';
 import { DEFAULT_SCRIPT_PROMPT } from '../utils/stageSpec.js';
@@ -106,10 +109,20 @@ export const CONFIG_MANIFEST = {
       {
         // Set once here; every funnel and every LLM call uses them. Blank = the
         // built-in default (shown pre-filled).
+        title: 'Comparison videos',
+        fields: [
+          { key: 'comparison_brand', label: 'Your product name', default: DEFAULT_COMPARISON_BRAND },
+          { key: 'comparison_logo', label: 'Your logo (image link or a public Drive link; blank = the name is typed)' },
+          { key: 'comparison_list', label: 'Facts per competitor', type: 'textarea', default: DEFAULT_COMPARISONS, help: 'One block per competitor: its name and the date checked, then one line per fact as label | yours | theirs, using yes or no. A video is matched from its file name or transcript, or pick it on the video page. The thumbnail shows the first differences, so keep the strongest on top.' },
+        ],
+      },
+      {
         title: 'System prompts (used by every LLM call)',
         fields: [
           { key: 'system_prompt_global', label: 'Global system prompt: added before every LLM call', type: 'textarea', help: 'House rules for all AI text: voice, language, words to avoid. Leave blank for none.' },
           { key: 'system_prompt_copy', label: 'Ready video copy writer (title, description, captions, thumbnail hook + image prompt)', type: 'textarea', default: DEFAULT_COPY_PROMPT, help: 'The app always adds the JSON output keys, the funnel comment keyword, brand brief and audience after this.' },
+          { key: 'system_prompt_thumbnail', label: 'Thumbnail image rules: added after every image prompt', type: 'textarea', default: DEFAULT_THUMB_RULES, help: 'Layout and style for the AI thumbnail picture. The prompt for each video is in its Image prompt box. Comparison videos use no AI picture.' },
+          { key: 'system_prompt_comparison', label: 'Comparison video copy writer: added after the copy writer for comparison videos', type: 'textarea', default: DEFAULT_COMPARISON_PROMPT, help: 'The app adds the two product names and the facts from the list below.' },
           { key: 'system_prompt_script', label: 'Video script writer (automated pipeline)', type: 'textarea', default: DEFAULT_SCRIPT_PROMPT, help: "The funnel's script tone is added after this." },
           { key: 'system_prompt_refill', label: 'VidaPulse post refill', type: 'textarea', default: VIDAPULSE_SYSTEM },
           { key: 'transcript_glossary', label: 'Transcript glossary: names and terms to spell exactly (one per line)', type: 'textarea', help: 'Passed to Whisper as its prompt so names like STHIRA or PrATS come out right, and given to the copy writer as the correct spellings. Example: STHIRA, PrATS, Apply Gita Wisdom.' },

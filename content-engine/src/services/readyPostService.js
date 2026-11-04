@@ -44,6 +44,8 @@ import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '.
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
 import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey } from '../utils/aiCopySpec.js';
 import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, thumbSvg, thumbArt, pickTextSide, thumbImagePrompt } from '../utils/thumbSpec.js';
+import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
+import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
 import sharp from 'sharp';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -129,7 +131,10 @@ export async function listReadyVideos({ tenantId = 'default', funnelId, folder: 
   const saEmail = (g.serviceAccount && g.serviceAccount.client_email) || '';
   const picker = { clientId: g.oauthClientId || '', apiKey: g.pickerApiKey || '', appId: g.projectNumber || '' };
   const base = { funnel, resolved, cfg, folder, saEmail, picker, sources, source: { type: 'drive_pick', id: null }, defaultCaption: captionFor(cfg, resolved) };
-  if (picked && picked.length) return { ...base, folder: '', picked: true, videos: picked, drafts: await loadDrafts(funnel, picked.map((f) => f.id)) };
+  if (picked && picked.length) {
+    const drafts = await loadDrafts(funnel, picked.map((f) => f.id));
+    return { ...base, folder: '', picked: true, videos: picked, drafts, comparison: await comparisonState({ funnel, videos: picked, drafts }) };
+  }
   if (!folder) return { ...base, videos: [] };
   let files;
   try {
@@ -152,7 +157,8 @@ export async function listReadyVideos({ tenantId = 'default', funnelId, folder: 
     .filter((f) => !posted.has(f.id))
     .map((f) => ({ id: f.id, name: f.name, createdTime: f.createdTime }))
     .sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
-  return { ...base, videos, totalFiles: files.length, drafts: await loadDrafts(funnel, videos.map((v) => v.id)) };
+  const drafts = await loadDrafts(funnel, videos.map((v) => v.id));
+  return { ...base, videos, totalFiles: files.length, drafts, comparison: await comparisonState({ funnel, videos, drafts }) };
 }
 
 /**
@@ -177,6 +183,7 @@ export async function instanceView(row) {
     source: { type: row.source_type || 'drive_folder', id: row.source_id || null },
     videos: [{ id: driveId, name: video.name || row.title || driveId }],
     drafts,
+    comparison: await comparisonState({ funnel, videos: [{ id: driveId, name: video.name || row.title || '' }], drafts }),
     defaultCaption: captionFor(cfg, resolved),
   };
 }
@@ -341,7 +348,10 @@ export async function saveTranscript({ funnelId, driveId, name = '', text = '', 
   const head = String(headline || '').replace(/\s+/g, ' ').trim().slice(0, 80);
   const sub = String(subhead || '').replace(/\s+/g, ' ').trim().slice(0, 120);
   const prompt = String(imagePrompt || '').trim().slice(0, 1500);
-  if (approve && !next.text) throw new Error('The transcript is empty: transcribe the video, or type / paste the text, first');
+  if (approve && !next.text) {
+    const providers = await buildProviders(funnel.tenant_id || 'default');
+    if (!comparisonFor({ settings: providers.resolved.comparison, name, choice: prev.comparison })) throw new Error('The transcript is empty: transcribe the video, or type / paste the text, first');
+  }
   const unchanged = next.text === String(prev.text || '').trim();
   const srt = next.srt || (unchanged ? prev.srt || '' : '');
   const approvedAt = approve ? new Date().toISOString() : (unchanged ? prev.approvedAt || null : null);
@@ -381,10 +391,11 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   const providers = await buildProviders(funnel.tenant_id || tenantId);
   const costs = [];
   const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
+  const comparison = comparisonFor({ settings: providers.resolved.comparison, name, transcript, choice: tArt.comparison });
 
   const { data, model, usage } = await providers.llm.generateJsonDetailed({
-    system: copySystemPrompt({ brief: cfg && cfg.direct_copy_brief, audience: resolved.audiencePrefix, keyword: resolved.captureKeyword, base: providers.resolved.prompts.copy }),
-    user: copyUserPrompt({ transcript, fileName: name, glossary: glossaryTerms(providers.resolved.prompts?.glossary) }),
+    system: copySystemPrompt({ brief: cfg && cfg.direct_copy_brief, audience: resolved.audiencePrefix, keyword: resolved.captureKeyword, base: providers.resolved.prompts.copy, comparison: !!comparison, comparisonPrompt: providers.resolved.prompts.comparison }),
+    user: copyUserPrompt({ transcript, fileName: name, glossary: glossaryTerms(providers.resolved.prompts?.glossary), comparison }),
     maxTokens: 8000,
   });
   costs.push({ step: 'script', ...costText({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, model }) });
@@ -397,8 +408,8 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
   // A thumbnail failure never loses the copy; the video's first frame is used instead.
   const { thumbs, sizes, thumbError } = withThumbs
     ? await makeThumbs({
-      providers, resolved, driveId, ext, accessToken, costs,
-      imagePrompt: tArt.imagePrompt || copy.thumbPrompt || copy.title, text: tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '',
+      providers, resolved, driveId, ext, accessToken, costs, comparison,
+      imagePrompt: tArt.imagePrompt || copy.thumbPrompt || copy.title, text: comparison ? tArt.headline || '' : tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '',
     })
     : { thumbs: saved.thumbs || {}, sizes: saved.sizes || [], thumbError: '' };
   const instanceId = await saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, keepThumbs: !withThumbs }).catch((err) => {
@@ -425,7 +436,7 @@ export async function generateCopy({ tenantId = 'default', funnelId, driveId, na
  * the funnel's platforms need with the operator's headline. Never throws: a
  * failure comes back as thumbError. Image costs are pushed onto `costs`.
  */
-async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessToken = '', costs, imagePrompt, text, sub = '' }) {
+async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessToken = '', costs, imagePrompt, text, sub = '', comparison = null }) {
   const ffmpeg = createFfmpegProvider({}, log);
   let video = null; // downloaded only when a non-public file needs it for the frame
   const getVideo = async () => video || (video = await driveFor(providers, accessToken).download(driveId));
@@ -434,10 +445,18 @@ async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessTok
   let thumbError = '';
   try {
     const platforms = thumbPlatforms(resolved);
+    // A comparison is drawn from its facts: no AI picture, no cost, no people.
+    if (comparison) {
+      const logo = await comparisonLogo(comparison.logo);
+      const headline = comparisonHeadline(text);
+      const draw = (spec) => sharp(Buffer.from(comparisonSvg({ ...spec, ...comparison, headline, logo }))).jpeg({ quality: 88 }).toBuffer();
+      ({ thumbs, sizes } = await renderThumbs({ providers, platforms, draw }));
+      return { thumbs, sizes, thumbError };
+    }
     const imageModel = /^gpt-image/.test(String(providers.resolved.openai?.imageModel || '')) ? providers.resolved.openai.imageModel : 'gpt-image-1';
     let base = null;
     try {
-      base = await providers.llm.generateImage({ prompt: thumbImagePrompt(imagePrompt), size: '1024x1024', model: imageModel });
+      base = await providers.llm.generateImage({ prompt: thumbImagePrompt(imagePrompt, providers.resolved.prompts?.thumbnail), size: '1024x1024', model: imageModel });
       costs.push({ step: 'images', ...costImages({ count: 1, size: '1024x1024', model: imageModel }) });
     } catch (err) {
       log.warn({ err: err.message }, 'thumbnail artwork failed (using a video frame)');
@@ -474,11 +493,12 @@ export async function generateThumbnail({ tenantId = 'default', funnelId, driveI
   const head = String(headline ?? tArt.headline ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
   const sub = String(subhead ?? tArt.subhead ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
   const prompt = String(imagePrompt ?? tArt.imagePrompt ?? '').trim().slice(0, 1500);
-  if (!head) throw new Error('Type the thumbnail headline first');
   const providers = await buildProviders(funnel.tenant_id || tenantId);
+  const comparison = comparisonFor({ settings: providers.resolved.comparison, name, transcript: tArt.text, choice: tArt.comparison });
+  if (!head && !comparison) throw new Error('Type the thumbnail headline first');
   const costs = [];
   const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
-  const { thumbs, sizes, thumbError } = await makeThumbs({ providers, resolved, driveId: id, ext, accessToken, costs, imagePrompt: prompt || copy.thumbPrompt || copy.title || head, text: head, sub });
+  const { thumbs, sizes, thumbError } = await makeThumbs({ providers, resolved, driveId: id, ext, accessToken, costs, imagePrompt: prompt || copy.thumbPrompt || copy.title || head, text: head, sub, comparison });
   let steps = patchStep(base, 'transcript', { artifacts: { headline: head, subhead: sub, imagePrompt: prompt } });
   if (sizes.length) steps = patchStep(steps, 'images', { status: 'done', artifacts: { thumbs, sizes } });
   const at = new Date().toISOString();
@@ -493,23 +513,86 @@ export async function generateThumbnail({ tenantId = 'default', funnelId, driveI
  * hook headline) and upload it to Post for Me. Returns { thumbs: platform ->
  * url, sizes: [{ size, label, url, platforms }] }.
  */
-async function renderThumbs({ providers, platforms, base, text, sub = '' }) {
+async function renderThumbs({ providers, platforms, base, text, sub = '', draw = null }) {
   const postformeKey = providers.resolved.postformeKey || '';
   if (!postformeKey) throw new Error('No Post for Me API key, set it under Setup → Keys and credit');
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
   const thumbs = {};
   const sizes = [];
-  const side = await textSide(base);
+  const side = draw ? 'right' : await textSide(base);
   for (const [size, spec] of Object.entries(THUMB_SIZES)) {
     const users = platforms.filter((k) => PLATFORM_SIZE[k] === size);
     if (!users.length) continue;
-    const jpg = await composeThumb(base, spec, { text, sub, side });
+    const jpg = draw ? await draw(spec) : await composeThumb(base, spec, { text, sub, side });
     const url = await publish.uploadMedia(jpg, 'image/jpeg');
     for (const k of users) thumbs[k] = url;
     sizes.push({ size, label: spec.label, url, platforms: users });
   }
   log.info({ sizes: sizes.map((x) => x.label) }, 'thumbnails rendered + uploaded');
   return { thumbs, sizes };
+}
+
+/** The Settings logo link as a data: URI for the drawn thumbnail; '' (the name is typed) when it can't be read. */
+async function comparisonLogo(link) {
+  const url = String(link || '').trim();
+  if (!url) return '';
+  try {
+    const driveId = (url.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?.*id=)([\w-]{10,})/) || [])[1];
+    const res = await fetch(driveId ? publicDlUrl(driveId) : url, { signal: AbortSignal.timeout(20000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const png = await sharp(Buffer.from(await res.arrayBuffer())).resize({ height: 300, fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+    return `data:image/png;base64,${png.toString('base64')}`;
+  } catch (err) {
+    log.warn({ err: err.message }, 'comparison logo not readable (typing the name instead)');
+    return '';
+  }
+}
+
+/** For the video page: the competitors to pick from, and what each video is now. */
+async function comparisonState({ funnel, videos, drafts }) {
+  const { resolved } = await buildProviders(funnel.tenant_id || 'default');
+  const settings = resolved.comparison;
+  const byVideo = {};
+  for (const v of videos) {
+    const d = drafts[v.id] || {};
+    byVideo[v.id] = { choice: d.comparison || '', active: comparisonFor({ settings, name: v.name, transcript: d.transcript, choice: d.comparison }) };
+  }
+  return { names: parseComparisons(settings.list || DEFAULT_COMPARISONS).map((c) => c.competitor), byVideo };
+}
+
+/** The video page's comparison choice: blank = detect, off = normal video, or a competitor. */
+export async function setComparison({ tenantId = 'default', funnelId, driveId, name = '', choice = '', source = null }) {
+  if (!driveId) throw new Error('driveId required');
+  const { funnel } = await loadFunnel(funnelId);
+  const { inst, steps: base } = await ensureInstance({ funnel, driveId: String(driveId), name, source });
+  const picked = String(choice || '').slice(0, 80);
+  const steps = patchStep(base, 'transcript', { artifacts: { comparison: picked } });
+  await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
+  const providers = await buildProviders(funnel.tenant_id || tenantId);
+  const tArt = ((steps.find((x) => x.key === 'transcript') || {}).artifacts) || {};
+  return { instanceId: inst.id, choice: picked, active: comparisonFor({ settings: providers.resolved.comparison, name, transcript: tArt.text, choice: picked }) };
+}
+
+/** The transcript already saved on this video, so the router neither pays again nor overwrites pasted text. */
+export async function savedTranscript({ funnelId, driveId }) {
+  const { funnel } = await loadFunnel(funnelId);
+  const row = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [String(driveId)]))[String(driveId)];
+  if (!row) return null;
+  const text = String(((instanceService.parseSteps(row).find((x) => x.key === 'transcript') || {}).artifacts || {}).text || '');
+  return text.trim() ? { instanceId: row.id, transcript: text } : null;
+}
+
+/** Videos the router must leave alone: no speech found, nobody added text, and they are not comparisons. */
+export async function silentDriveIds({ funnel, resolved, files = [] }) {
+  const drafts = await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, files.map((f) => String(f.id)));
+  return files.filter((f) => {
+    const row = drafts[String(f.id)];
+    if (!row) return false;
+    const steps = instanceService.parseSteps(row);
+    if (!isNoSpeech(steps)) return false;
+    const choice = ((steps.find((x) => x.key === 'transcript') || {}).artifacts || {}).comparison;
+    return !comparisonFor({ settings: resolved.comparison, name: f.name, choice });
+  }).map((f) => String(f.id));
 }
 
 /** Which side of the artwork is calmer (less detail), so the text goes there and the face stays clear. */
@@ -1045,11 +1128,11 @@ function draftView(row) {
   const costUsd = steps.reduce((t, x) => t + (x.costs || []).reduce((u, c) => u + (Number(c.costUsd) || 0), 0), 0);
   const clean = (art('stitch').video || {}).clean || null;
   const hasTranscript = step('transcript').status === 'done';
-  if (!art('script').copy && !clean && !hasTranscript) return null;
   const t = art('transcript');
+  if (!art('script').copy && !clean && !hasTranscript && !t.comparison) return null;
   return {
     instanceId: row.id, stage: readyStage(row, steps), clean, copy: art('script').copy || null, ctaLink: art('script').ctaLink || '',
-    transcript: t.text || '', headline: t.headline || '', subhead: t.subhead || '', imagePrompt: t.imagePrompt || '', hasTranscript, srt: !!t.srt, timed: !!transcriptSrt(t), approved: !!t.approvedAt, approvedIst: t.approvedAt ? formatIst(t.approvedAt) : '',
+    comparison: t.comparison || '', noSpeech: isNoSpeech(steps), transcript: t.text || '', headline: t.headline || '', subhead: t.subhead || '', imagePrompt: t.imagePrompt || '', hasTranscript, srt: !!t.srt, timed: !!transcriptSrt(t), approved: !!t.approvedAt, approvedIst: t.approvedAt ? formatIst(t.approvedAt) : '',
     thumbs: art('images').thumbs || {}, sizes: art('images').sizes || [], costUsd, atIst: formatIst(row.updated_at),
   };
 }
@@ -1577,10 +1660,17 @@ export async function folderFiles({ funnelId }) {
  * The router's unattended path through the transcript gate: the Whisper text
  * is kept as it is and approved (the operator approves the finished copy
  * instead, in one email). The thumbnail headline comes from the AI copy.
+ * A blank transcript is never approved, unless the video is a comparison (its
+ * copy comes from the facts): returns null and the video waits for the operator.
  */
-export async function approveTranscriptAuto({ funnelId, driveId }) {
+export async function approveTranscriptAuto({ funnelId, driveId, name = '' }) {
   const { funnel } = await loadFunnel(funnelId);
-  const { inst, steps: base } = await ensureInstance({ funnel, driveId: String(driveId) });
+  const { inst, steps: base } = await ensureInstance({ funnel, driveId: String(driveId), name });
+  const tArt = ((base.find((x) => x.key === 'transcript') || {}).artifacts) || {};
+  if (!String(tArt.text || '').trim()) {
+    const providers = await buildProviders(funnel.tenant_id || 'default');
+    if (!comparisonFor({ settings: providers.resolved.comparison, name, choice: tArt.comparison })) return null;
+  }
   const steps = patchStep(base, 'transcript', { artifacts: { approvedAt: new Date().toISOString(), approvedBy: 'router' } });
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   await instanceRepo.setStatus(inst.id, 'draft');
@@ -1588,5 +1678,5 @@ export async function approveTranscriptAuto({ funnelId, driveId }) {
 }
 
 export default {
-  onPosted, startPost, postStatus, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, startTranscribe, transcribeStatus, saveTranscript, generateCopy, generateThumbnail, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, cleanForRouter, postSelections, folderFiles, approveTranscriptAuto,
+  setComparison, savedTranscript, silentDriveIds, onPosted, startPost, postStatus, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, startTranscribe, transcribeStatus, saveTranscript, generateCopy, generateThumbnail, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, cleanForRouter, postSelections, folderFiles, approveTranscriptAuto,
 };

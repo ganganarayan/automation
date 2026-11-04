@@ -14,7 +14,7 @@
  *               - thumbBox / thumbArt / pickTextSide: where the text and the artwork go
  *               - thumbSvg({ w, h, text, sub, layout, side, accent }): SVG overlay string
  *                 (text = the headline, sub = an optional smaller sub-head)
- *               - thumbImagePrompt(prompt): the image-model prompt
+ *               - thumbImagePrompt(prompt, rules): the image-model prompt (rules = the Settings field)
  *               - thumbMedia(videoUrl, thumbUrl): Post for Me media item
  * Dependencies: none.
  */
@@ -187,10 +187,13 @@ export function thumbSvg({ w, h, text, sub = '', layout = 'side', side = 'right'
 <text text-anchor="${anchor}" ${font} font-weight="800" font-size="${size}" fill="#FFFFFF" stroke="#000000" stroke-width="${Math.max(2, Math.round(size * 0.06))}" paint-order="stroke">${tspans}</text>${subText}</svg>`;
 }
 
+/** The rules added after every image prompt. Editable under System prompts. */
+export const DEFAULT_THUMB_RULES = 'Thumbnail artwork, square composition. Show only what is described above: no person or face unless it asks for one. Place the main subject on the LEFT side of the frame (the left 55%), whole and well lit, with room around it. Keep the RIGHT 45% of the frame calm and empty: a plain dark wall, a soft out-of-focus background or sky, nothing important there, so a headline can sit on it. Bold cinematic lighting, high contrast, one clear focal subject. Absolutely no text, letters, words, captions, logos or watermarks.';
+
 /** Image-model prompt for the thumbnail artwork (text is drawn by the app, never by the model). */
-export function thumbImagePrompt(prompt) {
-  const subject = String(prompt || '').trim().slice(0, 1500) || 'A striking, emotive scene that matches the video topic';
-  return `${subject}\n\nThumbnail artwork, square composition. Place the subject on the LEFT side of the frame (the left 55%), face clearly visible and well lit, the whole head inside the frame with room above it, looking toward the right. Keep the RIGHT 45% of the frame calm and empty: a plain dark wall, a soft out-of-focus background or sky, nothing important there, so a headline can sit on it. Bold cinematic lighting, high contrast, one clear focal subject. Absolutely no text, letters, words, captions, logos or watermarks.`;
+export function thumbImagePrompt(prompt, rules = '') {
+  const subject = String(prompt || '').trim().slice(0, 1500) || 'A striking scene that matches the video topic';
+  return `${subject}\n\n${String(rules || '').trim() || DEFAULT_THUMB_RULES}`;
 }
 
 /** The Post for Me media item: a designed thumbnail, else the first frame. */
@@ -198,4 +201,4 @@ export function thumbMedia(videoUrl, thumbUrl) {
   return thumbUrl ? { url: videoUrl, thumbnail_url: thumbUrl } : { url: videoUrl, thumbnail_timestamp_ms: 0 };
 }
 
-export default { THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, pickTextSide, thumbSvg, thumbImagePrompt, thumbMedia };
+export default { THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, pickTextSide, thumbSvg, DEFAULT_THUMB_RULES, thumbImagePrompt, thumbMedia };

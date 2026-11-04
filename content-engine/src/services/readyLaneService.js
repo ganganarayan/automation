@@ -102,12 +102,13 @@ async function sendApproval({ inst, funnel, resolved, providers, video, log, cle
  * Line up tomorrow's ready video for one funnel at `scheduledFor` (Luxon
  * DateTime). Returns { instance, approval: boolean }; throws LaneSkip / Error.
  */
-export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
+export async function prepare({ funnelRow, scheduledFor, log = baseLog, skipped = [] }) {
   const { funnel, resolved, providers, folder, files, posted, drive } = await readyPost.folderFiles({ funnelId: funnelRow.id });
   if (!folder) throw new LaneSkip('no ready-video folder on this funnel');
   if (!(resolved.accounts || []).length) throw new LaneSkip('no Post for Me accounts ticked on this funnel');
   const held = await instanceRepo.routerHeldDriveIds(funnel.id, funnel.tenant_id).catch(() => []);
-  const video = pickOldestVideo(files, [...posted, ...held]);
+  const silent = await readyPost.silentDriveIds({ funnel, resolved: providers.resolved, files }).catch(() => []);
+  const video = pickOldestVideo(files, [...posted, ...held, ...silent, ...skipped]);
   if (!video) throw new LaneSkip('no unposted ready video in the folder');
   const at = scheduledFor.toJSDate();
   const side = sidecarsFor(files, video);
@@ -129,10 +130,16 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
   }
 
   // Otherwise: transcribe → AI copy + thumbnail → one approval email.
-  const t = await readyPost.transcribeVideo({ funnelId: funnel.id, driveId: video.id, name: video.name });
+  const t = await readyPost.savedTranscript({ funnelId: funnel.id, driveId: video.id })
+    || await readyPost.transcribeVideo({ funnelId: funnel.id, driveId: video.id, name: video.name });
+  // No speech and not a comparison: it waits on its page (never paid for again), the next video goes today.
+  if (!(await readyPost.approveTranscriptAuto({ funnelId: funnel.id, driveId: video.id, name: video.name }))) {
+    await instanceRepo.setMeta(t.instanceId, { title: `${video.name} (no speech: add the text or pick its comparison)` });
+    log.warn({ video: video.name }, 'ready video has no speech, left for the operator');
+    return prepare({ funnelRow, scheduledFor, log, skipped: [...skipped, video.id] });
+  }
   await instanceRepo.setMeta(t.instanceId, { scheduledFor: at, title: `${video.name} · ${formatIst(at, { withTime: false })}` });
   try {
-    await readyPost.approveTranscriptAuto({ funnelId: funnel.id, driveId: video.id });
     await readyPost.generateCopy({ funnelId: funnel.id, driveId: video.id, name: video.name });
     const inst = await instanceRepo.get(t.instanceId);
     await sendApproval({ inst, funnel, resolved, providers, video, log, clean, cleanNote: note });
