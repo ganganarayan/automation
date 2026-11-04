@@ -13,7 +13,7 @@
  * Dependencies: tenantConfigRepository, tenantSettings, driveOAuthProvider, cleanHookSpec.
  *
  * Stored in tenant_config (never shown in the UI): google_drive_refresh_token,
- * google_drive_email, google_drive_folder_id, clean_hook_secret.
+ * google_drive_email, google_drive_folder_id, google_drive_scopes, clean_hook_secret.
  */
 import { randomBytes } from 'node:crypto';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
@@ -26,6 +26,7 @@ const K = {
   refresh: 'google_drive_refresh_token',
   email: 'google_drive_email',
   folder: 'google_drive_folder_id',
+  scopes: 'google_drive_scopes',
   secret: 'clean_hook_secret',
 };
 
@@ -79,21 +80,24 @@ export async function finishConnect({ tenantId = 'default', baseUrl, code }) {
   await tenantConfig.set(tenantId, K.refresh, refresh);
   await tenantConfig.set(tenantId, K.email, email);
   await tenantConfig.set(tenantId, K.folder, folderId);
+  await tenantConfig.set(tenantId, K.scopes, String(tok.scope || ''));
+  // Allowing Gmail here is the choice to send through it.
+  if (String(tok.scope || '').includes('gmail.send')) await tenantConfig.set(tenantId, 'mail_provider', 'gmail');
   tenantSettings.invalidate(tenantId);
   tokens.set(tenantId, { token: tok.access_token, until: Date.now() + (Number(tok.expires_in) || 3600) * 1000 - 5 * 60 * 1000 });
   return { email, folderId };
 }
 
 export async function disconnect(tenantId = 'default') {
-  for (const k of [K.refresh, K.email, K.folder]) await tenantConfig.del(tenantId, k);
+  for (const k of [K.refresh, K.email, K.folder, K.scopes]) await tenantConfig.del(tenantId, k);
   tokens.delete(tenantId);
   tenantSettings.invalidate(tenantId);
 }
 
 /** { connected, email, folderId }, for the settings page and the clean runner. */
 export async function status(tenantId = 'default') {
-  const [refresh, email, folderId] = await Promise.all([K.refresh, K.email, K.folder].map((k) => tenantConfig.get(tenantId, k)));
-  return { connected: !!refresh, email: email || '', folderId: folderId || '' };
+  const [refresh, email, folderId, scopes] = await Promise.all([K.refresh, K.email, K.folder, K.scopes].map((k) => tenantConfig.get(tenantId, k)));
+  return { connected: !!refresh, email: email || '', folderId: folderId || '', gmail: !!refresh && String(scopes || '').includes('gmail.send') };
 }
 
 /** A live access token (cached until ~5 min before it expires). */

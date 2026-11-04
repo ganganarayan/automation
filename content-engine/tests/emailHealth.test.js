@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DateTime } from 'luxon';
 import { smtpMissing, mailMissing, recipientDomain, sendRecord, parseRecord, healthLines } from '../src/utils/emailHealth.js';
-import { parseFrom, buildMailRequest, readMailResponse, messageIdOf } from '../src/utils/mailApis.js';
+import { parseFrom, buildMailRequest, readMailResponse, messageIdOf, rfc2822Message, DEFAULT_MAIL_PROVIDER } from '../src/utils/mailApis.js';
 import { createMailProvider } from '../src/providers/mailProvider.js';
 
 // Same output as formatIst (utils/time), which needs the app env to import.
@@ -10,6 +10,56 @@ const full = { host: 'smtp.gmail.com', port: 587, user: 'me@gmail.com', pass: 'a
 const log = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() });
 const smtpMail = (smtp) => ({ provider: 'smtp', smtp });
 const resend = { provider: 'resend', apiKey: 're_123', from: 'Gita <hello@x.com>', smtp: {} };
+
+describe('Gmail', () => {
+  const gmail = { provider: 'gmail', gmailReady: true, gmailEmail: 'me@gmail.com', gmailToken: async () => 'tok', smtp: {} };
+  const decode64 = (s) => Buffer.from(s.replace(/\r\n/g, ''), 'base64').toString();
+
+  it('is the free default and only needs the connected account', () => {
+    expect(DEFAULT_MAIL_PROVIDER).toBe('gmail');
+    expect(mailMissing(gmail)).toEqual([]);
+    expect(mailMissing({ provider: 'gmail' })[0]).toContain('Connect Google');
+  });
+
+  it('builds a real message: encoded subject, html, no header injection', () => {
+    const raw = rfc2822Message({ from: 'Gita <me@gmail.com>', to: 'a@x.com, b@y.in', subject: '🟢 Posted\r\nBcc: evil@x.com', html: '<p>héllo</p>' });
+    const [head, body] = raw.split(/\r\n\r\n/);
+    expect(head).toContain('From: Gita <me@gmail.com>');
+    expect(head).toContain('To: a@x.com, b@y.in');
+    expect(head).not.toMatch(/^Bcc:/m);
+    expect(decode64(head.match(/Subject: =\?UTF-8\?B\?(.+)\?=/)[1])).toBe('🟢 Posted Bcc: evil@x.com');
+    expect(decode64(body)).toBe('<p>héllo</p>');
+  });
+
+  it('carries text + html as alternatives, and attachments', () => {
+    const raw = rfc2822Message({ from: 'me@gmail.com', to: 'a@x.com', subject: 'S', text: 'hi', html: '<p>hi</p>', attachments: [{ filename: 'a.csv', content: 'x,y' }] });
+    expect(raw).toContain('multipart/mixed');
+    expect(raw).toContain('multipart/alternative');
+    expect(raw).toContain('filename="a.csv"');
+    expect(raw.trim().endsWith('--ce-mixed-boundary--')).toBe(true);
+  });
+
+  it('sends with the account token, from the connected address', async () => {
+    const request = vi.fn(async () => new Response(JSON.stringify({ id: 'm1' }), { status: 200 }));
+    const r = await createMailProvider({ ...gmail, from: 'Gita <other@x.com>' }, log(), vi.fn(), request).send({ to: 'a@y.com', subject: 'S', text: 'hi' });
+    expect(r).toEqual({ ok: true, id: 'm1' });
+    const [url, init] = request.mock.calls[0];
+    expect(url).toBe('https://gmail.googleapis.com/gmail/v1/users/me/messages/send');
+    expect(init.headers.Authorization).toBe('Bearer tok');
+    expect(Buffer.from(JSON.parse(init.body).raw, 'base64url').toString()).toContain('From: Gita <me@gmail.com>');
+  });
+
+  it("reports Google's own reason", async () => {
+    const request = async () => new Response(JSON.stringify({ error: { code: 403, message: 'Gmail API has not been used' } }), { status: 403 });
+    await expect(createMailProvider(gmail, log(), vi.fn(), request).send({ to: 'a@y.com', subject: 'S' })).rejects.toThrow('Gmail said 403: Gmail API has not been used');
+  });
+
+  it('not connected: skips and says what to press, never crashes an alert', async () => {
+    const r = await createMailProvider({ provider: 'gmail', from: 'a@b.com', smtp: {} }, log(), vi.fn()).send({ to: 'a@y.com', subject: 'S' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('Connect Google');
+  });
+});
 
 describe('smtpMissing', () => {
   it('names each empty setting by its Settings label', () => {

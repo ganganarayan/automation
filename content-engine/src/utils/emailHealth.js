@@ -18,6 +18,8 @@ const SMTP_FIELDS = [
   ['pass', 'SMTP password (app password)'],
 ];
 
+export const GMAIL_CONNECT = 'Connect Google (Settings, Google) and allow sending email';
+
 /** Labels of the SMTP settings that are empty (empty list = complete). */
 export function smtpMissing(smtp) {
   const s = smtp || {};
@@ -31,6 +33,7 @@ export function smtpMissing(smtp) {
 export function mailMissing(mail) {
   const m = mail || {};
   if (m.provider === 'smtp') return smtpMissing(m.smtp);
+  if (m.provider === 'gmail') return m.gmailReady ? [] : [GMAIL_CONNECT];
   const p = MAIL_PROVIDERS.find((x) => x.value === m.provider);
   if (!p) return [`Email provider (unknown "${m.provider || ''}")`];
   const out = [];
@@ -84,7 +87,7 @@ export function healthLines({ mail, last, lastError, fmt }) {
     ? { dot: '🔴', text: `${name} incomplete: set ${missing.join(', ')}, Save, then Send test` }
     : { dot: '🟢', text: `${name} is set up${mail?.provider === 'smtp' ? '' : ' (sends over HTTPS)'}` });
   if (mail?.provider === 'smtp') {
-    lines.push({ dot: '🟡', text: 'Railway blocks outbound SMTP: pick an HTTP provider (Resend, Brevo, SendGrid, Postmark or SMTP2GO)' });
+    lines.push({ dot: '🟡', text: 'Railway blocks outbound SMTP: pick Gmail (free) or another HTTP provider' });
   }
   if (!last) {
     lines.push({ dot: '🟡', text: 'No email has been attempted since this readout was added' });

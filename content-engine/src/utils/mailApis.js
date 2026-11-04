@@ -2,7 +2,8 @@
  * Email over HTTP: pure request builders.
  *
  * Purpose:      Railway blocks outbound SMTP, so approval and status emails go
- *               through an email provider's HTTPS API instead.
+ *               through an HTTPS API instead: the owner's own Gmail (free, the
+ *               default) or an email provider.
  * Responsibility: MAIL_PROVIDERS (the Settings choices), parseFrom ("Name
  *               <a@b>" or "a@b"), buildMailRequest (url + fetch init per
  *               provider), readMailResponse (error text or null; some
@@ -11,6 +12,7 @@
  */
 
 export const MAIL_PROVIDERS = [
+  { value: 'gmail', label: 'Gmail (your connected Google account, free)', keyLabel: '' },
   { value: 'resend', label: 'Resend (HTTP API)', keyLabel: 'Resend API key' },
   { value: 'brevo', label: 'Brevo (HTTP API)', keyLabel: 'Brevo API key' },
   { value: 'sendgrid', label: 'SendGrid (HTTP API)', keyLabel: 'SendGrid API key' },
@@ -19,7 +21,7 @@ export const MAIL_PROVIDERS = [
   { value: 'smtp', label: 'SMTP (blocked on Railway, only for other hosts)', keyLabel: '' },
 ];
 export const HTTP_PROVIDERS = MAIL_PROVIDERS.filter((p) => p.value !== 'smtp').map((p) => p.value);
-export const DEFAULT_MAIL_PROVIDER = 'resend';
+export const DEFAULT_MAIL_PROVIDER = 'gmail';
 
 /** The provider's display name ("Resend"), or the raw value. */
 export function providerName(value) {
@@ -39,6 +41,45 @@ const b64 = (content) => (Buffer.isBuffer(content) ? content : Buffer.from(Strin
 const toList = (to) => String(to || '').split(',').map((x) => x.trim()).filter(Boolean);
 const htmlOf = (msg) => msg.html || `<pre style="font-family:inherit;white-space:pre-wrap">${String(msg.text || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</pre>`;
 
+const headerText = (s) => String(s ?? '').replace(/[\r\n]+/g, ' ').trim();
+// Non-ASCII headers (a subject with 🟢, say) travel as an encoded word.
+const encodeHeader = (s) => {
+  const t = headerText(s);
+  return /^[\x20-\x7e]*$/.test(t) ? t : `=?UTF-8?B?${Buffer.from(t).toString('base64')}?=`;
+};
+const wrap76 = (b) => (b.match(/.{1,76}/g) || []).join('\r\n');
+const b64Part = (type, content, extra = []) => [`Content-Type: ${type}`, 'Content-Transfer-Encoding: base64', ...extra, '', wrap76(b64(content))].join('\r\n');
+const multipart = (kind, boundary, parts) => [
+  `Content-Type: multipart/${kind}; boundary="${boundary}"`, '',
+  ...parts.map((p) => `--${boundary}\r\n${p}`), `--${boundary}--`,
+].join('\r\n');
+
+/**
+ * One email as the RFC 2822 text the Gmail API takes (still to be base64url'd).
+ * Bodies and attachments are base64, which cannot contain a boundary's dashes.
+ */
+export function rfc2822Message(msg) {
+  const { email, name } = parseFrom(msg.from);
+  const html = b64Part('text/html; charset="UTF-8"', htmlOf(msg));
+  const text = msg.text ? b64Part('text/plain; charset="UTF-8"', msg.text) : '';
+  let body = text ? multipart('alternative', 'ce-alt-boundary', [text, html]) : html;
+  const files = msg.attachments || [];
+  if (files.length) {
+    const parts = files.map((f) => {
+      const file = headerText(f.filename).replace(/"/g, '');
+      return b64Part(`application/octet-stream; name="${file}"`, f.content, [`Content-Disposition: attachment; filename="${file}"`]);
+    });
+    body = multipart('mixed', 'ce-mixed-boundary', [body, ...parts]);
+  }
+  return [
+    `From: ${name ? `${encodeHeader(name)} <${headerText(email)}>` : headerText(email)}`,
+    `To: ${toList(msg.to).map(headerText).join(', ')}`,
+    `Subject: ${encodeHeader(msg.subject)}`,
+    'MIME-Version: 1.0',
+    body,
+  ].join('\r\n');
+}
+
 /**
  * The HTTPS request for one email.
  * @param {string} provider - one of HTTP_PROVIDERS
@@ -55,6 +96,10 @@ export function buildMailRequest(provider, msg) {
     init: { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers }, body: JSON.stringify(body) },
   });
   switch (provider) {
+    case 'gmail': // apiKey here is the connected account's access token.
+      return json('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { Authorization: `Bearer ${msg.apiKey}` }, {
+        raw: Buffer.from(rfc2822Message(msg)).toString('base64url'),
+      });
     case 'resend':
       return json('https://api.resend.com/emails', { Authorization: `Bearer ${msg.apiKey}` }, {
         from: fromHeader, to, subject: msg.subject, html: htmlOf(msg),
@@ -104,7 +149,7 @@ export function readMailResponse(provider, status, bodyText = '') {
   try { body = JSON.parse(bodyText); } catch { body = null; }
   const name = providerName(provider);
   if (status < 200 || status >= 300) {
-    const why = body?.message || body?.Message || body?.errors?.[0]?.message || body?.data?.error || String(bodyText || '').slice(0, 200) || 'no reason given';
+    const why = body?.error?.message || body?.message || body?.Message || body?.errors?.[0]?.message || body?.data?.error || String(bodyText || '').slice(0, 200) || 'no reason given';
     return `${name} said ${status}: ${why}`;
   }
   if (provider === 'postmark' && body?.ErrorCode) return `Postmark error ${body.ErrorCode}: ${body.Message || 'no message'}`;
@@ -123,4 +168,4 @@ export function messageIdOf(bodyText = '') {
   }
 }
 
-export default { MAIL_PROVIDERS, HTTP_PROVIDERS, DEFAULT_MAIL_PROVIDER, providerName, parseFrom, buildMailRequest, readMailResponse, messageIdOf };
+export default { MAIL_PROVIDERS, HTTP_PROVIDERS, DEFAULT_MAIL_PROVIDER, providerName, parseFrom, rfc2822Message, buildMailRequest, readMailResponse, messageIdOf };

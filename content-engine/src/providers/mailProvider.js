@@ -2,9 +2,10 @@
  * Mail provider (interface + HTTP API and SMTP implementations).
  *
  * Purpose:      Abstract outbound email (approvals, alerts) behind an interface.
- *               Railway blocks outbound SMTP, so the default is an email
- *               provider's HTTPS API (Resend, Brevo, SendGrid, Postmark,
- *               SMTP2GO); SMTP stays for hosts that allow it.
+ *               Railway blocks outbound SMTP, so the default is the connected
+ *               Google account's Gmail API (free); an email provider's HTTPS
+ *               API (Resend, Brevo, SendGrid, Postmark, SMTP2GO) also works,
+ *               and SMTP stays for hosts that allow it.
  * Responsibility: send({ to, subject, text, html, attachments }); skip({
  *               subject, reason }) for a caller that has no one to send to.
  *               Every attempt is logged with its outcome (recipient domain
@@ -12,7 +13,7 @@
  * Dependencies: nodemailer, fetch, utils/{mailApis,emailHealth}.
  */
 import nodemailer from 'nodemailer';
-import { buildMailRequest, readMailResponse, messageIdOf, providerName } from '../utils/mailApis.js';
+import { buildMailRequest, readMailResponse, messageIdOf, providerName, parseFrom } from '../utils/mailApis.js';
 import { mailMissing, recipientDomain, sendRecord } from '../utils/emailHealth.js';
 
 /**
@@ -36,7 +37,12 @@ function deliverer(mail, request) {
     return async (msg) => (await transport.sendMail({ from: mail.from || s.from || s.user, ...msg })).messageId;
   }
   return async (msg) => {
-    const { url, init } = buildMailRequest(mail.provider, { ...msg, apiKey: mail.apiKey, from: mail.from });
+    // Gmail sends as the connected account, under the name in From if there is one.
+    const gmail = mail.provider === 'gmail';
+    const name = gmail ? parseFrom(mail.from).name : '';
+    const from = gmail ? (name ? `${name} <${mail.gmailEmail}>` : mail.gmailEmail) : mail.from;
+    const apiKey = gmail ? await mail.gmailToken() : mail.apiKey;
+    const { url, init } = buildMailRequest(mail.provider, { ...msg, apiKey, from });
     const res = await request(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
     const body = await res.text().catch(() => '');
     const error = readMailResponse(mail.provider, res.status, body);
@@ -51,7 +57,7 @@ function deliverer(mail, request) {
  * missing (alert paths never crash); partly set (e.g. key without From, or
  * SMTP host+user without password) → logged and thrown with the plain reason.
  * A provider error is logged and thrown as well.
- * @param {{ provider: string, apiKey?: string, from?: string, smtp: object }} mail
+ * @param {{ provider: string, apiKey?: string, from?: string, smtp: object, gmailReady?: boolean, gmailEmail?: string, gmailToken?: () => Promise<string> }} mail
  * @param {import('pino').Logger} log
  * @param {(record: object) => Promise<void>|void} [onResult] - stores the outcome
  * @param {typeof fetch} [request]
@@ -76,7 +82,7 @@ export function createMailProvider(mail, log, onResult = null, request = globalT
 
   const missing = mailMissing(mail);
   const s = mail.smtp || {};
-  const partly = mail.provider === 'smtp' ? !!(s.host && s.user) : !!(mail.apiKey || mail.from);
+  const partly = mail.provider === 'smtp' ? !!(s.host && s.user) : mail.provider !== 'gmail' && !!(mail.apiKey || mail.from);
   const deliver = missing.length ? null : deliverer(mail, request);
 
   return {

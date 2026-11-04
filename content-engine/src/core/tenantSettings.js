@@ -175,6 +175,9 @@ export async function forTenant(tenantId = 'default') {
       provider: String(pick('mail_provider', DEFAULT_MAIL_PROVIDER)).trim(),
       apiKey: String(pick('mail_api_key', '') || '').trim(),
       from: String(pick('mail_from', pick('smtp_from', settings.smtp.from) || pick('smtp_user', settings.smtp.user)) || '').trim(),
+      // Gmail: the account connected under Settings, Google, if it allowed sending.
+      gmailEmail: String(pick('google_drive_email', '') || '').trim(),
+      gmailReady: !!pick('google_drive_refresh_token', '') && String(pick('google_drive_scopes', '')).includes('gmail.send'),
     },
   };
 }

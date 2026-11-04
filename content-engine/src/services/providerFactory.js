@@ -52,7 +52,7 @@ export async function buildProviders(tenantId = 'default') {
 
     // Tenant-scoped: each tenant sends approval/status email through the
     // provider chosen in the app (an HTTP email API; SMTP only off Railway).
-    mail: createMailProvider({ ...r.mail, smtp: r.smtp }, log, mailRecorder(tenantId)),
+    mail: createMailProvider({ ...r.mail, smtp: r.smtp, gmailToken: () => driveConnect.accessToken(tenantId) }, log, mailRecorder(tenantId)),
 
     // Google Sheets/Drive identity: the service account configured in the app
     // (tenant_config), falling back to the env default (see tenantSettings).

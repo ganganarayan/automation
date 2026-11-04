@@ -26,7 +26,7 @@ describe('clean job ticket', () => {
 describe('drive connect + dispatch', () => {
   it('asks for drive.file offline access', () => {
     const u = new URL(driveAuthUrl({ clientId: 'cid', redirectUri: 'https://x.test/cb', state: 'st' }));
-    expect(u.searchParams.get('scope')).toBe(DRIVE_SCOPE);
+    expect(u.searchParams.get('scope').split(' ')).toEqual([DRIVE_SCOPE, 'https://www.googleapis.com/auth/gmail.send']);
     expect(u.searchParams.get('access_type')).toBe('offline');
     expect(u.searchParams.get('prompt')).toBe('consent');
     expect(u.searchParams.get('redirect_uri')).toBe('https://x.test/cb');

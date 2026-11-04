@@ -44,7 +44,7 @@ export function register(ctx) {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
       const st = await driveConnect.status(req.tenantId || 'default');
-      res.set('Cache-Control', 'no-store').json({ ok: true, connected: st.connected, email: st.email });
+      res.set('Cache-Control', 'no-store').json({ ok: true, connected: st.connected, email: st.email, gmail: st.gmail });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }

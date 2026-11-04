@@ -18,6 +18,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+export const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 export const CLEAN_WORKFLOW = 'clean-video.yml';
 export const DEFAULT_REPO = 'ganganarayan/automation';
 // A ticket outlives a slow runner queue + a 10-minute video encode, not much more.
@@ -52,14 +53,14 @@ export function readTicket(ticket, secret, now = Date.now()) {
   return p;
 }
 
-/** Google's consent screen for the one-time Drive connect (offline = a refresh token). */
+/** Google's consent screen for the one-time connect, Drive + send-only Gmail (offline = a refresh token). */
 export function driveAuthUrl({ clientId, redirectUri, state }) {
   if (!clientId) throw new Error('Set the OAuth client ID first (Setup → Settings → Google)');
   const q = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope: DRIVE_SCOPE,
+    scope: `${DRIVE_SCOPE} ${GMAIL_SCOPE}`,
     access_type: 'offline',
     prompt: 'consent',
     include_granted_scopes: 'true',
@@ -106,4 +107,4 @@ export function normalizeRunner(v) {
   return String(v || '').trim().toLowerCase() === 'github' ? 'github' : 'railway';
 }
 
-export default { DRIVE_SCOPE, CLEAN_WORKFLOW, DEFAULT_REPO, signTicket, peekTicket, readTicket, driveAuthUrl, normalizeRepo, dispatchRequest, keepSecFor, normalizeRunner };
+export default { DRIVE_SCOPE, GMAIL_SCOPE, CLEAN_WORKFLOW, DEFAULT_REPO, signTicket, peekTicket, readTicket, driveAuthUrl, normalizeRepo, dispatchRequest, keepSecFor, normalizeRunner };
