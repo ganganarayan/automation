@@ -88,6 +88,7 @@ export function reviewLabel(key, email) {
   const r = REVIEWS[key];
   if (!r) return key;
   if (r.noEmail) return 'Transcript waiting for your check';
+  if (email === 'digest') return `${r.noun} ready, link in the daily email`;
   if (email === 'sent') return `${r.noun} email sent for approval`;
   if (email === 'failed') return `${r.noun} email failed, approve it here`;
   if (email === 'none') return `${r.noun} ready, no approval email set`;

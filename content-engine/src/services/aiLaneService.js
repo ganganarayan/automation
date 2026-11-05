@@ -3,11 +3,11 @@
  *
  * Purpose:      When no ready video is waiting, make one: check credit, research
  *               a new topic from the funnel's landing page + post history, write
- *               the script and send approval email 1. The existing pipeline then
+ *               the script and open approval 1. The existing pipeline then
  *               takes over (docs/daily-router-plan.md, Lane 2):
  *               approve → images → animate (no lip sync, the provider picked
  *               here) → ElevenLabs narrator → ffmpeg on GitHub Actions →
- *               approval email 2 → Post for Me at scheduled_for, or now if late.
+ *               approval 2 → Post for Me at scheduled_for, or now if late.
  * Responsibility:
  *               - prepare: credit gate (once-per-dry-spell email when out),
  *                 research, instance, script, script review. Throws LaneSkip
@@ -44,7 +44,7 @@ export class LaneSkip extends Error {}
 
 /**
  * Line up tomorrow's AI video for one funnel. Returns the instance (at
- * script_review, approval email 1 sent); throws LaneSkip or Error.
+ * script_review, approval 1 open); throws LaneSkip or Error.
  */
 export async function prepare({ funnelRow, scheduledFor, postDate, log = baseLog }) {
   const f = await funnels.resolve(funnelRow);
@@ -116,32 +116,13 @@ export async function onStageFailed(instanceId, stepKey, err) {
   // A re-run (or a later decision) already replaced this video: nothing to do.
   if (!day || (day.instance_id && String(day.instance_id) !== String(instanceId))) return;
 
-  let outcome;
   try {
     const inst = await imageLane.prepare({ funnelRow, scheduledFor, log });
-    outcome = 'An image post is lined up instead; its approval email is on its way.';
-    await routerDays.update(day.id, { lane: 'image', reason: `AI video failed (${reason}); image lane: approval email sent`, instanceId: inst.id });
+    await routerDays.update(day.id, { lane: 'image', reason: `AI video failed (${reason}); image lane: waiting for approval`, instanceId: inst.id });
   } catch (e) {
-    outcome = `The image lane failed too: ${e.message}`;
     await routerDays.update(day.id, { lane: 'none', reason: `AI video failed (${reason}); image lane failed: ${e.message}` });
   }
   log.warn({ reason }, 'AI video failed mid-render; dropped to the image lane');
-  try {
-    const providers = await buildProviders(row.tenant_id);
-    const f = await funnels.resolve(funnelRow);
-    const to = f.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
-    if (to) {
-      const strip = (s) => String(s).replace(/[&<>]/g, '');
-      await providers.mail.send({
-        to,
-        subject: `🟡 ${f.name} AI video failed: image post instead`,
-        html: `<p>The AI video for ${strip(f.name)} (${formatIst(scheduledFor)} IST) failed while rendering.</p>
-          <p><b>Why:</b> ${strip(reason)}</p><p>${strip(outcome)}</p>`,
-      });
-    }
-  } catch (e) {
-    log.warn({ err: e.message }, 'lane-2 failure email failed');
-  }
 }
 
 const dayTaken = (message) => Object.assign(new Error(message), { dayTaken: true });

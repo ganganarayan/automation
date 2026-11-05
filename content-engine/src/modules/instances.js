@@ -772,7 +772,7 @@ function detailPage(row, steps) {
         <a class="act" href="/api/v1/admin/instances">← Library</a>
       </div>
     </div>
-    <p class="ro">Read-only here. ${row.locked ? 'Posted and locked.' : 'Approve or request a change from the emailed review link.'}</p>
+    <p class="ro">Read-only here. ${row.locked ? 'Posted and locked.' : 'Approve or request a change from the link in the daily email.'}</p>
     ${row.locked ? '' : `<div class="row">
       <button class="act" onclick="sendReview('script')">✉ Send script review</button>
       <button class="act primary" onclick="sendReview('final')">✉ Send final review</button>
@@ -797,7 +797,7 @@ function detailPage(row, steps) {
       try{
         const r=await fetch('/api/v1/admin/instances/${row.id}/send-review?checkpoint='+cp,{method:'POST'});
         const j=await r.json();
-        if(m) m.textContent = j.ok ? ('Sent'+(j.emailedTo?(' to '+j.emailedTo):', no approval email set, link only')) : ('Failed: '+(j.error||''));
+        if(m) m.textContent = j.ok ? ('Ready. The link goes in the daily email'+(j.emailedTo?(' to '+j.emailedTo):', no email address set')) : ('Failed: '+(j.error||''));
       }catch(e){ if(m) m.textContent='Failed: '+e.message; }
     }
   `, 'instances');

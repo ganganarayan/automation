@@ -11,7 +11,7 @@ name: Wake content-engine for its daily jobs
 #   router → /api/v1/jobs/router-check  (the app runs each tenant's slot once,
 #            wake_ran_router, and router_days de-dupes per funnel + day)
 #   posts  → /api/v1/jobs/check-posts   (one run at a time; each channel's
-#            ✅/❌ and the go-live email are recorded once)
+#            ✅/❌ is recorded once; the daily email goes from here)
 #   nudge  → /api/v1/jobs/nudge         (one email a day at most; the app
 #            runs each tenant's slot once, wake_ran_nudge)
 #   relay  → /api/v1/jobs/poll-linkedin (LinkedIn notification mail relayed to

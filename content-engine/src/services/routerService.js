@@ -41,28 +41,6 @@ import { childLogger } from '../core/logger.js';
 
 const baseLog = childLogger({ module: 'router' });
 
-/** Tell the operator a funnel has no post lined up for that day (best-effort). */
-async function sendNoPostEmail({ funnel, f, scheduledFor, reason, log }) {
-  try {
-    const providers = await buildProviders(funnel.tenant_id);
-    const to = f.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
-    const day = formatIst(scheduledFor, { withTime: false });
-    if (!to) {
-      await providers.mail.skip?.({ subject: `🟡 No ${funnel.name} post lined up for ${day}`, reason: 'no recipient: set the funnel approval email or Settings, Emails, Notification' });
-      return;
-    }
-    await providers.mail.send({
-      to,
-      subject: `🟡 No ${funnel.name} post lined up for ${day}`,
-      html: `<p>The daily router could not line up ${funnel.name}'s post for ${formatIst(scheduledFor)} IST.</p>
-        <p><b>Why:</b> ${String(reason).replace(/[&<>]/g, '')}</p>
-        <p>Fix it, then run the router check again (POST /api/v1/jobs/router-check?retry=1).</p>`,
-    });
-  } catch (err) {
-    log.warn({ err: err.message, funnel: funnel.name }, 'no-post email failed');
-  }
-}
-
 /**
  * Decide one funnel's lane for tomorrow. Returns
  * { funnel, postDate, lane, reason, instanceId, skipped }.
@@ -106,7 +84,7 @@ export async function decideFunnel({ funnel, now = nowIst(), retryNone = false, 
   // Lane 1: the oldest ready video.
   try {
     const r = await readyLane.prepare({ funnelRow: funnel, scheduledFor, log: flog });
-    const what = r.approval ? 'ready video: approval email sent' : 'ready video: scheduled (own thumbnail + caption)';
+    const what = r.approval ? 'ready video: waiting for approval' : 'ready video: scheduled (own thumbnail + caption)';
     return done('ready_video', r.note ? `${what}, ${r.note}` : what, r.instance && r.instance.id);
   } catch (err) {
     note('ready video', err);
@@ -121,13 +99,11 @@ export async function decideFunnel({ funnel, now = nowIst(), retryNone = false, 
   // Lane 3: the image post (fail-safe).
   try {
     const inst = await imageLane.prepare({ funnelRow: funnel, scheduledFor, log: flog });
-    return done('image', 'image lane: approval email sent', inst.id);
+    return done('image', 'image lane: waiting for approval', inst.id);
   } catch (err) {
     const reason = `image lane failed: ${err.message}`;
     log.warn({ funnel: funnel.name, postDate, err: err.message }, 'router: no post lined up');
-    const res = await done('none', reason, null);
-    await sendNoPostEmail({ funnel, f, scheduledFor, reason: res.reason, log });
-    return res;
+    return done('none', reason, null);
   }
 }
 

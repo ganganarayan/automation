@@ -12,16 +12,16 @@
  *                 it → that thumbnail + caption, scheduled with no approval.
  *                 Otherwise transcribe → AI caption + headline + thumbnail
  *                 (readyPostService, the transcript gate passed by the router)
- *                 → one approval email. Throws LaneSkip when there's no video.
+ *                 → one approval, linked from the daily email. Throws LaneSkip when there's no video.
  *               - approve: schedule through readyPostService.postSelections at
  *                 scheduled_for, or now if that has passed (D2).
- *               - rework: write the copy again and re-send the approval.
+ *               - rework: write the copy again and open a new approval.
  * Dependencies: readyPostService, approvalService, instanceRepository,
  *               instanceService, providerFactory, publishProvider,
  *               utils/{routerSpec,thumbSpec,time}, logger.
  *
  * Instance statuses: transcript_review → draft (router-approved transcript)
- * → video_review (approval email out) → draft → scheduled → posted.
+ * → video_review (approval open) → draft → scheduled → posted.
  */
 import * as readyPost from './readyPostService.js';
 import * as approvalService from './approvalService.js';
@@ -44,7 +44,6 @@ const baseLog = childLogger({ module: 'readyLane' });
 /** Lane 1 has nothing to post today: the router moves on. */
 export class LaneSkip extends Error {}
 
-const recipient = (resolved, providers) => resolved.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
 const art = (steps, k) => ((steps.find((s) => s.key === k) || {}).artifacts) || {};
 
 /** One selection → Post for Me (via the ready-video poster). Returns the instance id. */
@@ -59,16 +58,14 @@ async function schedule({ funnelId, video, copy, thumbs, ctaLink = '', scheduled
   return r.instanceId;
 }
 
-/** Send (or re-send) the approval email for a draft that has its copy. */
-async function sendApproval({ inst, funnel, resolved, providers, video, log, clean = null, cleanNote = '' }) {
+/** Open (or re-open) the approval for a draft that has its copy; the daily email carries the link. */
+async function sendApproval({ inst, funnel, video, log, clean = null, cleanNote = '' }) {
   const steps = instanceService.parseSteps(await instanceRepo.get(inst.id));
   const copy = art(steps, 'script').copy || {};
   const sizes = art(steps, 'images').sizes || [];
   const thumb = (sizes[0] || {}).url || '';
-  const imagePrompt = imagePromptOf(steps);
-  const when = inst.scheduled_for ? `${formatIst(inst.scheduled_for)} IST` : '';
   const videoUrl = (clean && clean.url) || publicDlUrl(video.id);
-  const { reviewUrl } = await approvalService.createRequest({
+  await approvalService.createRequest({
     tenantId: funnel.tenant_id,
     kind: KIND,
     payload: {
@@ -76,34 +73,10 @@ async function sendApproval({ inst, funnel, resolved, providers, video, log, cle
       thumbnailUrl: thumb, videoUrl, caption: [copy.title, copy.description].filter(Boolean).join('\n\n'),
     },
   });
-  await instanceRepo.setStatus(inst.id, VIDEO_REVIEW);
-  // It waits on the Library's Approve either way, so an email problem fails nothing.
-  const to = recipient(resolved, providers);
-  if (!to) {
-    await stepLog.start(inst.id, 'review_copy', { email: 'none' });
-    return log.warn({ instance: inst.id }, 'no approval email address: approve it from the Library');
-  }
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const sent = providers.mail.send({
-    to,
-    subject: `Approve ${funnel.name} ready video${when ? ` for ${when}` : ''}`,
-    html: `<p>The next ready video for <b>${esc(funnel.name)}</b>: <b>${esc(video.name)}</b>${when ? `, posting ${esc(when)}` : ''}.</p>
-      ${thumb ? `<p><img src="${esc(thumb)}" width="320" style="border-radius:8px;max-width:100%" alt="thumbnail"></p>` : ''}
-      ${imagePrompt ? `<p style="color:#666"><b>Image prompt:</b> ${esc(imagePrompt)}</p>` : ''}
-      <p><b>${esc(copy.title)}</b></p><pre style="white-space:pre-wrap;background:#f5f5f5;padding:1rem;border-radius:6px">${esc(copy.description)}</pre>
-      <p><a href="${esc(videoUrl)}">▶ The video${clean ? ' (cleaned)' : ''}</a></p>
-      ${cleanNote ? `<p>${clean ? '🟢' : '🟡'} ${esc(cleanNote)}</p>` : ''}
-      <p><a href="${esc(reviewUrl)}" style="background:#0a7d32;color:#fff;padding:.6rem 1rem;border-radius:6px;text-decoration:none;display:inline-block">Approve &amp; schedule, or ask for new copy</a></p>
-      <p style="color:#666">Approved after its time, it posts at once.</p>`,
-  });
-  try {
-    await sent;
-    await stepLog.start(inst.id, 'review_copy', { email: 'sent' });
-    log.info({ instance: inst.id, video: video.name }, 'ready video approval email sent');
-  } catch (err) {
-    await stepLog.start(inst.id, 'review_copy', { email: 'failed' });
-    log.warn({ err: err.message, instance: inst.id }, 'ready video approval email failed: approve it from the Library');
-  }
+  // A failed clean is worth saying: the daily email and the Library show the note.
+  await instanceRepo.setStatus(inst.id, VIDEO_REVIEW, clean ? undefined : (cleanNote || undefined));
+  await stepLog.start(inst.id, 'review_copy', { email: 'digest' });
+  log.info({ instance: inst.id, video: video.name }, 'ready video waiting for approval');
   return null;
 }
 
@@ -138,7 +111,7 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog, skipped 
     return { instance: await instanceRepo.get(instanceId), approval: false, note };
   }
 
-  // Otherwise: transcribe → AI copy + thumbnail → one approval email.
+  // Otherwise: transcribe → AI copy + thumbnail → one approval, linked from the daily email.
   const t = await readyPost.savedTranscript({ funnelId: funnel.id, driveId: video.id })
     || await readyPost.transcribeVideo({ funnelId: funnel.id, driveId: video.id, name: video.name });
   // No speech and not a comparison: it waits on its page (never paid for again), the next video goes today.
@@ -151,7 +124,7 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog, skipped 
   try {
     await readyPost.generateCopy({ funnelId: funnel.id, driveId: video.id, name: video.name });
     const inst = await instanceRepo.get(t.instanceId);
-    await sendApproval({ inst, funnel, resolved, providers, video, log, clean, cleanNote: note });
+    await sendApproval({ inst, funnel, video, log, clean, cleanNote: note });
     return { instance: inst, approval: true, note };
   } catch (err) {
     // Unlink it from the day: the video stays in the folder for another go.
@@ -196,7 +169,7 @@ export async function reviewFacts(approval) {
   return row ? { imagePrompt: imagePromptOf(instanceService.parseSteps(row)) } : {};
 }
 
-/** Rework: write the copy + thumbnail again, following your note, and re-send the approval. */
+/** Rework: write the copy + thumbnail again, following your note, and open a new approval. */
 export async function rework(approval, note = '') {
   const p = approval.payload || {};
   const log = baseLog.child({ instance: p.instanceId });
@@ -207,7 +180,7 @@ export async function rework(approval, note = '') {
     await readyPost.generateCopy({ funnelId: row.funnel_id, driveId: p.driveId, name: p.name, note });
     const { funnel, resolved, providers } = await readyPost.folderFiles({ funnelId: row.funnel_id }).catch(() => ({}));
     const clean = p.videoUrl && p.videoUrl !== publicDlUrl(p.driveId) ? { url: p.videoUrl } : null;
-    await sendApproval({ inst: await instanceRepo.get(row.id), funnel, resolved, providers, video: { id: p.driveId, name: p.name }, log, clean });
+    await sendApproval({ inst: await instanceRepo.get(row.id), funnel, video: { id: p.driveId, name: p.name }, log, clean });
   } catch (err) {
     log.error({ err: err.message }, 'ready video rework failed');
     await instanceRepo.setStatus(row.id, 'failed', `Rework: ${err.message}`);

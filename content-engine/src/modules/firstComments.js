@@ -26,8 +26,8 @@ export function register(ctx) {
     }
     res.json({ ok: true });
     firstComment.onWebhook({ tenantId, event: req.body }).catch((err) => log.warn({ err: err.message }, 'first comment webhook failed (the timer retries)'));
-    // A channel went live: mark it ✅/❌ and send the go-live email now, so the
-    // app need not be awake on a timer to notice.
+    // A channel went live: mark it ✅/❌ now, so the app need not be awake on a
+    // timer to notice.
     readyPost.refreshAllTenants().catch((err) => log.warn({ err: err.message }, 'post check after webhook failed'));
   });
 

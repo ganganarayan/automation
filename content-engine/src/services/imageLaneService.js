@@ -3,14 +3,14 @@
  *
  * Purpose:      When no video lane delivers a funnel's post, line up an image
  *               post from the funnel's sheet as an INSTANCE, so it goes through
- *               the same instance → Post for Me → post check → go-live email
+ *               the same instance → Post for Me → post check
  *               path as every other lane (docs/daily-router-plan.md, Lane 3).
  * Responsibility:
  *               - prepare: top the sheet up (fewer than 2 Ready rows → 7 new
  *                 rows from the landing page + post history), pick the next
  *                 Ready row no open instance holds, create the instance
  *                 (source_type 'sheet', source_ref = the row's key), generate
- *                 the image, send the approval email.
+ *                 the image, open the approval (the daily email carries the link).
  *               - approve: sheet row → Approved; ONE Post for Me post to all
  *                 the funnel's accounts at scheduled_for, or at once if that
  *                 has passed (D2); first comment + webhook; instance → scheduled.
@@ -23,7 +23,7 @@
  *               publishProvider, firstCommentService, utils/{routerSpec,
  *               postCompose,instanceSpec,pricing,time}, httpClient.
  *
- * Instance statuses: running (image being made) → image_review (approval email
+ * Instance statuses: running (image being made) → image_review (approval link
  * out) → approved → scheduled → posted | partial | failed.
  */
 import * as funnels from '../repositories/funnelsRepository.js';
@@ -56,7 +56,6 @@ const baseLog = childLogger({ module: 'imageLane' });
 /** A reason the lane could not line up a post (shown on router_days.reason). */
 export class LaneError extends Error {}
 
-const recipient = (f, providers) => f.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
 const art = (steps, k) => ((steps.find((s) => s.key === k) || {}).artifacts) || {};
 
 /**
@@ -107,7 +106,7 @@ async function refill({ f, providers, tab, rows, log }) {
 
 /**
  * Generate the image for an instance, save it on the instance and send the
- * approval email. Leaves the instance at image_review.
+ * approval. Leaves the instance at image_review.
  */
 async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '', log }) {
   const inst = await instanceRepo.get(instanceId);
@@ -126,7 +125,7 @@ async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '
   }
   await stepLog.end(instanceId, 'images');
 
-  const { id: approvalId, reviewUrl } = await approvalService.createRequest({
+  const { id: approvalId } = await approvalService.createRequest({
     tenantId: f.tenantId,
     kind: KIND,
     payload: { instanceId, funnelId: f.id, mediaUrl: upload.downloadUrl, thumbnailUrl: upload.thumbnailUrl, captionFull: full, captionShort: short },
@@ -150,25 +149,9 @@ async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '
   await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
   await instanceRepo.setStatus(instanceId, IMAGE_REVIEW);
 
-  // It waits on the Library's Approve either way, so an email problem fails nothing.
-  const to = recipient(f, providers);
-  if (!to) {
-    await stepLog.start(instanceId, 'review_image', { email: 'none' });
-    return log.warn({ instance: instanceId }, 'no approval email address: approve it from the Library');
-  }
-  const when = inst.scheduled_for ? `${formatIst(inst.scheduled_for)} IST` : '';
-  try {
-    await providers.mail.send({
-      to,
-      subject: `${note ? 'Reworked' : 'Approve'} ${f.name} image post${when ? ` for ${when}` : ''}`,
-      html: poster.approvalEmail(f.name, upload.thumbnailUrl, full, short, reviewUrl, when),
-    });
-    await stepLog.start(instanceId, 'review_image', { email: 'sent' });
-    log.info({ instance: instanceId, row: sheet.key, round: inst.round }, 'image approval email sent');
-  } catch (err) {
-    await stepLog.start(instanceId, 'review_image', { email: 'failed' });
-    log.warn({ err: err.message, instance: instanceId }, 'image approval email failed: approve it from the Library');
-  }
+  // The daily email carries the approval link; the Library's Approve works too.
+  await stepLog.start(instanceId, 'review_image', { email: 'digest' });
+  log.info({ instance: instanceId, row: sheet.key, round: inst.round }, 'image post waiting for approval');
   return null;
 }
 
@@ -290,14 +273,6 @@ export async function approve(approval) {
     await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
     await instanceRepo.setStatus(row.id, 'failed', `Post for Me: ${err.message}`);
     await poster.markSheetRow(providers.sheets, f.sheetId, tab, { ...where, status: SHEET_STATUS.ready }, log);
-    const to = recipient(f, providers);
-    if (to) {
-      await providers.mail.send({
-        to,
-        subject: `🔴 ${f.name} image post not scheduled`,
-        html: `<p>Post for Me refused the approved ${f.name} image post: ${String(err.message).replace(/[&<>]/g, '')}</p><p>The sheet row is Ready again.</p>`,
-      }).catch(() => {});
-    }
     return null;
   }
 

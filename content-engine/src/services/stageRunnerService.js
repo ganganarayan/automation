@@ -368,7 +368,7 @@ export async function postInstance({ instanceId, captionOverride = '' }) {
   const result = await publish.createPost({ accountIds, caption, mediaUrl: dlUrl(videoId), scheduledAt });
   await firstComment.ensureWebhook(resolved.tenantId, publish).catch(() => false);
   const refs = result && result.id ? [result.id] : (Array.isArray(result) ? result.map((r) => r.id).filter(Boolean) : []);
-  // The channel list lets the post check mark each one ✅/❌ and send the go-live email.
+  // The channel list lets the post check mark each one ✅/❌.
   const accountMap = resolved.accountMap || {};
   const channels = accountIds.map((id) => ({ id, platform: (accountMap[id] || {}).platform || '', name: (accountMap[id] || {}).account_name || id, state: 'waiting' }));
   await instanceService.updateStep(instanceId, 'publish', { status: 'done', artifacts: { posts: refs, channels }, finishedAt: new Date().toISOString() });

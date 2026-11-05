@@ -33,7 +33,6 @@ import {
   rejectTransition,
   normalizeNote,
   driveEmbedUrl,
-  driveThumbUrl,
 } from '../utils/reviewSpec.js';
 
 export const KIND = 'instance_review';
@@ -82,9 +81,9 @@ async function recipientFor(instance, resolved) {
 // ---- requesting a review ---------------------------------------------------
 
 /**
- * Create a review request for a checkpoint of an instance and email it (with the
- * in-email Drive player for the final reel). Reflects the checkpoint on the
- * instance (script_review / final_review). Returns { id, reviewUrl, approvalEmail }.
+ * Create a review request for a checkpoint of an instance; the daily email carries
+ * the link. Reflects the checkpoint on the instance (script_review / final_review).
+ * Returns { id, reviewUrl, approvalEmail }.
  */
 export async function requestReview({ tenantId = 'default', instanceId, checkpoint = 'script' }) {
   if (!isCheckpoint(checkpoint)) throw new Error(`unknown checkpoint: ${checkpoint}`);
@@ -115,26 +114,8 @@ export async function requestReview({ tenantId = 'default', instanceId, checkpoi
   // Reflect the open checkpoint on the instance.
   await instanceRepo.setStatus(instance.id, checkpoint === 'script' ? 'script_review' : 'final_review');
 
-  let email = 'none';
-  if (approvalEmail) {
-    try {
-      await providers.mail.send({
-        to: approvalEmail,
-        subject: subjectFor(payload),
-        html: reviewEmailHtml(payload, reviewUrl),
-      });
-      email = 'sent';
-      log.info({ instance: instance.id, checkpoint, round: payload.round, to: approvalEmail }, 'review email sent');
-    } catch (err) {
-      // Don't fail the request if SMTP is unset/misconfigured, the hosted review
-      // link still works; surface the reason in logs.
-      email = 'failed';
-      log.warn({ err: err.message, instance: instance.id, checkpoint }, 'review email failed');
-    }
-  } else {
-    log.warn({ instance: instance.id, checkpoint }, 'no approval email configured, review link not emailed');
-  }
-  await stepLog.start(instance.id, reviewStep(checkpoint), { email });
+  await stepLog.start(instance.id, reviewStep(checkpoint), { email: 'digest' });
+  log.info({ instance: instance.id, checkpoint, round: payload.round }, 'review waiting for approval');
 
   return { id, reviewUrl, approvalEmail };
 }
@@ -178,7 +159,7 @@ export async function onApprove(approval) {
     try {
       // Dispatch the reel to Post-for-Me (at scheduled_for, or now if that has
       // passed). It stays 'scheduled' until the post check sees it live, marks
-      // each channel ✅/❌, locks it and sends the go-live email.
+      // each channel ✅/❌ and locks it.
       const refs = pipeline.beforeFinalLock ? ((await pipeline.beforeFinalLock({ instanceId })) || []) : [];
       if (!refs.length) {
         const ok = await instanceRepo.lockAsPosted(instanceId, { postRefs: refs, postedAt });
@@ -232,46 +213,6 @@ export function registerKind() {
 }
 
 // ---- rendering -------------------------------------------------------------
-
-function subjectFor(p) {
-  const who = p.funnelName || 'funnel';
-  const round = p.round > 1 ? ` (round ${p.round})` : '';
-  return p.checkpoint === 'final' ? `Final review: ${who}${round}` : `Review script: ${who}${round}`;
-}
-
-/**
- * The review email. For the final checkpoint it carries the in-email Drive
- * player: a poster thumbnail with a ▶ overlay that opens Drive's /preview player
- * in the browser (robust across mail clients that strip iframes), plus the link
- * to the hosted review page where the decision is made.
- */
-function reviewEmailHtml(p, reviewUrl) {
-  const who = esc(p.funnelName || 'funnel');
-  const roundLine = p.round > 1 ? `<p style="color:#b45309">Rework round ${esc(String(p.round))}.</p>` : '';
-
-  if (p.checkpoint === 'final') {
-    const poster = p.videoId
-      ? `<a href="${esc(driveEmbedUrl(p.videoId))}" target="_blank" rel="noopener"
-            style="display:inline-block;position:relative;text-decoration:none">
-           <img src="${esc(driveThumbUrl(p.videoId, 'w640'))}" alt="video poster"
-                width="320" style="border-radius:10px;display:block;max-width:100%">
-           <span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-                 font-size:2.4rem;color:#fff;text-shadow:0 1px 6px rgba(0,0,0,.6)">▶</span>
-         </a>`
-      : '<p>(no video yet)</p>';
-    return `<p>The final reel for <b>${who}</b> is ready for review.</p>
-      ${roundLine}
-      <p>${poster}</p>
-      <p><a href="${esc(driveEmbedUrl(p.videoId))}" target="_blank" rel="noopener">▶ Play the video</a></p>
-      <p><a href="${esc(reviewUrl)}" style="background:#0a7d32;color:#fff;padding:.6rem 1rem;border-radius:6px;text-decoration:none;display:inline-block">Approve &amp; post, or request a change</a></p>`;
-  }
-
-  const preview = esc((p.scriptText || '').slice(0, 1200)) + ((p.scriptText || '').length > 1200 ? '…' : '');
-  return `<p>The script for <b>${who}</b> is ready for review.</p>
-    ${roundLine}
-    <pre style="white-space:pre-wrap;background:#f5f5f5;padding:1rem;border-radius:6px;font-size:.9rem">${preview || '(empty)'}</pre>
-    <p><a href="${esc(reviewUrl)}" style="background:#0a7d32;color:#fff;padding:.6rem 1rem;border-radius:6px;text-decoration:none;display:inline-block">Approve script, or request a change</a></p>`;
-}
 
 /**
  * The hosted review page shown at /review/:token. Script: the script text.

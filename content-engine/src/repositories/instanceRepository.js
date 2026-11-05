@@ -79,6 +79,25 @@ export async function logRows({ tenantId = 'default', limit = 200 }) {
   return rows;
 }
 
+/**
+ * The rows for the daily email: what waits on you or is scheduled, what is being
+ * made (a lost run stops showing after 3 days), and whatever else moved today.
+ */
+export async function digestRows({ tenantId = 'default', statuses = ['script_review', 'transcript_review', 'final_review', 'image_review', 'video_review', 'review', 'manual', 'scheduled'], limit = 100 }) {
+  const { rows } = await query(
+    `SELECT id, title, funnel_id, funnel_name, status, post_status, note, scheduled_for, posted_at, updated_at, steps
+       FROM instances
+      WHERE tenant_id = $1 AND status NOT IN ('superseded', 'draft')
+        AND (status = ANY($2::text[])
+          OR (status = 'running' AND updated_at > now() - interval '3 days')
+          OR updated_at > now() - interval '24 hours'
+          OR posted_at > now() - interval '24 hours')
+      ORDER BY funnel_name, COALESCE(posted_at, scheduled_for, created_at) DESC LIMIT $3`,
+    [tenantId, statuses, limit],
+  );
+  return rows;
+}
+
 /** Replace the steps JSONB and the denormalized cost total. No-op if locked. */
 export async function saveSteps(id, steps, costUsd) {
   const { rowCount } = await query(

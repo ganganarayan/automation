@@ -40,6 +40,7 @@ import { createGoogleDriveProvider } from '../providers/storageProvider.js';
 import { createPublicDriveProvider, publicDlUrl } from '../providers/publicDriveProvider.js';
 import * as captureRules from './captureRules.js';
 import * as firstComment from './firstCommentService.js';
+import * as digest from './digestService.js';
 import * as firstCommentsRepo from '../repositories/firstCommentsRepository.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
@@ -55,9 +56,8 @@ import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, clean
 import { writeFile } from 'node:fs/promises';
 import * as driveConnect from './driveConnectService.js';
 import { signTicket, peekTicket, readTicket, dispatchRequest, normalizeRunner, keepSecFor, DEFAULT_REPO } from '../utils/cleanHookSpec.js';
-import { TRANSCRIPT_REVIEW, postOutcome, mergeChannels, channelOutcome, channelText, nextAutoRetry, requestFromPost, AUTO_RETRY_MINUTES, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
+import { TRANSCRIPT_REVIEW, postOutcome, mergeChannels, channelOutcome, channelText, nextAutoRetry, requestFromPost, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
 import { formatIst } from '../utils/time.js';
-import { driveEmbedUrl } from '../utils/reviewSpec.js';
 import {
   filterReadyVideos,
   defaultCaption,
@@ -1285,7 +1285,6 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
     }
   }
 
-  await sendPostedEmail({ providers, funnel, resolved, results });
   return { funnel: funnel.name, posted: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
 }
 
@@ -1475,9 +1474,6 @@ export async function refreshScheduled({ tenantId = 'default' } = {}) {
           await Promise.resolve(fn(row, { outcome, refs, channels })).catch((err) => log.warn({ err: err.message, instance: row.id }, 'post-live hook failed'));
         }
       }
-      if (outcome === 'posted' || !retry.attempts || !nextAt) {
-        await sendOutcomeEmail({ providers, row, steps, channels, outcome, postedAt: when, nextAt }).catch((err) => log.warn({ err: err.message }, 'post outcome email failed'));
-      }
       changed += 1;
     } catch (err) {
       log.warn({ err: err.message, instance: row.id }, 'scheduled post check failed (will retry)');
@@ -1489,7 +1485,7 @@ export async function refreshScheduled({ tenantId = 'default' } = {}) {
 /**
  * refreshScheduled for every tenant (the Post for Me webhook, the wake-up
  * crons, boot). One run at a time: a channel's webhook arriving mid-run asks
- * for one more pass instead of a parallel one, so no go-live email goes twice.
+ * for one more pass instead of a parallel one, so no channel is marked twice.
  */
 let refreshing = null;
 let refreshAgain = false;
@@ -1548,6 +1544,7 @@ async function refreshAllTenantsOnce() {
     n += await autoRetryDue({ tenantId: t.id }).catch(() => 0);
     await fillMissingLinks({ tenantId: t.id }).catch((err) => log.warn({ err: err.message }, 'post link fill failed'));
     await firstComment.runDue({ tenantId: t.id }).catch((err) => log.warn({ err: err.message }, 'first comment run failed'));
+    await digest.runDue({ tenantId: t.id }).catch((err) => log.warn({ err: err.message }, 'daily email failed (the next check tries again)'));
   }
   return n;
 }
@@ -1617,32 +1614,6 @@ export async function autoRetryDue({ tenantId = 'default' } = {}) {
   return n;
 }
 
-/** The go-live email: what went out and, per channel, ✅ or ❌ with the error. */
-async function sendOutcomeEmail({ providers, row, steps, channels, outcome, postedAt, nextAt = null }) {
-  const funnel = row.funnel_id ? await funnels.get(row.funnel_id) : null;
-  const resolved = funnel ? await funnels.resolve(funnel) : {};
-  const to = resolved.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
-  if (!to) return;
-  const art = (k) => ((steps.find((x) => x.key === k) || {}).artifacts) || {};
-  const copy = art('script').copy || {};
-  const req = art('publish').request || {};
-  const head = { posted: '🟢 Posted', partial: '🟡 Partly posted', failed: '🔴 Post failed' }[outcome];
-  const base = settings.app.publicBaseUrl || '';
-  const link = `${base}/api/v1/admin/instances/${row.id}`;
-  const rows = channels.map((c) => `<tr><td>${c.state === 'ok' ? '✅' : '❌'}</td><td>${esc(c.platform)}</td><td>${esc(c.name)}</td><td>${c.url ? `<a href="${esc(c.url)}">open</a>` : esc(c.error || '')}</td></tr>`).join('');
-  const kind = row.source_type === 'sheet' ? 'image' : 'video';
-  const html = `<p><b>${head}</b> · ${esc(row.funnel_name || '')} · ${kind}</p>
-    <p><b>${esc(copy.title || row.title || '')}</b></p>
-    <p>Scheduled: ${esc(row.scheduled_for ? formatIst(row.scheduled_for) : '(posted now)')}<br>Posted: ${esc(formatIst(postedAt))}</p>
-    <table border="1" cellpadding="6" style="border-collapse:collapse"><thead><tr><th></th><th>Platform</th><th>Account</th><th>Post / error</th></tr></thead><tbody>${rows}</tbody></table>
-    ${outcome === 'posted' ? '' : nextAt
-    ? `<p><b>Reconnect the ❌ accounts in Post for Me. That is all.</b> The app re-posts to just those channels by itself (next try ${esc(formatIst(nextAt))} IST, up to ${AUTO_RETRY_MINUTES.length} tries over about 2 days). The ✅ ones are not posted again.</p>`
-    : '<p>Reconnect the ❌ accounts in Post for Me, then open the instance and press <b>↻ Post to the failed channels only</b>.</p>'}
-    <p>${req.mediaUrl ? `<a href="${esc(req.mediaUrl)}">${kind === 'image' ? '🖼 The image' : '▶ The video'}</a> · ` : ''}<a href="${esc(link)}">Open the instance</a></p>
-    <pre style="white-space:pre-wrap;font:inherit">${esc(copy.description || req.caption || '')}</pre>`;
-  await providers.mail.send({ to, subject: `${head}: ${copy.title || row.title || kind}`, html });
-}
-
 /**
  * ✏ Edit a scheduled post: delete it on Post for Me first (so nothing goes out
  * while you correct it), then the instance is a draft again. Schedule or Post
@@ -1666,35 +1637,6 @@ export async function unscheduleInstance({ instanceId }) {
   await instanceRepo.unschedule(row.id);
   log.info({ instance: row.id, deleted: refs.length }, 'scheduled post paused for editing');
   return { instanceId: row.id };
-}
-
-async function sendPostedEmail({ providers, funnel, resolved, results }) {
-  const to = resolved.approvalEmail || providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
-  const ok = results.filter((r) => r.ok);
-  if (!to || !ok.length) return;
-  const rows = ok
-    .map(
-      (r) => `<tr>
-        <td><a href="${esc(driveEmbedUrl(r.driveId))}" target="_blank" rel="noopener">▶ ${esc(r.name || 'video')}</a></td>
-        <td>${esc(r.scheduledIso ? formatIst(r.scheduledIso) : 'Now (immediate)')}</td>
-        <td><pre style="white-space:pre-wrap;margin:0;font:inherit">${esc(r.caption)}</pre></td>
-      </tr>`,
-    )
-    .join('');
-  const html = `<p><b>${esc(String(ok.length))}</b> ready video(s) scheduled for <b>${esc(funnel.name)}</b> via Post for Me.</p>
-    <table border="1" cellpadding="6" style="border-collapse:collapse">
-      <thead><tr><th>Video</th><th>Scheduled (IST)</th><th>Caption</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-  try {
-    await providers.mail.send({ to, subject: `📅 Scheduled ${ok.length} ready video(s) · ${funnel.name} (a second email comes when each goes live)`, html });
-  } catch (err) {
-    log.warn({ err: err.message }, 'posted-summary email failed');
-  }
-}
-
-function esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // ---- daily router Lane 1 helpers -------------------------------------------
