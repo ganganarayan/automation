@@ -93,6 +93,11 @@ export async function bindNativePost({ ruleId, platformPostId, accountId = null 
   );
 }
 
+/** The post was replaced on Post for Me: its rules follow it. */
+export async function moveToPost(fromId, toId) {
+  await query('UPDATE keyword_rules SET postforme_post_id = $2, updated_at = now() WHERE postforme_post_id = $1', [fromId, toId]);
+}
+
 /** All rules for the admin list, newest first. */
 export async function listByTenant({ tenantId = 'default', limit = 200 } = {}) {
   const { rows } = await query(
@@ -112,4 +117,4 @@ export async function setActive(id, active) {
   await query('UPDATE keyword_rules SET active = $2, updated_at = now() WHERE id = $1', [id, !!active]);
 }
 
-export default { upsert, activeForPost, activeUnlinkedForPlatform, bindNativePost, listByTenant, get, setActive };
+export default { moveToPost, upsert, activeForPost, activeUnlinkedForPlatform, bindNativePost, listByTenant, get, setActive };

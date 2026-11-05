@@ -11,6 +11,7 @@
  * Dependencies: luxon.
  */
 import { DateTime } from 'luxon';
+import { normalizeScheduleClean } from './cleanSpec.js';
 
 const ZONE = 'Asia/Kolkata';
 
@@ -167,6 +168,8 @@ export function normalizeSelections(selections) {
       now: !!(s && s.now), // post immediately (ignore the schedule)
       // This post's CTA link; blank = the funnel's.
       ctaLink: /^https?:\/\/\S+$/.test(String((s && s.ctaLink) || '').trim()) ? String(s.ctaLink).trim() : '',
+      // The Clean panel's numbers: Schedule applies them when the video is not cleaned yet.
+      ...(normalizeScheduleClean(s && s.cleanOpts) ? { cleanOpts: normalizeScheduleClean(s.cleanOpts) } : {}),
       // AI-copy lane: the per-video, per-platform copy and what generating it cost.
       copy: s && s.copy && typeof s.copy === 'object' ? s.copy : null,
       costs: (Array.isArray(s && s.costs) ? s.costs : [])

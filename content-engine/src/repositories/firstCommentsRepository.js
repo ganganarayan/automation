@@ -70,4 +70,9 @@ export async function finish(id, { status, attempts, nextAt = null, lastError = 
   );
 }
 
-export default { enqueue, due, getByPost, claim, mark, release, finish };
+/** The post was replaced on Post for Me: its comment job follows it. */
+export async function moveToPost(fromId, toId) {
+  await query('UPDATE first_comments SET postforme_post_id = $2, updated_at = now() WHERE postforme_post_id = $1', [fromId, toId]);
+}
+
+export default { moveToPost, enqueue, due, getByPost, claim, mark, release, finish };

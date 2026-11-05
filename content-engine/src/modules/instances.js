@@ -253,6 +253,25 @@ export function register(ctx) {
     }
   });
 
+  // ✂ Fix scheduled videos: clean the ones still posting their original, keep their times.
+  router.post('/admin/instances/fix-scheduled', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      res.json({ ok: true, ...(await readyPost.startFixScheduled({ tenantId: req.tenantId, options: req.body || {} })) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  router.post('/admin/instances/fix-scheduled/status', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      res.json({ ok: true, ...readyPost.fixStatus({ tenantId: req.tenantId }) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   // ✂ Clean: zoom out a corner watermark + cut the outro, in the background.
   router.post('/admin/instances/ready-ai/clean', async (req, res) => {
     try {
@@ -695,8 +714,10 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
         ${libraryTabs('all')}
         <a class="act primary" href="/api/v1/admin/instances/new">+ New</a>
         <button class="act" onclick="sample()">+ Sample</button>
+        <button class="act" id="fixbtn" onclick="fixScheduled()">✂ Fix scheduled videos</button>
       </div>
     </div>
+    <div class="hint" id="fixmsg"></div>
     <div class="libchips">${labelChips}${spentChip}</div>
     ${funnelChips ? `<div class="libchips">${funnelChips}</div>` : ''}
     ${status ? `<p class="hint">Showing raw status “${esc(STATUS_LABEL[status] || status)}” (old link). <a href="/api/v1/admin/instances">Show all</a></p>` : ''}
@@ -719,6 +740,26 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
       try{ const r=await fetch('/api/v1/admin/instances/'+id+'/approve',{method:'POST'}); const j=await r.json(); if(j.ok){ b.textContent='🟢 Approved'; setTimeout(()=>location.reload(), 900); } else { b.disabled=false; b.textContent=t; alert(j.error||'failed'); } }
       catch(e){ b.disabled=false; b.textContent=t; alert(e.message); }
     }
+    async function fixPost(path, body){ const r=await fetch('/api/v1/admin/instances/fix-scheduled'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); return r.json(); }
+    function fixShow(j){
+      const m=document.getElementById('fixmsg');
+      const line=x=>(x.outcome==='fixed'?'🟢 '+x.title+': replaced, zoom '+x.zoomPct+'%, cut last '+x.trimEndSec+' s, same time':x.outcome==='already'?'⚪ '+x.title+': already uses a cleaned copy (zoom '+x.zoomPct+'%, cut last '+x.trimEndSec+' s)':'🔴 '+x.title+': '+x.error);
+      const head=j.state==='running'?'✂ Fixing '+(j.done+1)+' of '+j.total+'… you can leave this page':j.state==='failed'?'🔴 Stopped: '+(j.error||'unknown'):j.total?'Finished '+j.total+' scheduled video(s)':'No scheduled ready videos to fix';
+      m.innerHTML=[head].concat((j.results||[]).map(line)).map(s=>String(s).replace(/</g,'&lt;')).join('<br>');
+    }
+    async function fixPoll(){ try{ const j=await fixPost('/status'); if(j.ok && j.state!=='none') fixShow(j); if(j.ok && j.state==='running') setTimeout(fixPoll, 5000); else document.getElementById('fixbtn').disabled=false; }catch(e){ setTimeout(fixPoll, 8000); } }
+    async function fixScheduled(){
+      let o={}; try{ o=JSON.parse(localStorage.getItem('cleanOpts')||'{}'); }catch(e){}
+      const z=prompt('Zoom % for scheduled videos still posting their original:', o.zoomPct===undefined?8:o.zoomPct); if(z===null) return;
+      const t=prompt('Seconds to cut from the end:', o.trimEndSec===undefined?4:o.trimEndSec); if(t===null) return;
+      if(!confirm('Each scheduled video still posting its original is cleaned (zoom '+z+'%, cut last '+t+' s), then its post is replaced at the same time. Videos already cleaned are left alone. Continue?')) return;
+      const end=String(o.endText||'').trim()?{ endText:o.endText, endLink:o.endLink||'', endSec:o.endSec||0 }:{};
+      document.getElementById('fixbtn').disabled=true;
+      const j=await fixPost('', Object.assign({ zoomPct:Number(z)||0, trimEndSec:Number(t)||0, subs:o.subs!==false, runner:o.runner||'' }, end));
+      if(!j.ok){ document.getElementById('fixbtn').disabled=false; alert(j.error||'failed'); return; }
+      fixShow(j); fixPoll();
+    }
+    fixPoll();
     async function del(id){ if(!confirm('Delete this instance? Its cost stays in the deleted log.')) return; const r=await fetch('/api/v1/admin/instances/'+id+'/delete',{method:'POST'}); const j=await r.json(); if(j.ok) location.reload(); else alert(j.error||'failed'); }
     ${LIVE_STEPS_SCRIPT}
   `, 'instances');
@@ -1038,7 +1079,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
               </div>
             </div>
             <div class="pbar" id="pb-${id}"><i></i></div>
-            <div class="hint" id="cs-${id}">Zooms in keeping the top fixed so the bottom-right watermark leaves the frame, and cuts the outro. The end card plays after the video. Posting then uses the cleaned video.</div>
+            <div class="hint" id="cs-${id}">Zooms in keeping the top fixed so the bottom-right watermark leaves the frame, and cuts the outro. The end card plays after the video. 📅 Schedule applies these numbers if you have not pressed ✂ Clean; set zoom and cut to 0, clear the end card and untick subtitles to post the original. The tile above always plays the Drive original: check the cut with ▶ Preview cleaned video.</div>
           </div>
           <div class="panel"><h4>2 · Transcript <span class="hint">check the names, then approve</span></h4>
             <label class="fl">Comparison video: the copy and thumbnail come from the facts in Settings, with no AI picture<select id="cp-${id}" onchange="setComp('${id}')"><option value="">Auto-detect</option><option value="off">Off: normal video</option>${comparison.names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></label>
@@ -1374,6 +1415,13 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         else $('cs',id).textContent='⚠ Clean failed: '+(j.error||j.state||'unknown');
       }catch(e){ setTimeout(()=>pollClean(id), 8000); }
     }
+    // What Schedule applies when this video has no clean yet; null = post the original.
+    function cleanOptsOf(id){
+      const zoomPct=Number($('zm',id).value)||0, trimEndSec=Number($('tr',id).value)||0, subs=!!($('sb',id) && $('sb',id).checked);
+      const endText=$('ec',id).value, endLink=$('el',id).value.trim(), endSec=(endText.trim()||endLink)?(Number($('es',id).value)||0):0;
+      if(!zoomPct && !trimEndSec && !endSec && !subs) return null;
+      return { zoomPct, trimEndSec, endText, endLink, endSec, subs, runner:$('rn',id) ? $('rn',id).value : '' };
+    }
     async function cleanVid(id){
       if(cleaning[id]) return;
       const zoomPct=Number($('zm',id).value)||0, trimEndSec=Number($('tr',id).value)||0;
@@ -1444,7 +1492,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       const late=order.filter(id=>!(allNow||$('now',id).checked) && (!$('sch',id).value || $('sch',id).value < istNow()));
       if(late.length){ msg('Pick a future date and time for '+late.map(id=>$('ord',id).textContent||'this video').join(', ')+' (or choose ⚡ Post now).'); return; }
       const selections = order.map(id=>({ driveId:id, name:$('nm',id).value, caption:'', scheduledAt:toIst($('sch',id).value), now:allNow||$('now',id).checked,
-        copy:{ title:$('ti',id).value, description:$('de',id).value, igCaption:$('ig',id).value, short:$('sh',id).value }, ctaLink:$('ct',id).value.trim(), costs:costs[id]||[], thumbs:thumbs[id]||{} }));
+        copy:{ title:$('ti',id).value, description:$('de',id).value, igCaption:$('ig',id).value, short:$('sh',id).value }, ctaLink:$('ct',id).value.trim(), costs:costs[id]||[], thumbs:thumbs[id]||{}, cleanOpts:cleanOptsOf(id) }));
       const nowCount=selections.filter(s=>s.now).length;
       if(nowCount && !confirm(nowCount+' video(s) will go live on every channel right now. Continue?')) return;
       msg((nowCount===selections.length?'Posting now ':'Scheduling ')+selections.length+'…');

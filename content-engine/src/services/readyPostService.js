@@ -52,7 +52,7 @@ import sharp from 'sharp';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, progressPct, transcriptSrt, clipSrt, parseSrt, captionSampleTimes, captionsVerdict, routerCleanOpts, autoCheckTimes, autoCleanFromFrames } from '../utils/cleanSpec.js';
+import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, progressPct, transcriptSrt, clipSrt, parseSrt, captionSampleTimes, captionsVerdict, routerCleanOpts, autoCheckTimes, autoCleanFromFrames, normalizeScheduleClean, cleanFixPlan, swapMediaUrl } from '../utils/cleanSpec.js';
 import { writeFile } from 'node:fs/promises';
 import * as driveConnect from './driveConnectService.js';
 import { signTicket, peekTicket, readTicket, dispatchRequest, normalizeRunner, keepSecFor, DEFAULT_REPO } from '../utils/cleanHookSpec.js';
@@ -237,7 +237,7 @@ function sourceOf(source) {
  */
 async function ensureInstance({ funnel, driveId, name = '', title = 'Ready video', source = null }) {
   const src = sourceOf(source);
-  const existing = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [driveId]))[driveId];
+  const existing = await workingRow(funnel, driveId);
   if (existing) {
     if (!existing.source_type || !existing.source_ref || (!existing.source_id && src.id)) {
       await instanceRepo.setSource(existing.id, {
@@ -659,6 +659,17 @@ function videoArt(steps, driveId, durationSec = 0) {
   return { ...prev, driveId, ...(durationSec ? { durationSec } : {}) };
 }
 
+// Scheduled videos being re-cleaned, Drive id -> instance id: their clean, subtitles
+// and cost belong on that scheduled instance, not on a new draft.
+const repairing = new Map();
+
+/** The instance a video's clean and transcript live on: the one being repaired, else its draft. */
+async function workingRow(funnel, driveId) {
+  const id = String(driveId);
+  if (repairing.has(id)) return instanceRepo.get(repairing.get(id));
+  return (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [id]))[id];
+}
+
 // ✂ Clean jobs by Drive id: { state: running | done | failed, phase, pct, clean?, error? }
 //, phase: starting → encoding (download + encode, with pct) → uploading.
 // In memory only: a restart loses a running job (just press Clean again);
@@ -757,7 +768,7 @@ async function recordCost(funnel, driveId, step, cost, { name = '', source = nul
 
 /** The video's timed subtitles from its transcript step (pasted SRT or Whisper cues); '' when none. */
 async function videoSrt(funnel, driveId) {
-  const draft = (await instanceRepo.draftsByDriveIds(funnel.id, funnel.tenant_id, [String(driveId)]).catch(() => ({})))[String(driveId)];
+  const draft = await workingRow(funnel, driveId).catch(() => null);
   const steps = draft ? instanceService.parseSteps(draft) : [];
   return transcriptSrt(((steps.find((x) => x.key === 'transcript') || {}).artifacts) || {});
 }
@@ -1058,6 +1069,113 @@ export async function cleanForRouter({ funnelId, driveId, name = '' }) {
     log.warn({ err: err.message, driveId: id }, 'router clean failed (original video used)');
     return { clean: null, note: [`clean failed, using the original video: ${String(err.message).slice(0, 200)}`, note].filter(Boolean).join('; ') };
   }
+}
+
+/** ✂ Clean one video and wait for it, wherever it runs. Throws when it fails. */
+async function cleanAndWait({ funnelId, driveId, name = '', source = null, opts }) {
+  const id = String(driveId);
+  await startClean({ funnelId, driveId: id, ...opts, name, source, baseUrl: settings.app.publicBaseUrl });
+  const until = Date.now() + ROUTER_CLEAN_WAIT_MS;
+  for (;;) {
+    const j = cleanJobs.get(id) || { state: 'none' };
+    if (j.state === 'done' && j.clean) return j.clean;
+    if (j.state === 'failed') throw new Error(j.error || 'the clean failed');
+    if (j.state !== 'running') throw new Error('the clean stopped without a result');
+    if (Date.now() > until) throw new Error('the clean is still running after 25 min');
+    await sleep(5000);
+  }
+}
+
+const FIX_MARGIN_MS = 5 * 60 * 1000;
+const fixJobs = new Map();
+
+/** One scheduled video: clean it, then swap the post at the same time. Returns { outcome, title, error? }. */
+async function fixOne(row, opts) {
+  const title = row.title || row.id;
+  const steps = instanceService.parseSteps(row);
+  const stepArt = (k) => (steps.find((x) => x.key === k) || {}).artifacts || {};
+  const pub = stepArt('publish');
+  const video = stepArt('stitch').video || {};
+  const driveId = row.source_ref || video.driveId;
+  const refs = (Array.isArray(row.post_refs) ? row.post_refs : JSON.parse(row.post_refs || '[]')).filter(Boolean);
+  const accountIds = (pub.channels || []).map((c) => c.id).filter(Boolean);
+  if (!driveId || refs.length !== 1 || !accountIds.length) return { outcome: 'failed', title, error: 'not one plain scheduled post: use ✏ Edit, then Schedule' };
+  const at = new Date(row.scheduled_for);
+  if (at.getTime() - Date.now() < FIX_MARGIN_MS) return { outcome: 'failed', title, error: 'it goes out in under 5 minutes, left as it is' };
+
+  const providers = await buildProviders(row.tenant_id);
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+  const req = pub.request && pub.request.mediaUrl ? pub.request : requestFromPost(await publish.getPost(refs[0]).catch(() => null));
+  if (!req || !req.mediaUrl) return { outcome: 'failed', title, error: 'could not read the post from Post for Me' };
+  const plan = cleanFixPlan({ mediaUrl: req.mediaUrl, clean: video.clean, opts });
+  if (plan === 'already') return { outcome: 'already', title, zoomPct: video.clean.zoomPct, trimEndSec: video.clean.trimEndSec };
+
+  // The cleaned copy comes first: until it exists the scheduled post is untouched.
+  let clean = video.clean;
+  if (plan === 'clean') {
+    repairing.set(String(driveId), row.id);
+    try {
+      clean = await cleanAndWait({ funnelId: row.funnel_id, driveId, name: video.name || row.title || '', opts });
+    } finally {
+      repairing.delete(String(driveId));
+    }
+  }
+
+  const now = await instanceRepo.get(row.id);
+  const nowRefs = now ? (Array.isArray(now.post_refs) ? now.post_refs : JSON.parse(now.post_refs || '[]')) : [];
+  if (!now || now.status !== 'scheduled' || nowRefs[0] !== refs[0]) return { outcome: 'failed', title, error: 'it changed while cleaning, left as it is' };
+  if (at.getTime() - Date.now() < 2 * 60 * 1000) return { outcome: 'failed', title, error: 'its time came while cleaning, the original went out' };
+  const old = await publish.getPost(refs[0]).catch(() => null);
+  if (old && ['processing', 'processed'].includes(old.status)) return { outcome: 'failed', title, error: 'Post for Me is already publishing it' };
+
+  // The new post first, then the old one goes: never none, never two.
+  const request = swapMediaUrl(req, req.mediaUrl, clean.url);
+  const made = await publish.createPost({ accountIds, scheduledAt: at.toISOString(), caption: request.caption, mediaUrl: request.mediaUrl, platformConfigurations: request.platformConfigurations });
+  const ref = made && made.id;
+  if (!ref) throw new Error('Post for Me did not return a post id');
+  try {
+    await publish.deletePost(refs[0]);
+  } catch (err) {
+    await publish.deletePost(ref).catch((e) => log.error({ err: e.message, instance: row.id, ref }, 'replacement post could not be removed'));
+    throw new Error(`could not replace the old post, it stays as it was: ${err.message}`);
+  }
+  const latest = patchStep(instanceService.parseSteps(now), 'publish', { artifacts: { posts: [ref], request } });
+  await instanceRepo.saveSteps(row.id, latest, sumInstanceCost(latest));
+  await instanceRepo.markScheduled(row.id, { postRefs: [ref], scheduledFor: at });
+  await firstCommentsRepo.moveToPost(refs[0], ref).catch((err) => log.warn({ err: err.message, instance: row.id }, 'first comment job not moved'));
+  await captureRules.movePost(refs[0], ref).catch((err) => log.warn({ err: err.message, instance: row.id }, 'comment-to-DM rule not moved'));
+  log.info({ instance: row.id, from: refs[0], to: ref }, 'scheduled post now uses the cleaned video');
+  return { outcome: 'fixed', title, zoomPct: clean.zoomPct, trimEndSec: clean.trimEndSec, durationSec: clean.durationSec };
+}
+
+/**
+ * ✂ Fix scheduled videos: every scheduled ready video still posting its original
+ * gets these numbers and a replacement post at the same time. One at a time, in
+ * the background; the Library polls fixStatus.
+ */
+export async function startFixScheduled({ tenantId = 'default', options }) {
+  const running = fixJobs.get(tenantId);
+  if (running && running.state === 'running') return running;
+  const opts = normalizeScheduleClean(options);
+  if (!opts) throw new Error('give a zoom or a cut first');
+  const rows = await instanceRepo.scheduledReadyVideos(tenantId);
+  const job = { state: 'running', total: rows.length, done: 0, results: [] };
+  fixJobs.set(tenantId, job);
+  heartbeat.during('clean', async () => {
+    for (const row of rows) {
+      const out = await fixOne(row, opts).catch((err) => {
+        log.error({ err: err.message, instance: row.id }, 'scheduled video fix failed');
+        return { outcome: 'failed', title: row.title || row.id, error: err.message };
+      });
+      job.results.push(out);
+      job.done += 1;
+    }
+  }).then(() => { job.state = 'done'; }).catch((err) => { job.state = 'failed'; job.error = err.message; });
+  return job;
+}
+
+export function fixStatus({ tenantId = 'default' } = {}) {
+  return fixJobs.get(tenantId) || { state: 'none' };
 }
 
 /** Where a clean job stands (running / done / failed), else the saved cleaned video. */
@@ -1373,7 +1491,23 @@ export async function startPost({ tenantId = 'default', funnelId, selections, ac
     await stepLog.fail(item.instanceId, 'publish');
     await instanceRepo.markPostFailed(item.instanceId, why).catch((err) => log.warn({ err: err.message, instance: item.instanceId }, 'could not save the post failure'));
   };
-  heartbeat.during('post', () => postSelections({ tenantId, funnelId, selections: clean, accessToken, accounts: pickedAccounts }))
+  // The Clean panel's numbers apply here when ✂ Clean was not pressed. A failed clean posts nothing.
+  const cleanThenPost = async () => {
+    const ready = [];
+    const refused = [];
+    for (const sel of clean) {
+      try {
+        const saved = sel.cleanOpts ? (await loadDrafts(funnel, [sel.driveId]))[sel.driveId] : null;
+        if (sel.cleanOpts && !(saved && saved.clean)) await cleanAndWait({ funnelId, driveId: sel.driveId, name: sel.name, opts: sel.cleanOpts });
+        ready.push(sel);
+      } catch (err) {
+        refused.push({ driveId: sel.driveId, name: sel.name, ok: false, error: `✂ Clean failed, nothing posted: ${err.message}` });
+      }
+    }
+    const out = ready.length ? await postSelections({ tenantId, funnelId, selections: ready, accessToken, accounts: pickedAccounts }) : { results: [] };
+    return { ...out, results: [...(out.results || []), ...refused] };
+  };
+  heartbeat.during('post', cleanThenPost)
     .then(async (out) => {
       for (const item of items) {
         const r = (out.results || []).find((x) => x.driveId === item.driveId);
@@ -1680,5 +1814,5 @@ export async function approveTranscriptAuto({ funnelId, driveId, name = '' }) {
 }
 
 export default {
-  setComparison, savedTranscript, silentDriveIds, onPosted, startPost, postStatus, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, startTranscribe, transcribeStatus, saveTranscript, generateCopy, generateThumbnail, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, cleanForRouter, postSelections, folderFiles, approveTranscriptAuto,
+  setComparison, savedTranscript, silentDriveIds, onPosted, startPost, postStatus, refreshScheduled, refreshAllTenants, retryFailed, autoRetryDue, unscheduleInstance, listReadyVideos, instanceView, removeSource, videoDurations, transcribeVideo, startTranscribe, transcribeStatus, saveTranscript, generateCopy, generateThumbnail, saveDraftEdit, startClean, cleanStatus, cleanHookJob, cleanHookToken, cleanHookCard, cleanHookProgress, cleanHookDone, cleanHookFail, cleanForRouter, startFixScheduled, fixStatus, postSelections, folderFiles, approveTranscriptAuto,
 };

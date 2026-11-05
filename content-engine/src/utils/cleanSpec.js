@@ -333,4 +333,36 @@ export function autoCleanFromFrames({ frames, tail = [], totalSec = 0, fallback 
   return { ...normalizeCleanOpts({ zoomPct, trimEndSec }), watermark: marked.length > 0, outro: k < tailFr.length };
 }
 
-export default { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, subtitlesFilter, parseSrt, splitLongCues, transcriptSrt, clipSrt, captionSampleTimes, captionsVerdict, progressSeconds, progressPct, routerCleanOpts, autoCheckTimes, autoCleanFromFrames };
+/**
+ * What the Clean panel asks for, ready for ✂ Clean: null when it asks for
+ * nothing (no zoom, no cut, no end card, no subtitles), so the original is posted.
+ */
+export function normalizeScheduleClean(o) {
+  if (!o || typeof o !== 'object') return null;
+  const opts = {
+    ...normalizeCleanOpts({ zoomPct: Number(o.zoomPct) || 0, trimEndSec: Number(o.trimEndSec) || 0 }),
+    ...normalizeEndCard(o),
+    subs: o.subs === true,
+    runner: String(o.runner || ''),
+  };
+  return opts.zoomPct || opts.trimEndSec || opts.endSec || opts.subs ? opts : null;
+}
+
+/**
+ * A scheduled post against the numbers asked for: 'already' (it posts a cleaned
+ * copy), 'reuse' (a copy with these numbers exists but the post uses the
+ * original), else 'clean'.
+ */
+export function cleanFixPlan({ mediaUrl = '', clean = null, opts = {} }) {
+  if (clean && clean.url && clean.url === mediaUrl) return 'already';
+  if (clean && clean.url && Number(clean.zoomPct) === Number(opts.zoomPct) && Number(clean.trimEndSec) === Number(opts.trimEndSec)) return 'reuse';
+  return 'clean';
+}
+
+/** The saved post request with its video swapped, in the top level and every platform's media. */
+export function swapMediaUrl(request, from, to) {
+  const quoted = (s) => JSON.stringify(String(s)).slice(1, -1);
+  return JSON.parse(JSON.stringify(request).split(quoted(from)).join(quoted(to)));
+}
+
+export default { normalizeScheduleClean, cleanFixPlan, swapMediaUrl, normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, subtitlesFilter, parseSrt, splitLongCues, transcriptSrt, clipSrt, captionSampleTimes, captionsVerdict, progressSeconds, progressPct, routerCleanOpts, autoCheckTimes, autoCleanFromFrames };

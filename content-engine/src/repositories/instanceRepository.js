@@ -235,6 +235,18 @@ export async function scheduledDue(tenantId = 'default', limit = 25) {
   return rows;
 }
 
+/** Ready videos still waiting on Post for Me, soonest first (✂ Fix scheduled videos). */
+export async function scheduledReadyVideos(tenantId = 'default', limit = 100) {
+  const { rows } = await query(
+    `SELECT * FROM instances
+      WHERE tenant_id = $1 AND status = 'scheduled' AND locked = false
+        AND source_type IN ('drive_folder', 'drive_pick') AND scheduled_for > now()
+      ORDER BY scheduled_for LIMIT $2`,
+    [tenantId, limit],
+  );
+  return rows;
+}
+
 /** Partly posted / failed instances whose next automatic retry is due. */
 export async function retryDue(tenantId = 'default', limit = 10) {
   const { rows } = await query(

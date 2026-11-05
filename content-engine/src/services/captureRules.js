@@ -69,4 +69,10 @@ export async function createForPublish({
   return made;
 }
 
-export default { dmPlatforms, createForPublish };
+/** A post replaced on Post for Me keeps its rules. */
+export async function movePost(fromId, toId, deps = {}) {
+  const rules = deps.rules || (await defaultRules());
+  await rules.moveToPost(fromId, toId);
+}
+
+export default { dmPlatforms, createForPublish, movePost };
