@@ -202,7 +202,7 @@ export const WIZARD_STEPS = [
       // Comment-to-DM for this funnel's Instagram/Facebook posts (optional).
       { key: 'capture_keyword', label: 'Auto-DM keyword on comments (blank = off)', placeholder: 'e.g. guide' },
       { key: 'capture_dm_text', label: 'Auto-DM message', type: 'textarea' },
-      { key: 'capture_dm_link', label: 'Auto-DM link' },
+      { key: 'capture_dm_link', label: 'Auto-DM link (blank = the CTA link)' },
       { key: 'capture_public_replies', label: 'Public reply variants (one per line)', type: 'textarea' },
       {
         key: 'capture_require_follow', label: 'Require them to follow before sending the link', type: 'select', default: 'off',

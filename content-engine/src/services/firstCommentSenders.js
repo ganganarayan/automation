@@ -16,6 +16,7 @@
  *   youtube:   POST youtube/v3/commentThreads?part=snippet
  *   x:         POST api.x.com/2/tweets { text, reply.in_reply_to_tweet_id }
  * Anything else (TikTok, Pinterest, …) has no comment API: skipped.
+ * Instagram is not commented on: its link goes by comment-to-DM (see dmOnly).
  */
 const FB_VERSION = 'v21.0';
 
@@ -32,6 +33,11 @@ export function commentPlatform(platform = '') {
   const p = String(platform || '').toLowerCase();
   if (p === 'twitter' || p === 'x') return 'x';
   return COMMENT_PLATFORMS.find((k) => p.includes(k)) || '';
+}
+
+/** Channels whose link goes by comment-to-DM, not a first comment. */
+export function dmOnly(platform = '') {
+  return commentPlatform(platform) === 'instagram';
 }
 
 function errorText(res) {
@@ -157,4 +163,4 @@ export function createFirstCommentSenders({ request: req = realRequest, log } = 
   };
 }
 
-export default { createFirstCommentSenders, commentPlatform, linkedinUrn, linkedinActors, COMMENT_PLATFORMS };
+export default { createFirstCommentSenders, commentPlatform, dmOnly, linkedinUrn, linkedinActors, COMMENT_PLATFORMS };

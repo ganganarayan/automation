@@ -1260,7 +1260,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
           tenantId: funnel.tenant_id, funnelId: funnel.id, lane: funnel.name,
           platforms: captureRules.dmPlatforms(accounts, accountMap),
           postformePostId: ref,
-          keyword: resolved.captureKeyword, dmText: resolved.captureDmText, dmLink: resolved.captureDmLink,
+          keyword: resolved.captureKeyword, dmText: resolved.captureDmText, dmLink: sel.ctaLink || resolved.captureDmLink || resolved.ctaLink,
           publicReplyVariants: resolved.capturePublicReplies,
           requireFollow: resolved.captureRequireFollow, followupText: resolved.captureFollowupText,
           notFollowingText: resolved.captureNotFollowingText, log,

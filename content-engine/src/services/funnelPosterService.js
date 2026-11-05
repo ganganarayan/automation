@@ -194,7 +194,7 @@ export async function armPostExtras({ f, p, ref, accounts, log }) {
       postformePostId: ref,
       keyword,
       dmText: p.dmText || f.captureDmText,
-      dmLink: p.dmLink || f.captureDmLink,
+      dmLink: p.dmLink || f.captureDmLink || f.ctaLink,
       publicReplyVariants: f.capturePublicReplies,
       requireFollow: f.captureRequireFollow, followupText: f.captureFollowupText,
       notFollowingText: f.captureNotFollowingText,

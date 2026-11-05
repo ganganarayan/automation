@@ -55,7 +55,7 @@ export const FUNNEL_FIELDS = [
   // Comment-to-DM defaults for this funnel (used when the content row has none).
   { key: 'capture_keyword', label: 'Auto-DM keyword (blank = off)', placeholder: 'e.g. guide' },
   { key: 'capture_dm_text', label: 'Auto-DM message', type: 'textarea' },
-  { key: 'capture_dm_link', label: 'Auto-DM link' },
+  { key: 'capture_dm_link', label: 'Auto-DM link (blank = the CTA link)' },
   { key: 'capture_public_replies', label: 'Public reply variants (one per line)', type: 'textarea' },
   {
     key: 'manual_stepper',

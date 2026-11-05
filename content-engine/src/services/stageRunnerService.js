@@ -382,7 +382,7 @@ export async function postInstance({ instanceId, captionOverride = '' }) {
       tenantId: resolved.tenantId, funnelId: resolved.id, lane: resolved.name,
       platforms: captureRules.dmPlatforms(accountIds, resolved.accountMap),
       postformePostId: refs[0],
-      keyword: resolved.captureKeyword, dmText: resolved.captureDmText, dmLink: resolved.captureDmLink,
+      keyword: resolved.captureKeyword, dmText: resolved.captureDmText, dmLink: resolved.captureDmLink || resolved.ctaLink,
       publicReplyVariants: resolved.capturePublicReplies,
       requireFollow: resolved.captureRequireFollow, followupText: resolved.captureFollowupText,
       notFollowingText: resolved.captureNotFollowingText, log,

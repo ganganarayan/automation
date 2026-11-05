@@ -1,5 +1,6 @@
 /**
- * First comment: the post's link in its first comment, on every channel.
+ * First comment: the post's link in its first comment. Instagram is the
+ * exception: its link goes by comment-to-DM (captureRules), so it is skipped.
  *
  * Purpose:      Every publish path queues its Post for Me post here with the
  *               link. Post for Me has no first-comment option, so the moment it
@@ -20,7 +21,7 @@ import * as repo from '../repositories/firstCommentsRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { buildProviders } from './providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
-import { createFirstCommentSenders, commentPlatform } from './firstCommentSenders.js';
+import { createFirstCommentSenders, commentPlatform, dmOnly } from './firstCommentSenders.js';
 import * as captureConfig from './captureConfig.js';
 import { postOutcome } from '../utils/laneSpec.js';
 import { settings } from '../settings/index.js';
@@ -86,6 +87,10 @@ async function commentOn(publish, row, r, attempts) {
   try {
     const account = await publish.getAccount(accountId);
     platform = (account && account.platform) || '';
+    if (dmOnly(platform)) {
+      await repo.mark(row.id, accountId, { state: 'skipped', platform, error: 'Instagram sends the link by comment-to-DM' });
+      return 'skipped';
+    }
     const postId = r.platform_data && r.platform_data.id;
     const out = await senders.commentWithFallback({
       platform, postId, text: row.text, account,
