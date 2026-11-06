@@ -975,20 +975,20 @@ async function saveClean(funnel, driveId, clean, { name = '', source = null } = 
 }
 
 const AUTO_CHECK_SYSTEM = 'You check frames of a short video. Frame 1 is from the start, the others are its last seconds, in order. For each frame say: '
-  + 'watermark: is there a small logo or brand mark laid over the picture (often in a bottom corner, e.g. "NotebookLM"); a title, slide text or subtitles are NOT a watermark. '
+  + 'watermark: is the NotebookLM logo or the word "NotebookLM" laid over the picture as a small mark, usually in a bottom corner; any other logo, brand name, title, slide text or subtitles are NOT a watermark. '
   + 'watermarkBottomPct: when that watermark is in the lower part of the picture, how far its TOP edge is above the bottom edge, as a percent of the picture height (e.g. 6); else 0. '
-  + 'outro: is this frame a branded end screen (a product logo or "made with" card on a plain background) rather than the video’s own content. '
-  + 'Return JSON: {"frames":[{"watermark":true|false,"watermarkBottomPct":number,"outro":true|false}, ...]}, one entry per image, in order.';
+  + 'outro: is this frame NotebookLM’s own end screen, its logo or name on a plain background; a closing screen from the video’s maker (their own logo, a call to action, a phone number, a link, "book now") is the video’s content, NOT an outro. '
+  + 'When unsure, answer false. Return JSON: {"frames":[{"watermark":true|false,"watermarkBottomPct":number,"outro":true|false}, ...]}, one entry per image, in order.';
 
 /**
- * Auto-check: an AI looks at an early frame and the last 15 s and sets this
- * video's zoom (watermark height) and cut (where the outro starts). Returns
- * { zoomPct, trimEndSec, note }; throws when the frames can't be read.
+ * The AI check: looks at an early frame and the last `checkSec` seconds and sets
+ * this video's zoom (watermark height) and cut (where the outro starts). Returns
+ * { zoomPct, trimEndSec, note }; throws when the frames or the answer can't be read.
  */
-async function autoCleanPlan({ funnel, providers, driveId, name, fallback }) {
+async function autoCleanPlan({ funnel, providers, driveId, name, checkSec }) {
   const total = (await videoDurations([driveId]))[driveId] || 0;
   if (!(total > 0)) throw new Error('could not read the video length');
-  const { early, tail } = autoCheckTimes(total);
+  const { early, tail } = autoCheckTimes(total, checkSec);
   const url = publicDlUrl(driveId);
   const ffmpeg = createFfmpegProvider({}, log);
   const frames = [];
@@ -999,22 +999,23 @@ async function autoCleanPlan({ funnel, providers, driveId, name, fallback }) {
   const r = await providers.llm.generateJsonVision({ system: AUTO_CHECK_SYSTEM, user: `${frames.length} frames: the first at ${early} s, then one a second from ${tail[0]} s to ${tail[tail.length - 1]} s of a ${Math.round(total)} s video.`, images: frames });
   const cost = { ...costText({ inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, model: r.model }), provider: r.provider };
   await recordCost(funnel, driveId, 'stitch', cost, { name }).catch((err) => log.warn({ err: err.message, driveId }, 'auto-check cost not saved'));
-  const got = autoCleanFromFrames({ frames: (r.data || {}).frames, tail, totalSec: total, fallback });
+  const got = autoCleanFromFrames({ frames: (r.data || {}).frames, tail, totalSec: total });
+  if (got.watermark === null) throw new Error('the AI did not answer for every frame');
   log.info({ driveId, ...got }, 'clean auto-check');
   const what = [got.watermark ? `watermark found, zoom ${got.zoomPct}%` : 'no watermark', got.outro ? `outro found, cut last ${got.trimEndSec} s` : 'no outro'];
-  return { zoomPct: got.zoomPct, trimEndSec: got.trimEndSec, note: `auto-check: ${what.join(', ')}` };
+  return { zoomPct: got.zoomPct, trimEndSec: got.trimEndSec, note: `AI check: ${what.join(', ')}` };
 }
 
 const ROUTER_CLEAN_WAIT_MS = 25 * 60 * 1000;
 const sleep = (ms) => new Promise((r) => { setTimeout(r, ms).unref?.(); });
 
 /**
- * The daily router's ✂ Clean for Lane 1, with the funnel's Clean defaults (or
- * the auto-check's numbers), waited for inside the router's run: on Railway it
- * runs here; on GitHub it is polled for up to 25 min. A video already cleaned
- * by hand keeps that clean. Never throws: { clean, note }, clean null = post
- * the original (Clean off, or it failed: note says why, for router_days and
- * the approval email).
+ * The daily router's ✂ Clean for Lane 1: when the funnel has Clean on, the AI
+ * check sets this video's zoom and cut, and the clean is waited for inside the
+ * router's run: on Railway it runs here; on GitHub it is polled for up to 25
+ * min. A video already cleaned by hand keeps that clean. Never throws: { clean,
+ * note }, clean null = post the original (Clean off, nothing found, or the
+ * check or clean failed: note says why, for router_days and the approval email).
  */
 export async function cleanForRouter({ funnelId, driveId, name = '' }) {
   const id = String(driveId);
@@ -1026,18 +1027,12 @@ export async function cleanForRouter({ funnelId, driveId, name = '' }) {
     const done = (await loadDrafts(funnel, [id]))[id];
     if (done && done.clean) return { clean: done.clean, note: 'cleaned earlier on the Prepare page' };
     const providers = await buildProviders(funnel.tenant_id);
-    const opts = { zoomPct: o.zoomPct, trimEndSec: o.trimEndSec, ...normalizeEndCard(o) };
-    if (o.auto) {
-      try {
-        const a = await autoCleanPlan({ funnel, providers, driveId: id, name, fallback: o });
-        Object.assign(opts, normalizeCleanOpts(a));
-        note = a.note;
-      } catch (err) {
-        log.warn({ err: err.message, driveId: id }, 'clean auto-check failed (funnel defaults used)');
-        note = `auto-check failed (${String(err.message).slice(0, 120)}), used the funnel's zoom and cut`;
-      }
-    }
-    if (!opts.zoomPct && !opts.trimEndSec && !opts.endSec) return { clean: null, note: [note, 'nothing to clean, the original video is used'].filter(Boolean).join('; ') };
+    const a = await autoCleanPlan({ funnel, providers, driveId: id, name, checkSec: o.checkSec })
+      .catch((err) => { throw new Error(`the AI check failed: ${err.message}`); });
+    note = a.note;
+    // Nothing of NotebookLM's found: the video stays exactly as it is, no end card either.
+    if (!a.zoomPct && !a.trimEndSec) return { clean: null, note: `${note}; nothing to clean, the original video is used` };
+    const opts = { ...normalizeCleanOpts(a), ...normalizeEndCard(o) };
     let job = cleanJobs.get(id);
     if (!job || job.state !== 'running') {
       const where = normalizeRunner((providers.resolved.clean || {}).runner);

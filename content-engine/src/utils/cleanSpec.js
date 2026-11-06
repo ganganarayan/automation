@@ -271,17 +271,17 @@ const ON = /^(on|true|1|yes)$/i;
 
 /**
  * The daily router's Clean for one funnel (Lane 1 setup page, funnel_config):
- * { on, auto, zoomPct, trimEndSec, endText, endLink, endSec }, clamped. A blank
- * zoom is 10 %, a blank cut 0 s; an end card with text or a link and no
- * seconds shows for 4 s.
+ * { on, checkSec, endText, endLink, endSec }, clamped. The zoom and the cut
+ * come from the AI check, per video. A blank check is the last 15 s; an end
+ * card with text or a link and no seconds shows for 4 s.
  */
 export function routerCleanOpts(cfg = {}) {
   const c = cfg || {};
   const has = (k) => String(c[k] ?? '').trim() !== '';
+  const check = Number(c.direct_clean_check_sec);
   return {
     on: ON.test(String(c.direct_clean || '').trim()),
-    auto: ON.test(String(c.direct_clean_auto || '').trim()),
-    ...normalizeCleanOpts({ zoomPct: has('direct_clean_zoom') ? c.direct_clean_zoom : 10, trimEndSec: has('direct_clean_trim') ? c.direct_clean_trim : 0 }),
+    checkSec: has('direct_clean_check_sec') && Number.isFinite(check) ? Math.min(30, Math.max(2, Math.round(check))) : 15,
     ...normalizeEndCard({ endText: c.direct_clean_end_text, endLink: c.direct_clean_end_link, endSec: has('direct_clean_end_sec') ? c.direct_clean_end_sec : 4 }),
   };
 }
@@ -306,15 +306,17 @@ export function autoCheckTimes(totalSec, windowSec = 15) {
  * watermark, outro }, clamped by normalizeCleanOpts.
  * Zoom: just enough to push the lowest-reaching bottom watermark (+2 %) out
  * of the frame (zooming from the top crops 1 - 1/f of the height), 0 when
- * there is none, the fallback when it is there but its height is unknown.
+ * there is none, the standard 10 % when it is there but its height is unknown.
  * Trim: the run of outro frames at the very end, cut halfway between the last
  * content frame and the first outro frame.
+ * No answer, or not one per frame (times can't be trusted): watermark and
+ * outro are null, zoom and trim 0, so nothing gets cut on a guess.
  */
-export function autoCleanFromFrames({ frames, tail = [], totalSec = 0, fallback = {} }) {
+export function autoCleanFromFrames({ frames, tail = [], totalSec = 0 }) {
   const list = Array.isArray(frames) ? frames.map((f) => f || {}) : [];
-  const base = normalizeCleanOpts(fallback);
-  if (!list.length) return { ...base, watermark: null, outro: null };
-  const tailFr = list.slice(1, 1 + tail.length);
+  const base = normalizeCleanOpts();
+  if (list.length !== 1 + tail.length) return { zoomPct: 0, trimEndSec: 0, watermark: null, outro: null };
+  const tailFr = list.slice(1);
   const content = [list[0], ...tailFr.filter((f) => f.outro !== true)];
   const marked = content.filter((f) => f.watermark === true);
   let zoomPct = 0;
