@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  pickNextVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, providerOrder, isCreditError, creditState,
+  pickNextVideo, waitingVideos, freeReadyRows, stockDot, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, providerOrder, isCreditError, creditState,
   chooseProvider, laneTwoVerdict, dryTransition, researchPrompt, normalizeResearch, briefTopic, rerunAction,
   nudgeNeeded, laneForInstance, NUDGE_TEXT, creditView,
 } from '../src/utils/routerSpec.js';
@@ -14,6 +14,31 @@ const files = [
   { id: 'c1', name: 'a.txt', mimeType: 'text/plain', createdTime: '2026-10-01T00:00:00Z' },
   { id: 't3', name: 'c.png', mimeType: 'image/png', createdTime: '2026-10-03T00:00:00Z' },
 ];
+
+describe('Funnels page stock', () => {
+  const files = [
+    { id: '1', name: 'Ad2.mp4', mimeType: 'video/mp4' },
+    { id: '2', name: 'Ad1.mp4', mimeType: 'video/mp4' },
+    { id: '3', name: 'POSTED - Ad0.mp4', mimeType: 'video/mp4' },
+    { id: '4', name: 'Ad1.jpg', mimeType: 'image/jpeg' },
+    { id: '5', name: 'Ad1.txt', mimeType: 'text/plain' },
+    { id: '6', name: 'Ad3.mp4', mimeType: 'video/mp4' },
+  ];
+  it('counts only videos, leaving out posted, held and skipped ones', () => {
+    expect(waitingVideos(files).map((f) => f.id)).toEqual(['2', '1', '6']);
+    expect(waitingVideos(files, ['1', 6]).map((f) => f.id)).toEqual(['2']);
+    expect(waitingVideos(null)).toEqual([]);
+  });
+  it('counts Ready rows that no open post holds', () => {
+    const rows = [['Post #', 'Status', 'Image Prompt'], ['1', 'Ready', 'a'], ['2', 'Posted', 'b'], ['3', 'Ready', 'c'], ['4', 'Ready', '']];
+    expect(freeReadyRows(rows).map((r) => r.rowNumber)).toEqual([2, 4]);
+    const [first] = freeReadyRows(rows);
+    expect(freeReadyRows(rows, [first.key]).map((r) => r.rowNumber)).toEqual([4]);
+  });
+  it('red at none, yellow at 3 or fewer or unknown, green above', () => {
+    expect([0, 1, 3, 4, null].map(stockDot)).toEqual(['🔴', '🟡', '🟡', '🟢', '🟡']);
+  });
+});
 
 describe('Lane 1: pickNextVideo', () => {
   it('goes by serial number, not upload date or plain text order', () => {

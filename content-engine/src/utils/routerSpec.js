@@ -191,10 +191,15 @@ export function readyRows(rows = []) {
   return out;
 }
 
+/** The Ready rows not attached to an open instance (by key). */
+export function freeReadyRows(rows = [], openKeys = []) {
+  const taken = new Set((openKeys || []).map(String));
+  return readyRows(rows).filter((r) => !taken.has(r.key));
+}
+
 /** The next Ready row not attached to an open instance (by key), or null. */
 export function pickReadyRow(rows = [], openKeys = []) {
-  const taken = new Set((openKeys || []).map(String));
-  return readyRows(rows).find((r) => !taken.has(r.key)) || null;
+  return freeReadyRows(rows, openKeys)[0] || null;
 }
 
 /**
@@ -402,15 +407,27 @@ const baseName = (name) => String(name || '').replace(/\.[a-z0-9]{2,5}$/i, '').t
 const isVideoFile = (f) => String((f && f.mimeType) || '').startsWith('video') || /\.(mp4|mov|m4v|webm|mkv)$/i.test(String((f && f.name) || ''));
 
 /**
- * The next video in the folder by serial number, else alphabetically (byFileOrder),
- * that is not posted (by name or by the app's record) and not held by an open
- * job. Returns the file or null.
+ * The videos still waiting in the folder, by serial number, else alphabetically
+ * (byFileOrder): not posted (by name or by the app's record) and not held by an
+ * open job.
  */
-export function pickNextVideo(files = [], skipIds = []) {
+export function waitingVideos(files = [], skipIds = []) {
   const skip = new Set((skipIds || []).map(String));
   return (Array.isArray(files) ? files : [])
     .filter((f) => f && f.id && isVideoFile(f) && !/posted/i.test(String(f.name || '')) && !skip.has(String(f.id)))
-    .sort(byFileOrder)[0] || null;
+    .sort(byFileOrder);
+}
+
+/** The next waiting video, or null. */
+export function pickNextVideo(files = [], skipIds = []) {
+  return waitingVideos(files, skipIds)[0] || null;
+}
+
+/** How a stock count reads on the Funnels page: 0 is out, 3 or fewer is running low. */
+export function stockDot(count) {
+  if (!Number.isFinite(count)) return '🟡';
+  if (count <= 0) return '🔴';
+  return count <= 3 ? '🟡' : '🟢';
 }
 
 /**

@@ -27,6 +27,7 @@
  *   GET  /api/v1/admin/users/billing         a user's billing history (JSON)
  *   GET  /api/v1/admin/wake-schedule         last GitHub wake-up sync + current times (JSON)
  *   POST /api/v1/admin/wake-schedule/sync    write WAKE_SCHEDULE to GitHub now (JSON)
+ *   GET  /api/v1/admin/funnels/stock         ready videos and images left per funnel (JSON)
  */
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
 import { navHtml, NAV_CSS } from '../utils/adminNav.js';
@@ -53,6 +54,8 @@ import { listReadyVideos } from '../services/readyPostService.js';
 import { parseDriveFolderId } from '../utils/readyPostSpec.js';
 import { keyOk, gateState, currentSession } from '../services/accessService.js';
 import * as wakeSchedule from '../services/wakeScheduleService.js';
+import { stockForTenant } from '../services/funnelStockService.js';
+import { REFILL_BELOW } from '../utils/routerSpec.js';
 
 export function register(ctx) {
   const { router, log } = ctx;
@@ -122,6 +125,16 @@ export function register(ctx) {
   // which produced a /admin/funnels/settings 404).
   const backToFunnels = (body) =>
     `/api/v1/admin/settings?${new URLSearchParams({ tenant: body.tenant || 'default' })}#funnels`;
+
+  // Asked for by the page once the Funnels panel opens: it reads Drive and the sheets.
+  router.get('/admin/funnels/stock', async (req, res, next) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
+      res.json({ ok: true, funnels: await stockForTenant((req.query.tenant || 'default').toString()) });
+    } catch (err) {
+      next(err);
+    }
+  });
 
   router.post('/admin/funnels', async (req, res, next) => {
     try {
@@ -550,6 +563,13 @@ ${NAV_CSS}
  .funnelrow{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;background:#15151f;border:1px solid #24243a;border-radius:10px;padding:.8rem 1rem}
  .funnelrow-name{font-weight:600}
  .funnelrow-meta{font-size:.8rem;color:#8a8aa2;margin-top:.15rem}
+ .funnelrow-main{flex:1 1 11rem}
+ .funnelrow-acts{min-width:16.5rem;justify-content:flex-end}
+ .stockcols{display:flex;gap:1.25rem}
+ .stockcell{width:6.25rem}
+ .stocklabel{font-size:.75rem;color:#8a8aa2}
+ .stocknum{font-size:1.15rem;font-weight:600;margin-top:.1rem}
+ .stocknote{font-size:.72rem;color:#8a8aa2}
  /* flowchart view */
  .flow{margin:.5rem 0}
  .flowphase{margin:0}
@@ -630,6 +650,31 @@ ${NAV_CSS}
     document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id==='panel-'+id));
     document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('active',n.dataset.target===id));
     if(history.replaceState) history.replaceState(null,'',location.pathname+location.search+'#'+id);
+    if(id==='funnels') loadStock();
+  }
+  // Ready videos and images per funnel, filled in only when the Funnels panel opens.
+  let stockLoaded=false;
+  function paintStock(cell, s){
+    if(!cell) return;
+    cell.querySelector('.stocknum').textContent=s.dot+' '+(s.count===null?'?':s.count);
+    cell.querySelector('.stocknote').textContent=s.note||'';
+  }
+  async function loadStock(){
+    if(stockLoaded) return;
+    stockLoaded=true;
+    const tenant=new URLSearchParams(location.search).get('tenant')||'default';
+    try{
+      const r=await fetch('/api/v1/admin/funnels/stock?tenant='+encodeURIComponent(tenant),{headers:{'X-Admin-Key':KEY}});
+      const j=await r.json();
+      if(!j.ok) throw new Error(j.error||'failed');
+      for(const f of j.funnels){
+        paintStock(document.querySelector('[data-stock="'+f.id+'-videos"]'),f.videos);
+        paintStock(document.querySelector('[data-stock="'+f.id+'-images"]'),f.images);
+      }
+    }catch(e){
+      document.querySelectorAll('[data-stock]').forEach((c)=>paintStock(c,{dot:'🟡',count:null,note:'could not read'}));
+      stockLoaded=false;
+    }
   }
   function flag(i){ const f=document.getElementById('flag-'+i); if(!f) return; f.classList.add('show'); setTimeout(()=>f.classList.remove('show'),1200); }
   async function post(path, body){
@@ -829,7 +874,11 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
           <div class="funnelrow-name">${esc(f.name)} ${f.active ? '' : '<span class="pill">paused</span>'}</div>
           <div class="funnelrow-meta">${ready ? '🟢 ready' : `🟡 ${done}/${total} pages set`}</div>
         </div>
-        <div class="row" style="gap:.4rem;margin:0">
+        <div class="stockcols">
+          <div class="stockcell" data-stock="${f.id}-videos"><div class="stocklabel">Ready videos</div><div class="stocknum">…</div><div class="stocknote"></div></div>
+          <div class="stockcell" data-stock="${f.id}-images"><div class="stocklabel">Ready images</div><div class="stocknum">…</div><div class="stocknote"></div></div>
+        </div>
+        <div class="row funnelrow-acts" style="gap:.4rem;margin:0">
           <a class="act primary" href="/api/v1/admin/funnels/${f.id}/setup">Set up →</a>
           <form method="post" action="/api/v1/admin/funnels/active" style="display:inline">
             <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
@@ -849,6 +898,7 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
   return `<section class="panel card" id="panel-funnels">
     <h2>Funnels</h2>
     <p class="blurb">A funnel is a brand/campaign scope with its own accounts and schedule. Each day the router picks the lane (ready video, AI video, image post) and lines up the content. Add one, then open its setup: shared basics, one page per lane, then publish.</p>
+    <p class="hint"><b>Ready videos</b>: videos in the Lane 1 folder not posted or lined up yet. <b>Ready images</b>: Ready rows in the Lane 3 sheet not in a post yet; the picture is made when a row is used, and the router adds rows when fewer than ${REFILL_BELOW} are left. Lane 2 makes its videos when needed, so it has no count. 🔴 none left, 🟡 3 or fewer, 🟢 more than 3.</p>
     <fieldset><legend>Add a funnel</legend>
       <form method="post" action="/api/v1/admin/funnels" class="row">
         <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
