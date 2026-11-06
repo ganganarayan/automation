@@ -139,8 +139,14 @@ export function threadsPost(short, link) {
   return l ? `${clip(short, budget)}\n${l}` : clip(short, LIMITS.threads);
 }
 
-/** Longest video a platform takes through its API, in seconds. Threads: 5 minutes. */
-export const VIDEO_LIMIT_SEC = { threads: 300 };
+/**
+ * Longest video a platform takes through its API, in seconds. Threads: 5 minutes.
+ * X: 20 minutes on its current docs (an older page says 140s; a refusal steps down anyway).
+ */
+export const VIDEO_LIMIT_SEC = { threads: 300, x: 1200 };
+
+/** Platforms that don't need a video: a failure steps down rather than stays failed. */
+export const STEP_DOWN_PLATFORMS = ['threads', 'x'];
 
 /** Map an account-map platform label onto Post for Me's platform key. */
 export function platformKey(label) {
@@ -194,15 +200,15 @@ export function platformConfigsFor(copy, { accountIds = [], accountMap = {}, cta
 }
 
 /**
- * The next thing to try on Threads after a failure, so the post still goes out:
- * video, then its picture and text, then text alone. `configs` is the saved
+ * The next thing to try on Threads or X after a failure, so the post still goes
+ * out: video, then its picture and text, then text alone. `configs` is the saved
  * platform_configurations; the picture may come from another platform's video.
  * `lastAs` is what the channel last went as ('' = the video).
  * @returns {{ config: object, as: string }}
  */
-export function threadsFallback(configs = {}, caption = '', lastAs = '') {
-  const own = configs.threads || {};
-  const text = own.caption || threadsPost(caption, '');
+export function stepDownFallback(platform, configs = {}, caption = '', lastAs = '') {
+  const own = configs[platform] || {};
+  const text = own.caption || (platform === 'x' ? xPost(caption, '') : threadsPost(caption, ''));
   const { media, ...rest } = own;
   const art = !lastAs && [own, ...Object.values(configs)]
     .map((c) => ((c && c.media && c.media[0]) || {}).thumbnail_url).find(Boolean);

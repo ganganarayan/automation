@@ -91,6 +91,11 @@ export function createFfmpegProvider(cfg = {}, log) {
       }
     },
 
+    /** Render an image post's Short (the argv comes from utils/shortSpec). */
+    async imageToShort({ args }) {
+      await run(bin, args, { maxBuffer: 64 * 1024 * 1024, timeout: 300000 });
+    },
+
     /**
      * Grab one video frame as a JPEG, from video bytes, or straight from a
      * public URL (ffmpeg range-reads only what it needs). Tries `atSec`, then

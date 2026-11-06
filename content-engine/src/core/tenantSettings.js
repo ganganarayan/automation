@@ -149,6 +149,11 @@ export async function forTenant(tenantId = 'default') {
       brand: pick('comparison_brand', ''),
       logo: pick('comparison_logo', ''),
     },
+    // The music on a YouTube Short made from an image post.
+    shortMusic: {
+      track: pick('short_music', ''),
+      url: pick('short_music_url', ''),
+    },
     // System prompts (API Keys → System prompts). Blank = the built-in default.
     prompts: {
       global: pick('system_prompt_global', ''),

@@ -72,10 +72,10 @@ describe('image posts and YouTube', () => {
     expect(imageAccounts(null, map)).toEqual([]);
   });
 
-  it('offers no Retry for an image post that only YouTube refused', () => {
+  it('offers Retry for an image post whose YouTube Short failed', () => {
     const row = { status: 'partial', source_type: 'sheet' };
     const pub = (platform) => [{ key: 'publish', artifacts: { channels: [{ state: 'ok', platform: 'facebook' }, { state: 'failed', platform }] } }];
-    expect(retryAction(row, pub('youtube'))).toBe('');
+    expect(retryAction(row, pub('youtube'))).toBe('channels');
     expect(retryAction(row, pub('instagram'))).toBe('channels');
   });
 

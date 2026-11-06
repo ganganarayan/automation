@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { platformConfigsFor, threadsFallback } from '../src/utils/aiCopySpec.js';
+import { platformConfigsFor, stepDownFallback } from '../src/utils/aiCopySpec.js';
 import { nextAutoRetry, channelText } from '../src/utils/laneSpec.js';
 
 const copy = { title: 'T', description: 'D', igCaption: 'I', short: 'S' };
@@ -29,25 +29,25 @@ describe('a video too long for Threads', () => {
   });
 });
 
-describe('threadsFallback', () => {
+describe('stepDownFallback', () => {
   const video = { threads: { caption: 'S', media: [{ url: 'https://v', thumbnail_url: 'https://t.jpg' }] } };
 
   it('steps from video to picture to text', () => {
-    const one = threadsFallback(video, 'long');
+    const one = stepDownFallback('threads', video, 'long');
     expect(one).toEqual({ config: { caption: 'S', media: [{ url: 'https://t.jpg' }] }, as: 'image and text' });
-    const two = threadsFallback({ threads: one.config }, 'long', one.as);
+    const two = stepDownFallback('threads', { threads: one.config }, 'long', one.as);
     expect(two).toEqual({ config: { caption: 'S' }, as: 'text only' });
-    expect(threadsFallback({ threads: two.config }, 'long', two.as).as).toBe('text only');
+    expect(stepDownFallback('threads', { threads: two.config }, 'long', two.as).as).toBe('text only');
   });
 
   it("borrows another platform's picture, and does not step back up from text", () => {
     const configs = { threads: { caption: 'S', media: [{ url: 'https://v', thumbnail_timestamp_ms: 0 }] }, youtube: { media: [{ url: 'https://v', thumbnail_url: 'https://yt.jpg' }] } };
-    expect(threadsFallback(configs, '').config.media).toEqual([{ url: 'https://yt.jpg' }]);
-    expect(threadsFallback(configs, '', 'text only').config.media).toBeUndefined();
+    expect(stepDownFallback('threads', configs, '').config.media).toEqual([{ url: 'https://yt.jpg' }]);
+    expect(stepDownFallback('threads', configs, '', 'text only').config.media).toBeUndefined();
   });
 
   it('clips the shared caption to fit Threads when there is no saved copy', () => {
-    const { config, as } = threadsFallback({}, 'x'.repeat(2000));
+    const { config, as } = stepDownFallback('threads', {}, 'x'.repeat(2000));
     expect(as).toBe('text only');
     expect(config.caption.length).toBeLessThanOrEqual(500);
   });
@@ -64,7 +64,7 @@ describe('automatic retry for Threads', () => {
   });
 
   it('leaves other platforms as they were', () => {
-    expect(nextAutoRetry([{ platform: 'x', state: 'failed', error: 'video too long' }], 0, now)).toBeNull();
+    expect(nextAutoRetry([{ platform: 'tiktok', state: 'failed', error: 'video too long' }], 0, now)).toBeNull();
   });
 
   it('shows what actually went out', () => {

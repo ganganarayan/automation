@@ -44,7 +44,9 @@ import * as digest from './digestService.js';
 import * as firstCommentsRepo from '../repositories/firstCommentsRepository.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
-import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey, nextImagePrompt, threadsFallback } from '../utils/aiCopySpec.js';
+import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey, nextImagePrompt, stepDownFallback, STEP_DOWN_PLATFORMS } from '../utils/aiCopySpec.js';
+import * as imageShort from './imageShortService.js';
+import { shortTitle } from '../utils/shortSpec.js';
 import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt } from '../utils/thumbSpec.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
@@ -1709,9 +1711,11 @@ export async function retryFailed({ instanceId, auto = false }) {
   let req = pub.request && pub.request.mediaUrl ? pub.request : null;
   if (!req && oldRefs[0]) req = requestFromPost(await publish.getPost(oldRefs[0]).catch(() => null));
   if (!req) throw new Error('could not read the original post from Post for Me, use ✏ Edit and post it again');
-  const isThreads = (c) => platformKey(c.platform) === 'threads';
-  const others = failed.filter((c) => !isThreads(c));
-  const threads = failed.filter(isThreads);
+  const steppers = (c) => STEP_DOWN_PLATFORMS.includes(platformKey(c.platform));
+  // An image post reaches YouTube as a Short, on a post of its own.
+  const isShort = (c) => row.source_type === 'sheet' && platformKey(c.platform) === 'youtube';
+  const others = failed.filter((c) => !steppers(c) && !isShort(c));
+  const shorts = failed.filter(isShort);
   const original = oldRefs[0] ? await firstCommentsRepo.getByPost(oldRefs[0]).catch(() => null) : null;
   const send = async (accounts, body) => {
     const result = await publish.createPost({ accountIds: accounts.map((c) => c.id), ...body });
@@ -1723,7 +1727,8 @@ export async function retryFailed({ instanceId, auto = false }) {
   };
   const made = [];
   const sent = new Set();
-  let as = '';
+  const asByPlatform = {};
+  const errors = [];
   let request = req;
   if (others.length) {
     const platforms = new Set(others.map((c) => platformKey(c.platform)).filter(Boolean));
@@ -1733,30 +1738,46 @@ export async function retryFailed({ instanceId, auto = false }) {
     made.push(await send(others, { caption: req.caption, mediaUrl: req.mediaUrl, platformConfigurations: configs }));
     others.forEach((c) => sent.add(c.id));
   }
-  if (threads.length) {
-    // Threads steps down on its own post, so "no media" can't pick up the top-level video.
-    const next = threadsFallback(req.platformConfigurations || {}, req.caption, threads[0].as || '');
+  if (shorts.length) {
     try {
-      made.push(await send(threads, { caption: next.config.caption, mediaUrl: next.config.media ? next.config.media[0].url : undefined, platformConfigurations: { threads: next.config } }));
-      threads.forEach((c) => sent.add(c.id));
-      as = next.as;
-      request = { ...req, platformConfigurations: { ...(req.platformConfigurations || {}), threads: next.config } };
+      const shortUrl = req.shortUrl || await imageShort.make({ imageUrl: req.mediaUrl, publish, music: providers.resolved.shortMusic, log });
+      const shortConfig = req.shortConfig || { title: shortTitle(row.title, req.caption), caption: req.caption };
+      made.push(await send(shorts, { caption: shortConfig.caption, mediaUrl: shortUrl, platformConfigurations: { youtube: shortConfig } }));
+      shorts.forEach((c) => sent.add(c.id));
+      request = { ...request, shortUrl, shortConfig };
     } catch (err) {
-      if (!made.length) throw err;
-      log.warn({ err: err.message, instance: row.id }, 'Threads re-post failed (the next try goes again)');
+      errors.push(err);
+      log.warn({ err: err.message, instance: row.id }, 'YouTube Short re-post failed (the next try goes again)');
     }
   }
+  for (const platform of STEP_DOWN_PLATFORMS) {
+    const group = failed.filter((c) => platformKey(c.platform) === platform);
+    if (!group.length) continue;
+    // Each steps down on its own post, so "no media" can't pick up the top-level video.
+    const next = stepDownFallback(platform, request.platformConfigurations || {}, req.caption, group[0].as || '');
+    try {
+      made.push(await send(group, { caption: next.config.caption, mediaUrl: next.config.media ? next.config.media[0].url : undefined, platformConfigurations: { [platform]: next.config } }));
+      group.forEach((c) => sent.add(c.id));
+      asByPlatform[platform] = next.as;
+      request = { ...request, platformConfigurations: { ...(request.platformConfigurations || {}), [platform]: next.config } };
+    } catch (err) {
+      errors.push(err);
+      log.warn({ err: err.message, instance: row.id, platform }, 'step-down re-post failed (the next try goes again)');
+    }
+  }
+  if (!made.length) throw errors[0] || new Error('no failed channels to retry');
   const refs = [...oldRefs, ...made];
   const channels = (pub.channels || []).map((c) => {
     if (!sent.has(c.id)) return c;
-    return { ...c, state: 'waiting', error: '', ...(isThreads(c) && as ? { as } : {}) };
+    const as = asByPlatform[platformKey(c.platform)];
+    return { ...c, state: 'waiting', error: '', ...(as ? { as } : {}) };
   });
   // A press of the button starts the automatic tries afresh; an automatic try counts one.
   const attempts = auto ? ((pub.retry && pub.retry.attempts) || 0) + 1 : 0;
   steps = patchStep(steps, 'publish', { artifacts: { channels, posts: refs, request, retry: { attempts, nextAt: null, lastAt: new Date().toISOString() } } });
   await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
   await instanceRepo.markScheduled(row.id, { postRefs: refs });
-  log.info({ instance: row.id, retried: sent.size, refs: made, auto, attempts, threadsAs: as }, 'failed channels re-posted');
+  log.info({ instance: row.id, retried: sent.size, refs: made, auto, attempts, steppedDown: asByPlatform }, 'failed channels re-posted');
   return { instanceId: row.id, retried: sent.size };
 }
 

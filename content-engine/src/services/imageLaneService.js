@@ -39,6 +39,8 @@ import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { request } from '../core/httpClient.js';
 import { extractRow, composePrompt, composeCaptions, buildPlatformConfigs } from '../utils/postCompose.js';
 import { patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
+import * as imageShort from './imageShortService.js';
+import { shortTitle } from '../utils/shortSpec.js';
 import { costImages } from '../utils/pricing.js';
 import { formatIst } from '../utils/time.js';
 import {
@@ -178,7 +180,6 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
   const f = await funnels.resolve(funnelRow);
   if (!f.sheetId) throw new LaneError('no content sheet on this funnel');
   if (!(f.accounts || []).length) throw new LaneError('no Post for Me accounts ticked on this funnel');
-  if (!imageAccounts(f.accounts, f.accountMap).length) throw new LaneError('only YouTube is ticked on this funnel, and YouTube takes no image posts');
   const providers = await buildProviders(f.tenantId);
   const tab = await poster.tabFor(providers.sheets, f);
   let rows = await providers.sheets.readTab(f.sheetId, tab, { fresh: true });
@@ -260,13 +261,34 @@ export async function approve(approval) {
   const configs = buildPlatformConfigs(full, short);
   const req = { caption: short || full, mediaUrl: (img.image || {}).url || p.mediaUrl, ...(configs ? { platformConfigurations: configs } : {}) };
   const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+  // YouTube takes no images: it gets the picture as a Short, on a post of its own.
+  const ytAccounts = (f.accounts || []).filter((id) => !accounts.includes(id));
+  const ytConfig = { title: shortTitle(row.title, short || full), caption: full || short };
+  let shortUrl = '';
+  let shortRef = null;
+  let shortError = '';
+  if (ytAccounts.length) {
+    try {
+      shortUrl = await imageShort.make({ imageUrl: req.mediaUrl, publish, music: providers.resolved.shortMusic, log });
+      const made = await publish.createPost({ accountIds: ytAccounts, scheduledAt: postAt || undefined, caption: ytConfig.caption, mediaUrl: shortUrl, platformConfigurations: { youtube: ytConfig } });
+      shortRef = made && made.id ? made.id : null;
+      if (!shortRef) throw new Error('Post for Me did not return a post id');
+    } catch (err) {
+      shortError = String(err.message).slice(0, 200);
+      log.warn({ err: err.message }, 'YouTube Short failed (the image post goes on; Retry tries it again)');
+    }
+  }
   let ref = null;
   try {
-    if (!accounts.length) throw new Error('no Post for Me accounts ticked on this funnel');
-    const result = await publish.createPost({ accountIds: accounts, scheduledAt: postAt || undefined, ...req });
-    ref = result && result.id ? result.id : null;
-    if (!ref) throw new Error('Post for Me did not return a post id');
+    if (accounts.length) {
+      const result = await publish.createPost({ accountIds: accounts, scheduledAt: postAt || undefined, ...req });
+      ref = result && result.id ? result.id : null;
+      if (!ref) throw new Error('Post for Me did not return a post id');
+    } else if (!shortRef) {
+      throw new Error(shortError || 'no Post for Me accounts ticked on this funnel');
+    }
   } catch (err) {
+    if (shortRef) await publish.deletePost(shortRef).catch((e) => log.warn({ err: e.message, shortRef }, 'could not withdraw the Short'));
     log.error({ err: err.message }, 'image post could not be created');
     await stepLog.fail(row.id, 'publish');
     steps = patchStep(steps, 'publish', { status: 'failed', error: err.message });
@@ -278,20 +300,26 @@ export async function approve(approval) {
 
   // The link goes in each channel's first comment once the post is live; the
   // webhook is what wakes a sleeping app when it goes live.
-  await firstComment.queue({ tenantId: f.tenantId, postformePostId: ref, link: f.ctaLink, scheduledAt: postAt });
+  const refs = [ref, shortRef].filter(Boolean);
+  for (const made of refs) await firstComment.queue({ tenantId: f.tenantId, postformePostId: made, link: f.ctaLink, scheduledAt: postAt });
   await firstComment.ensureWebhook(f.tenantId, publish).catch(() => false);
   const fields = img.row || {};
-  await poster.armPostExtras({ f, p: { dmKeyword: fields.dmKeyword, dmText: fields.dmText, dmLink: fields.dmLink, matchKey: sheet.key }, ref, accounts, log });
+  if (ref) await poster.armPostExtras({ f, p: { dmKeyword: fields.dmKeyword, dmText: fields.dmText, dmLink: fields.dmLink, matchKey: sheet.key }, ref, accounts, log });
 
-  const channels = accounts.map((id) => ({ id, platform: (accountMap[id] || {}).platform || '', name: (accountMap[id] || {}).account_name || id, state: 'waiting' }));
-  steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: [ref], caption: req.caption, channels, request: req } });
+  const channel = (id) => ({ id, platform: (accountMap[id] || {}).platform || '', name: (accountMap[id] || {}).account_name || id, state: 'waiting' });
+  const channels = [
+    ...accounts.map(channel),
+    ...ytAccounts.map((id) => ({ ...channel(id), as: 'Short from image', ...(shortRef ? {} : { state: 'failed', error: `Short not made: ${shortError}` }) })),
+  ];
+  const saved = { ...req, ...(shortRef ? { shortUrl } : {}), ...(ytAccounts.length ? { shortConfig: ytConfig } : {}) };
+  steps = patchStep(steps, 'publish', { status: 'done', artifacts: { posts: refs, caption: req.caption, channels, request: saved } });
   await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
   await stepLog.end(row.id, 'publish');
-  await instanceRepo.markScheduled(row.id, { postRefs: [ref], scheduledFor: postAt ? new Date(postAt) : null, postNow: !postAt });
-  await poster.markSheetRow(providers.sheets, f.sheetId, tab, { ...where, extra: { [PFM_COL]: ref } }, log);
+  await instanceRepo.markScheduled(row.id, { postRefs: refs, scheduledFor: postAt ? new Date(postAt) : null, postNow: !postAt });
+  await poster.markSheetRow(providers.sheets, f.sheetId, tab, { ...where, extra: { [PFM_COL]: refs.join(', ') } }, log);
   await setApprovalStatus(approval.id, 'published');
-  log.info({ ref, postAt: postAt || 'now', accounts: accounts.length }, 'image post handed to Post for Me');
-  return ref;
+  log.info({ refs, postAt: postAt || 'now', accounts: accounts.length, shorts: shortRef ? ytAccounts.length : 0 }, 'image post handed to Post for Me');
+  return refs[0];
 }
 
 /** Rework (reject with a note): regenerate the image and re-send the approval. */

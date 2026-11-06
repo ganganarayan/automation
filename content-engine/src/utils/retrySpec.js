@@ -36,9 +36,7 @@ export function retryAction(row, steps, now = Date.now()) {
   const list = Array.isArray(steps) ? steps : [];
   const step = (key) => list.find((s) => s.key === key) || {};
   if (r.locked) return '';
-  // YouTube takes no images, so an image post can never succeed there.
-  const canRepost = (c) => c.state === 'failed' && !(laneOf(r) === 'image' && /youtube/i.test(String(c.platform || '')));
-  if (['partial', 'failed'].includes(r.status) && (step('publish').artifacts?.channels || []).some(canRepost)) return 'channels';
+  if (['partial', 'failed'].includes(r.status) && (step('publish').artifacts?.channels || []).some((c) => c.state === 'failed')) return 'channels';
   if (r.post_status === 'post_failed') return 'open';
   if (r.status === 'manual' && list.some((s) => s.status === 'failed')) return 'open';
   // A script review with no script (sent by hand while it was stuck) has nothing to approve.
