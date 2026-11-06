@@ -196,7 +196,7 @@ export function channelIcon(c = {}) {
 
 /** One channel as "✅ youtube Ganga" / "❌ x (error)" / "⏳ threads name". */
 export function channelText(c = {}) {
-  return `${channelIcon(c)} ${[c.platform, c.name].filter(Boolean).join(' ')}${c.state === 'failed' && c.error ? ` (${c.error})` : ''}`;
+  return `${channelIcon(c)} ${[c.platform, c.name].filter(Boolean).join(' ')}${c.as ? ` [${c.as}]` : ''}${c.state === 'failed' && c.error ? ` (${c.error})` : ''}`;
 }
 
 /**
@@ -233,7 +233,9 @@ export function isRecoverableError(message = '') {
  */
 export function nextAutoRetry(channels = [], attempts = 0, now = new Date()) {
   const failed = (Array.isArray(channels) ? channels : []).filter((c) => c.state === 'failed');
-  if (!failed.length || !failed.some((c) => isRecoverableError(c.error))) return null;
+  // Threads always has a next step down (picture and text, then text), whatever the error.
+  const canStepDown = (c) => /threads/i.test(String(c.platform || '')) && c.as !== 'text only';
+  if (!failed.length || !failed.some((c) => isRecoverableError(c.error) || canStepDown(c))) return null;
   const mins = AUTO_RETRY_MINUTES[Number(attempts) || 0];
   if (mins === undefined) return null;
   return new Date(now.getTime() + mins * 60000).toISOString();

@@ -44,7 +44,7 @@ import * as digest from './digestService.js';
 import * as firstCommentsRepo from '../repositories/firstCommentsRepository.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
-import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey, nextImagePrompt } from '../utils/aiCopySpec.js';
+import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey, nextImagePrompt, threadsFallback } from '../utils/aiCopySpec.js';
 import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt } from '../utils/thumbSpec.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
@@ -1362,7 +1362,8 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
     const cleaned = (saved[sel.driveId] || {}).clean || null;
     const videoUrl = cleaned ? cleaned.url : publicDlUrl(sel.driveId);
     // CTA: this post's own link overrides the funnel's.
-    const ai = sel.copy ? platformConfigsFor(sel.copy, { accountIds: accounts, accountMap, ctaLink: sel.ctaLink || resolved.ctaLink, videoUrl, thumbs: sel.thumbs }) : null;
+    const durationSec = (cleaned && cleaned.durationSec) || (await videoDurations([sel.driveId]).catch(() => ({})))[sel.driveId] || 0;
+    const ai = sel.copy ? platformConfigsFor(sel.copy, { accountIds: accounts, accountMap, ctaLink: sel.ctaLink || resolved.ctaLink, videoUrl, thumbs: sel.thumbs, durationSec }) : null;
     const caption = ai ? ai.caption : (sel.caption.trim() || captionFor(cfg, resolved));
     try {
       await drive.shareAnyone(sel.driveId);
@@ -1387,8 +1388,12 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
       const instanceId = await recordPostedInstance({
         funnel, driveId: sel.driveId, caption, scheduledIso, ref,
         copy: sel.copy ? normalizeCopy(sel.copy) : null, costs: sel.costs, request, ctaLink: sel.ctaLink,
-        channels: accounts.map((id) => ({ id, platform: (accountMap[id] || {}).platform || '', name: (accountMap[id] || {}).account_name || id, state: 'waiting' })),
-        durationSec: (cleaned && cleaned.durationSec) || (await videoDurations([sel.driveId]))[sel.driveId] || 0,
+        channels: accounts.map((id) => {
+          const platform = (accountMap[id] || {}).platform || '';
+          const as = ai && ai.posted[platformKey(platform)];
+          return { id, platform, name: (accountMap[id] || {}).account_name || id, state: 'waiting', ...(as ? { as } : {}) };
+        }),
+        durationSec,
       });
       try {
         await drive.renameFile(sel.driveId, `POSTED - ${sel.name || sel.driveId}`);
@@ -1597,6 +1602,7 @@ export async function refreshScheduled({ tenantId = 'default' } = {}) {
       await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
       const when = postedAt || new Date();
       const failedNote = channels.filter((c) => c.state === 'failed').map((c) => channelText(c)).join('; ');
+      if (failedNote) log.warn({ instance: row.id, refs, failed: failedNote }, 'channels failed');
       if (outcome === 'posted') await instanceRepo.lockAsPosted(row.id, { postRefs: refs, postedAt: when });
       else if (outcome === 'partial') await instanceRepo.markPartial(row.id, { note: failedNote, postedAt: when });
       else {
@@ -1703,25 +1709,55 @@ export async function retryFailed({ instanceId, auto = false }) {
   let req = pub.request && pub.request.mediaUrl ? pub.request : null;
   if (!req && oldRefs[0]) req = requestFromPost(await publish.getPost(oldRefs[0]).catch(() => null));
   if (!req) throw new Error('could not read the original post from Post for Me, use ✏ Edit and post it again');
-  const platforms = new Set(failed.map((c) => platformKey(c.platform)).filter(Boolean));
-  const configs = req.platformConfigurations
-    ? Object.fromEntries(Object.entries(req.platformConfigurations).filter(([k]) => !platforms.size || platforms.has(k)))
-    : undefined;
-  const result = await publish.createPost({ accountIds: failed.map((c) => c.id), caption: req.caption, mediaUrl: req.mediaUrl, platformConfigurations: configs });
-  const ref = result && result.id ? result.id : null;
-  if (!ref) throw new Error('Post for Me did not return a post id');
-  // The re-posted channels get the same first comment as the original post.
+  const isThreads = (c) => platformKey(c.platform) === 'threads';
+  const others = failed.filter((c) => !isThreads(c));
+  const threads = failed.filter(isThreads);
   const original = oldRefs[0] ? await firstCommentsRepo.getByPost(oldRefs[0]).catch(() => null) : null;
-  if (original) await firstComment.queue({ tenantId: row.tenant_id, postformePostId: ref, link: original.text });
-  const refs = [...oldRefs, ref];
-  const channels = (pub.channels || []).map((c) => (c.state === 'failed' ? { ...c, state: 'waiting', error: '' } : c));
+  const send = async (accounts, body) => {
+    const result = await publish.createPost({ accountIds: accounts.map((c) => c.id), ...body });
+    const made = result && result.id ? result.id : null;
+    if (!made) throw new Error('Post for Me did not return a post id');
+    // The re-posted channels get the same first comment as the original post.
+    if (original) await firstComment.queue({ tenantId: row.tenant_id, postformePostId: made, link: original.text });
+    return made;
+  };
+  const made = [];
+  const sent = new Set();
+  let as = '';
+  let request = req;
+  if (others.length) {
+    const platforms = new Set(others.map((c) => platformKey(c.platform)).filter(Boolean));
+    const configs = req.platformConfigurations
+      ? Object.fromEntries(Object.entries(req.platformConfigurations).filter(([k]) => !platforms.size || platforms.has(k)))
+      : undefined;
+    made.push(await send(others, { caption: req.caption, mediaUrl: req.mediaUrl, platformConfigurations: configs }));
+    others.forEach((c) => sent.add(c.id));
+  }
+  if (threads.length) {
+    // Threads steps down on its own post, so "no media" can't pick up the top-level video.
+    const next = threadsFallback(req.platformConfigurations || {}, req.caption, threads[0].as || '');
+    try {
+      made.push(await send(threads, { caption: next.config.caption, mediaUrl: next.config.media ? next.config.media[0].url : undefined, platformConfigurations: { threads: next.config } }));
+      threads.forEach((c) => sent.add(c.id));
+      as = next.as;
+      request = { ...req, platformConfigurations: { ...(req.platformConfigurations || {}), threads: next.config } };
+    } catch (err) {
+      if (!made.length) throw err;
+      log.warn({ err: err.message, instance: row.id }, 'Threads re-post failed (the next try goes again)');
+    }
+  }
+  const refs = [...oldRefs, ...made];
+  const channels = (pub.channels || []).map((c) => {
+    if (!sent.has(c.id)) return c;
+    return { ...c, state: 'waiting', error: '', ...(isThreads(c) && as ? { as } : {}) };
+  });
   // A press of the button starts the automatic tries afresh; an automatic try counts one.
   const attempts = auto ? ((pub.retry && pub.retry.attempts) || 0) + 1 : 0;
-  steps = patchStep(steps, 'publish', { artifacts: { channels, posts: refs, request: req, retry: { attempts, nextAt: null, lastAt: new Date().toISOString() } } });
+  steps = patchStep(steps, 'publish', { artifacts: { channels, posts: refs, request, retry: { attempts, nextAt: null, lastAt: new Date().toISOString() } } });
   await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
   await instanceRepo.markScheduled(row.id, { postRefs: refs });
-  log.info({ instance: row.id, retried: failed.length, ref, auto, attempts }, 'failed channels re-posted');
-  return { instanceId: row.id, retried: failed.length };
+  log.info({ instance: row.id, retried: sent.size, refs: made, auto, attempts, threadsAs: as }, 'failed channels re-posted');
+  return { instanceId: row.id, retried: sent.size };
 }
 
 /**

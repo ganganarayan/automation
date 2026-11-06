@@ -139,6 +139,9 @@ export function threadsPost(short, link) {
   return l ? `${clip(short, budget)}\n${l}` : clip(short, LIMITS.threads);
 }
 
+/** Longest video a platform takes through its API, in seconds. Threads: 5 minutes. */
+export const VIDEO_LIMIT_SEC = { threads: 300 };
+
 /** Map an account-map platform label onto Post for Me's platform key. */
 export function platformKey(label) {
   const p = String(label || '').toLowerCase();
@@ -158,7 +161,7 @@ export function platformKey(label) {
  * platform info at all, every supported platform is configured.
  * @returns {{ caption: string, platformConfigurations: object }}
  */
-export function platformConfigsFor(copy, { accountIds = [], accountMap = {}, ctaLink = '', videoUrl = '', thumbs = {} } = {}) {
+export function platformConfigsFor(copy, { accountIds = [], accountMap = {}, ctaLink = '', videoUrl = '', thumbs = {}, durationSec = 0 } = {}) {
   const c = normalizeCopy(copy);
   // The CTA link is added here, once: the post's own link, else the funnel's.
   const longText = withLink(stripTrailingLink(c.description), ctaLink);
@@ -174,12 +177,37 @@ export function platformConfigsFor(copy, { accountIds = [], accountMap = {}, cta
   const present = new Set((accountIds || []).map((id) => platformKey((accountMap[id] || {}).platform)).filter(Boolean));
   const keys = present.size ? [...present] : Object.keys(all);
   const platformConfigurations = {};
+  const posted = {};
   for (const k of keys) {
     if (!all[k]) continue;
+    // Too long for this platform: its picture and text go instead of the video.
+    const art = (thumbs && thumbs[k]) || Object.values(thumbs || {}).find(Boolean);
+    if (videoUrl && art && durationSec > (VIDEO_LIMIT_SEC[k] || Infinity)) {
+      platformConfigurations[k] = { ...all[k], media: [{ url: art }] };
+      posted[k] = 'image and text';
+      continue;
+    }
     // Each platform gets its own designed thumbnail, else the first frame.
     platformConfigurations[k] = videoUrl ? { ...all[k], media: [thumbMedia(videoUrl, thumbs && thumbs[k])] } : all[k];
   }
-  return { caption: longText, platformConfigurations };
+  return { caption: longText, platformConfigurations, posted };
+}
+
+/**
+ * The next thing to try on Threads after a failure, so the post still goes out:
+ * video, then its picture and text, then text alone. `configs` is the saved
+ * platform_configurations; the picture may come from another platform's video.
+ * `lastAs` is what the channel last went as ('' = the video).
+ * @returns {{ config: object, as: string }}
+ */
+export function threadsFallback(configs = {}, caption = '', lastAs = '') {
+  const own = configs.threads || {};
+  const text = own.caption || threadsPost(caption, '');
+  const { media, ...rest } = own;
+  const art = !lastAs && [own, ...Object.values(configs)]
+    .map((c) => ((c && c.media && c.media[0]) || {}).thumbnail_url).find(Boolean);
+  if (art) return { config: { ...rest, caption: text, media: [{ url: art }] }, as: 'image and text' };
+  return { config: { ...rest, caption: text }, as: 'text only' };
 }
 
 /**
