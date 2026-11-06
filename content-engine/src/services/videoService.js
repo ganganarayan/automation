@@ -22,6 +22,7 @@ import {
   buildVideoImagePrompts,
   buildMovieSpec,
 } from '../utils/videoSpec.js';
+import { byFileOrder } from '../utils/readyPostSpec.js';
 import { childLogger } from '../core/logger.js';
 import { settings } from '../settings/index.js';
 
@@ -137,11 +138,11 @@ export async function runSimple({ tenantId = 'default' }) {
   const providers = await buildProviders(tenantId);
   const resolved = providers.resolved;
   const files = await providers.storage.listFiles(resolved.drive.reelsFolder);
-  const oldest = files
+  const next = files
     .filter((f) => (f.mimeType || '').startsWith('video') && !/POSTED/i.test(f.name || ''))
-    .sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime))[0];
+    .sort(byFileOrder)[0];
 
-  if (!oldest) {
+  if (!next) {
     await providers.mail.send({
       to: resolved.emails.approvalGita,
       subject: 'Gita reels: none left to post',
@@ -151,25 +152,25 @@ export async function runSimple({ tenantId = 'default' }) {
     return;
   }
 
-  await providers.storage.shareAnyone(oldest.id);
+  await providers.storage.shareAnyone(next.id);
   const defaultCaption = `Take the assessment: ${resolved.links.gitaSimpleAssessment}`;
   const { reviewUrl } = await approvalService.createRequest({
     tenantId,
     kind: SIMPLE_KIND,
     payload: {
-      fileId: oldest.id,
-      fileName: oldest.name,
+      fileId: next.id,
+      fileName: next.name,
       caption: defaultCaption,
       editableCaption: true,
-      mediaUrl: `https://drive.google.com/uc?export=download&id=${oldest.id}`,
+      mediaUrl: `https://drive.google.com/uc?export=download&id=${next.id}`,
     },
   });
   await providers.mail.send({
     to: resolved.emails.approvalGita,
-    subject: `Approve Gita reel: ${oldest.name}`,
-    html: `<p>Reel ready to post: ${escapeHtml(oldest.name)}</p><p><a href="${reviewUrl}">Review, edit caption &amp; Approve</a></p>`,
+    subject: `Approve Gita reel: ${next.name}`,
+    html: `<p>Reel ready to post: ${escapeHtml(next.name)}</p><p><a href="${reviewUrl}">Review, edit caption &amp; Approve</a></p>`,
   });
-  log.info({ file: oldest.name }, 'reel approval email sent');
+  log.info({ file: next.name }, 'reel approval email sent');
 }
 
 export async function publishSimple(approval) {

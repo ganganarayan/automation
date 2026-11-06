@@ -63,6 +63,24 @@ export function parsePickedFiles(raw) {
   return out;
 }
 
+// A serial number leads the name, after at most one word: Ad9, Ad 9, Part-9, 9 Title.
+const SERIAL = /^\s*[a-z]*[\s_-]*(\d+)/i;
+const serialOf = (name) => {
+  const m = String(name || '').match(SERIAL);
+  return m ? Number(m[1]) : Infinity;
+};
+
+/**
+ * The order videos go out: by the serial number in the file name (Ad2 before
+ * Ad10), then alphabetically, with unnumbered files last. Never by upload date.
+ */
+export function byFileOrder(a, b) {
+  const x = serialOf(a && a.name);
+  const y = serialOf(b && b.name);
+  if (x !== y) return x < y ? -1 : 1;
+  return String((a && a.name) || '').localeCompare(String((b && b.name) || ''), 'en', { numeric: true, sensitivity: 'base' });
+}
+
 const VIDEO_EXT = { mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/x-m4v', webm: 'video/webm', mkv: 'video/x-matroska', avi: 'video/x-msvideo' };
 const unent = (s) => String(s).replace(/&(amp|lt|gt|quot|#39|#(\d+));/g, (m, n, d) => (d ? String.fromCharCode(Number(d)) : { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" }[n]));
 
@@ -184,4 +202,4 @@ export function normalizeSelections(selections) {
 }
 
 export { ZONE };
-export default { normalizePickedAccounts, parseEmbeddedFolder, parseDriveFolderId, parseSheetId, isStorageQuotaError, parsePickedFiles, filterReadyVideos, defaultSlotsIso, parseIstDateTime, postTimeIso, defaultCaption, normalizeSelections, ZONE };
+export default { byFileOrder, normalizePickedAccounts, parseEmbeddedFolder, parseDriveFolderId, parseSheetId, isStorageQuotaError, parsePickedFiles, filterReadyVideos, defaultSlotsIso, parseIstDateTime, postTimeIso, defaultCaption, normalizeSelections, ZONE };

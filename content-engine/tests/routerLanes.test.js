@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
-  pickOldestVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, providerOrder, isCreditError, creditState,
+  pickNextVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, providerOrder, isCreditError, creditState,
   chooseProvider, laneTwoVerdict, dryTransition, researchPrompt, normalizeResearch, briefTopic, rerunAction,
   nudgeNeeded, laneForInstance, NUDGE_TEXT, creditView,
 } from '../src/utils/routerSpec.js';
+import { byFileOrder } from '../src/utils/readyPostSpec.js';
 
 const files = [
   { id: 'v3', name: 'c.mp4', mimeType: 'video/mp4', createdTime: '2026-10-03T00:00:00Z' },
@@ -14,16 +15,27 @@ const files = [
   { id: 't3', name: 'c.png', mimeType: 'image/png', createdTime: '2026-10-03T00:00:00Z' },
 ];
 
-describe('Lane 1: pickOldestVideo', () => {
-  it('takes the oldest unposted video', () => {
-    expect(pickOldestVideo(files).id).toBe('v1');
+describe('Lane 1: pickNextVideo', () => {
+  it('goes by serial number, not upload date or plain text order', () => {
+    const v = (id, name, createdTime) => ({ id, name, mimeType: 'video/mp4', createdTime });
+    const list = [v('9', 'Ad9 Pattern.mp4', '2026-10-01'), v('10', 'Ad10 Decide.mp4', '2026-10-02'), v('2', 'Ad2 Mind at 9 am.mp4', '2026-10-09')];
+    expect(pickNextVideo(list).id).toBe('2');
+    expect(pickNextVideo(list, ['2']).id).toBe('9');
+  });
+  it('goes alphabetically with no numbers, and numbered files first', () => {
+    const v = (name, createdTime) => ({ id: name, name, mimeType: 'video/mp4', createdTime });
+    expect([v('b.mp4', '2026-01-01'), v('a.mp4', '2026-09-01'), v('Mind at 2 am.mp4', '2025-01-01'), v('Reel 3.mp4', '2026-12-01')].sort(byFileOrder).map((f) => f.name))
+      .toEqual(['Reel 3.mp4', 'a.mp4', 'b.mp4', 'Mind at 2 am.mp4']);
+  });
+  it('takes the first unposted video', () => {
+    expect(pickNextVideo(files).id).toBe('v1');
   });
   it('skips posted and held ids', () => {
-    expect(pickOldestVideo(files, ['v1']).id).toBe('v3');
-    expect(pickOldestVideo(files, ['v1', 'v3'])).toBeNull();
+    expect(pickNextVideo(files, ['v1']).id).toBe('v3');
+    expect(pickNextVideo(files, ['v1', 'v3'])).toBeNull();
   });
   it('treats .mp4 names as videos when the mime type is missing', () => {
-    expect(pickOldestVideo([{ id: 'x', name: 'clip.MP4' }]).id).toBe('x');
+    expect(pickNextVideo([{ id: 'x', name: 'clip.MP4' }]).id).toBe('x');
   });
 });
 

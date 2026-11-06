@@ -49,7 +49,7 @@ export const WIZARD_STEPS = [
     id: 'ready',
     title: 'Lane 1: Ready video',
     icon: 'ti-video',
-    desc: 'First choice every day. The router takes the oldest unposted video in this Drive folder. A same-name .jpg/.png and .txt next to it are used as its thumbnail and caption, and it is scheduled with no approval; otherwise it is transcribed, the AI writes the copy and thumbnail, and you get one approval email.',
+    desc: 'First choice every day. The router takes the unposted video with the lowest number in its file name (Ad1, Ad2, Ad3), or the first A to Z if there is no number. A same-name .jpg/.png and .txt next to it are used as its thumbnail and caption, and it is scheduled with no approval; otherwise it is transcribed, the AI writes the copy and thumbnail, and you get one approval email.',
     requiredFn: readyRequired,
     fields: [
       { key: 'direct_drive_folder', label: 'Drive folder of ready videos (blank = the funnel media folder)', driveFolder: true, placeholder: 'folder link or ID' },

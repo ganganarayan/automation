@@ -12,7 +12,7 @@
  *                 already has a router_days row is skipped.
  *               - decideFunnel: a live instance already lined up for that date
  *                 → record its lane ('already scheduled'). Otherwise Lane 1
- *                 (the oldest ready video) → Lane 2 (a researched AI video,
+ *                 (the next ready video) → Lane 2 (a researched AI video,
  *                 when there is credit) → Lane 3 (the image post). Each lane's
  *                 reason for passing is kept on router_days.reason. A day
  *                 nothing could be lined up for is recorded as 'none' with
@@ -35,7 +35,7 @@ import * as credit from './creditService.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { buildProviders } from './providerFactory.js';
 import * as heartbeat from '../core/heartbeat.js';
-import { routerTarget, runsOn, laneForInstance, existingReason, rerunAction, pickOldestVideo, nudgeNeeded, NUDGE_TEXT } from '../utils/routerSpec.js';
+import { routerTarget, runsOn, laneForInstance, existingReason, rerunAction, pickNextVideo, nudgeNeeded, NUDGE_TEXT } from '../utils/routerSpec.js';
 import { nowIst, formatIst, todayKeyIst } from '../utils/time.js';
 import { childLogger } from '../core/logger.js';
 
@@ -81,7 +81,7 @@ export async function decideFunnel({ funnel, now = nowIst(), retryNone = false, 
     return { ...out, lane, reason: why, instanceId };
   };
 
-  // Lane 1: the oldest ready video.
+  // Lane 1: the next ready video.
   try {
     const r = await readyLane.prepare({ funnelRow: funnel, scheduledFor, log: flog });
     const what = r.approval ? 'ready video: waiting for approval' : 'ready video: scheduled (own thumbnail + caption)';
@@ -176,7 +176,7 @@ export async function runNudge({ tenantIds = null, log = baseLog } = {}) {
     try {
       const { files, posted } = await readyPost.folderFiles({ funnelId: funnel.id });
       const held = await instanceRepo.routerHeldDriveIds(funnel.id, funnel.tenant_id).catch(() => []);
-      readyVideo = !!pickOldestVideo(files, [...posted, ...held]);
+      readyVideo = !!pickNextVideo(files, [...posted, ...held]);
     } catch (err) {
       log.warn({ funnel: funnel.name, err: err.message }, 'nudge: ready folder unreadable');
     }

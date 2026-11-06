@@ -68,6 +68,7 @@ import {
   normalizeSelections,
   normalizePickedAccounts,
   parseDriveFolderId,
+  byFileOrder,
 } from '../utils/readyPostSpec.js';
 import * as tenantRepo from '../repositories/tenantRepository.js';
 import { settings } from '../settings/index.js';
@@ -159,7 +160,7 @@ export async function listReadyVideos({ tenantId = 'default', funnelId, folder: 
   const videos = filterReadyVideos(files)
     .filter((f) => !posted.has(f.id))
     .map((f) => ({ id: f.id, name: f.name, createdTime: f.createdTime }))
-    .sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
+    .sort(byFileOrder);
   const drafts = await loadDrafts(funnel, videos.map((v) => v.id));
   return { ...base, videos, totalFiles: files.length, drafts, comparison: await comparisonState({ funnel, videos, drafts }) };
 }

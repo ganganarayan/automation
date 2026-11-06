@@ -167,7 +167,7 @@ function todayPage({ now, tomorrow, session, waiting, images, live, readyLeft, f
       <thead><tr><th>Funnel</th><th>Plan</th><th></th></tr></thead>
       <tbody>${plan || '<tr><td colspan="3" class="hint">No active funnels. Activate one under Setup → Funnels.</td></tr>'}</tbody>
     </table>
-    <p class="hint">The router tries Lane 1 (the oldest ready video), then Lane 2 (an AI video, when there is credit), then Lane 3 (an image post).</p>
+    <p class="hint">The router tries Lane 1 (the next ready video, by the number in its file name), then Lane 2 (an AI video, when there is credit), then Lane 3 (an image post).</p>
     ${superAdmin ? `<script>
       async function rerun(id, btn){
         if(!confirm("Re-run tomorrow's check for this funnel? What it lined up and you have not approved yet is replaced.")) return;

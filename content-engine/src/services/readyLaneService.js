@@ -1,7 +1,7 @@
 /**
  * Daily router: Lane 1: the ready video (top priority).
  *
- * Purpose:      Post a video you already made: the OLDEST unposted video in the
+ * Purpose:      Post a video you already made: the next unposted video, by file name, in the
  *               funnel's ready-video Drive folder (D3, deduped by Drive file id)
  *               goes out at the funnel's publish time (docs/daily-router-plan.md,
  *               Lane 1).
@@ -33,7 +33,7 @@ import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { publicDlUrl } from '../providers/publicDriveProvider.js';
 import { PLATFORM_SIZE } from '../utils/thumbSpec.js';
 import { imagePromptOf } from '../utils/aiCopySpec.js';
-import { VIDEO_REVIEW, pickOldestVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot } from '../utils/routerSpec.js';
+import { VIDEO_REVIEW, pickNextVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot } from '../utils/routerSpec.js';
 import { formatIst } from '../utils/time.js';
 import { childLogger } from '../core/logger.js';
 
@@ -90,7 +90,7 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog, skipped 
   if (!(resolved.accounts || []).length) throw new LaneSkip('no Post for Me accounts ticked on this funnel');
   const held = await instanceRepo.routerHeldDriveIds(funnel.id, funnel.tenant_id).catch(() => []);
   const silent = await readyPost.silentDriveIds({ funnel, resolved: providers.resolved, files }).catch(() => []);
-  const video = pickOldestVideo(files, [...posted, ...held, ...silent, ...skipped]);
+  const video = pickNextVideo(files, [...posted, ...held, ...silent, ...skipped]);
   if (!video) throw new LaneSkip('no unposted ready video in the folder');
   const at = scheduledFor.toJSDate();
   const side = sidecarsFor(files, video);

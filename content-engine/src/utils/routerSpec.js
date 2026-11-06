@@ -14,6 +14,7 @@
  */
 import { DateTime } from 'luxon';
 import { extractRow, locate } from './postCompose.js';
+import { byFileOrder } from './readyPostSpec.js';
 
 const ZONE = 'Asia/Kolkata';
 
@@ -401,14 +402,15 @@ const baseName = (name) => String(name || '').replace(/\.[a-z0-9]{2,5}$/i, '').t
 const isVideoFile = (f) => String((f && f.mimeType) || '').startsWith('video') || /\.(mp4|mov|m4v|webm|mkv)$/i.test(String((f && f.name) || ''));
 
 /**
- * D3: the OLDEST video in the folder that is not posted (by name or by the
- * app's record) and not held by an open job. Returns the file or null.
+ * The next video in the folder by serial number, else alphabetically (byFileOrder),
+ * that is not posted (by name or by the app's record) and not held by an open
+ * job. Returns the file or null.
  */
-export function pickOldestVideo(files = [], skipIds = []) {
+export function pickNextVideo(files = [], skipIds = []) {
   const skip = new Set((skipIds || []).map(String));
   return (Array.isArray(files) ? files : [])
     .filter((f) => f && f.id && isVideoFile(f) && !/posted/i.test(String(f.name || '')) && !skip.has(String(f.id)))
-    .sort((a, b) => new Date(a.createdTime || 0) - new Date(b.createdTime || 0) || String(a.name).localeCompare(String(b.name)))[0] || null;
+    .sort(byFileOrder)[0] || null;
 }
 
 /**
@@ -656,7 +658,7 @@ export default {
   routerTarget, runsOn, laneForInstance, existingReason, routerClash, postAtFor, colLetter, planHeader, colIndex, rowKey,
   readyRows, pickReadyRow, nextMatchKeys, htmlToText, landingUrls, landingLine, historyLines, instanceHistoryLine, sheetHistory, sheetColumns, refillPrompt,
   normalizeRefill, rowsForSheet,
-  imageAccounts, VIDEO_REVIEW, pickOldestVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, VIDEO_PROVIDERS, providerOrder,
+  imageAccounts, VIDEO_REVIEW, pickNextVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, VIDEO_PROVIDERS, providerOrder,
   isCreditError, creditState, creditView, chooseProvider, laneTwoVerdict, dryTransition, researchPrompt, normalizeResearch, briefTopic,
   rerunAction, nudgeNeeded, NUDGE_TEXT,
 };
