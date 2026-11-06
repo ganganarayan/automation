@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  pickNextVideo, waitingVideos, freeReadyRows, stockDot, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, providerOrder, isCreditError, creditState,
+  pickNextVideo, waitingVideos, ownThumbnailCount, freeReadyRows, stockDot, sidecarsFor, copyFromCaption, thumbsForAll, istSlot, providerOrder, isCreditError, creditState,
   chooseProvider, laneTwoVerdict, dryTransition, researchPrompt, normalizeResearch, briefTopic, rerunAction,
   nudgeNeeded, laneForInstance, NUDGE_TEXT, creditView,
 } from '../src/utils/routerSpec.js';
@@ -28,6 +28,13 @@ describe('Funnels page stock', () => {
     expect(waitingVideos(files).map((f) => f.id)).toEqual(['2', '1', '6']);
     expect(waitingVideos(files, ['1', 6]).map((f) => f.id)).toEqual(['2']);
     expect(waitingVideos(null)).toEqual([]);
+  });
+  it('counts your own thumbnail only with its caption, one per video', () => {
+    const videos = waitingVideos(files);
+    expect(ownThumbnailCount(videos, files)).toBe(1);
+    expect(ownThumbnailCount(videos, files.filter((f) => f.name !== 'Ad1.txt'))).toBe(0);
+    const sizes = [...files, { id: '7', name: 'Ad1.png', mimeType: 'image/png' }];
+    expect(ownThumbnailCount(videos, sizes)).toBe(1);
   });
   it('counts Ready rows that no open post holds', () => {
     const rows = [['Post #', 'Status', 'Image Prompt'], ['1', 'Ready', 'a'], ['2', 'Posted', 'b'], ['3', 'Ready', 'c'], ['4', 'Ready', '']];

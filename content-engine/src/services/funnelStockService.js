@@ -6,10 +6,13 @@
  * Responsibility:
  *               - Ready videos (Lane 1): videos in the ready folder, not posted,
  *                 not lined up for a day, not waiting for text (no speech).
- *               - Ready images (Lane 3): Ready rows in the content sheet that no
- *                 open post holds.
+ *               - Ready thumbnails: those videos that have your own thumbnail
+ *                 and caption, one per video. No warning dot: the router makes
+ *                 a thumbnail for each of the others.
+ *               - Image posts (Lane 3): Ready rows in the content sheet that no
+ *                 open post holds. The picture is made when a row is used.
  *               - Lane 2 makes its videos when asked, so it has no stock.
- *               Each count fails alone: { count: null, note } says why.
+ *               Each source fails alone: { count: null, note } says why.
  * Dependencies: readyPostService, funnelPosterService, providerFactory,
  *               funnelsRepository, instanceRepository, utils/{routerSpec,postCompose}.
  */
@@ -18,7 +21,7 @@ import * as poster from './funnelPosterService.js';
 import { buildProviders } from './providerFactory.js';
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
-import { waitingVideos, freeReadyRows, stockDot } from '../utils/routerSpec.js';
+import { waitingVideos, ownThumbnailCount, freeReadyRows, stockDot } from '../utils/routerSpec.js';
 import { extractRow } from '../utils/postCompose.js';
 import { childLogger } from '../core/logger.js';
 
@@ -29,13 +32,17 @@ const noCount = (note) => ({ count: null, dot: stockDot(null), note });
 
 async function videoStock(funnelRow) {
   const { funnel, providers, folder, files, posted } = await readyPost.folderFiles({ funnelId: funnelRow.id });
-  if (!folder) return noCount('no folder set');
+  if (!folder) return { videos: noCount('no folder set'), thumbnails: noCount('no folder set') };
   const held = await instanceRepo.routerHeldDriveIds(funnel.id, funnel.tenant_id).catch(() => []);
   const silent = await readyPost.silentDriveIds({ funnel, resolved: providers.resolved, files }).catch(() => []);
-  return counted(waitingVideos(files, [...posted, ...held, ...silent]).length);
+  const waiting = waitingVideos(files, [...posted, ...held, ...silent]);
+  return {
+    videos: counted(waiting.length),
+    thumbnails: { count: ownThumbnailCount(waiting, files), dot: '', note: `of ${waiting.length} videos` },
+  };
 }
 
-async function imageStock(funnelRow) {
+async function imagePostStock(funnelRow) {
   const f = await funnels.resolve(funnelRow);
   if (!f.sheetId) return noCount('no sheet set');
   const { sheets } = await buildProviders(f.tenantId);
@@ -46,17 +53,21 @@ async function imageStock(funnelRow) {
   return counted(freeReadyRows(rows, open).length);
 }
 
-const safely = (what, funnelRow, fn) => fn(funnelRow).catch((err) => {
-  log.warn({ err: err.message, funnel: funnelRow.id }, `could not count ready ${what}`);
-  return noCount('could not read');
-});
-
-/** [{ id, videos: { count, dot, note }, images: { count, dot, note } }], one per funnel of this tenant. */
+/** [{ id, videos, thumbnails, imagePosts }], each { count, dot, note }, one per funnel of this tenant. */
 export async function stockForTenant(tenantId = 'default') {
   const list = await funnels.listByTenant(tenantId);
   return Promise.all(list.map(async (f) => {
-    const [videos, images] = await Promise.all([safely('videos', f, videoStock), safely('images', f, imageStock)]);
-    return { id: f.id, videos, images };
+    const [folder, imagePosts] = await Promise.all([
+      videoStock(f).catch((err) => {
+        log.warn({ err: err.message, funnel: f.id }, 'could not count ready videos');
+        return { videos: noCount('could not read'), thumbnails: noCount('could not read') };
+      }),
+      imagePostStock(f).catch((err) => {
+        log.warn({ err: err.message, funnel: f.id }, 'could not count image posts');
+        return noCount('could not read');
+      }),
+    ]);
+    return { id: f.id, ...folder, imagePosts };
   }));
 }
 

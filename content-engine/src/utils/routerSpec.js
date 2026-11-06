@@ -443,6 +443,18 @@ export function sidecarsFor(files = [], video = {}) {
   };
 }
 
+/**
+ * How many of these videos go out with your own thumbnail: Lane 1 uses a same-name
+ * image only together with its same-name .txt, and makes its own for the rest.
+ * One per video, whatever sizes it is turned into.
+ */
+export function ownThumbnailCount(videos = [], files = []) {
+  return (Array.isArray(videos) ? videos : []).filter((v) => {
+    const side = sidecarsFor(files, v);
+    return side.thumb && side.caption;
+  }).length;
+}
+
 /** A sidecar caption file → copy for every platform (first line is the title). */
 export function copyFromCaption(text = '') {
   const body = String(text || '').replace(/^﻿/, '').replace(/\r\n/g, '\n').trim();

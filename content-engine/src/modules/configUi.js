@@ -27,7 +27,7 @@
  *   GET  /api/v1/admin/users/billing         a user's billing history (JSON)
  *   GET  /api/v1/admin/wake-schedule         last GitHub wake-up sync + current times (JSON)
  *   POST /api/v1/admin/wake-schedule/sync    write WAKE_SCHEDULE to GitHub now (JSON)
- *   GET  /api/v1/admin/funnels/stock         ready videos and images left per funnel (JSON)
+ *   GET  /api/v1/admin/funnels/stock         ready videos, thumbnails and image posts per funnel (JSON)
  */
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
 import { navHtml, NAV_CSS } from '../utils/adminNav.js';
@@ -656,7 +656,7 @@ ${NAV_CSS}
   let stockLoaded=false;
   function paintStock(cell, s){
     if(!cell) return;
-    cell.querySelector('.stocknum').textContent=s.dot+' '+(s.count===null?'?':s.count);
+    cell.querySelector('.stocknum').textContent=(s.dot?s.dot+' ':'')+(s.count===null?'?':s.count);
     cell.querySelector('.stocknote').textContent=s.note||'';
   }
   async function loadStock(){
@@ -669,7 +669,8 @@ ${NAV_CSS}
       if(!j.ok) throw new Error(j.error||'failed');
       for(const f of j.funnels){
         paintStock(document.querySelector('[data-stock="'+f.id+'-videos"]'),f.videos);
-        paintStock(document.querySelector('[data-stock="'+f.id+'-images"]'),f.images);
+        paintStock(document.querySelector('[data-stock="'+f.id+'-thumbnails"]'),f.thumbnails);
+        paintStock(document.querySelector('[data-stock="'+f.id+'-posts"]'),f.imagePosts);
       }
     }catch(e){
       document.querySelectorAll('[data-stock]').forEach((c)=>paintStock(c,{dot:'🟡',count:null,note:'could not read'}));
@@ -876,7 +877,8 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
         </div>
         <div class="stockcols">
           <div class="stockcell" data-stock="${f.id}-videos"><div class="stocklabel">Ready videos</div><div class="stocknum">…</div><div class="stocknote"></div></div>
-          <div class="stockcell" data-stock="${f.id}-images"><div class="stocklabel">Ready images</div><div class="stocknum">…</div><div class="stocknote"></div></div>
+          <div class="stockcell" data-stock="${f.id}-thumbnails"><div class="stocklabel">Ready thumbnails</div><div class="stocknum">…</div><div class="stocknote"></div></div>
+          <div class="stockcell" data-stock="${f.id}-posts"><div class="stocklabel">Image posts</div><div class="stocknum">…</div><div class="stocknote"></div></div>
         </div>
         <div class="row funnelrow-acts" style="gap:.4rem;margin:0">
           <a class="act primary" href="/api/v1/admin/funnels/${f.id}/setup">Set up →</a>
@@ -898,7 +900,7 @@ function funnelsPanel({ funnelList, funnelConfigs, tenantId, key }) {
   return `<section class="panel card" id="panel-funnels">
     <h2>Funnels</h2>
     <p class="blurb">A funnel is a brand/campaign scope with its own accounts and schedule. Each day the router picks the lane (ready video, AI video, image post) and lines up the content. Add one, then open its setup: shared basics, one page per lane, then publish.</p>
-    <p class="hint"><b>Ready videos</b>: videos in the Lane 1 folder not posted or lined up yet. <b>Ready images</b>: Ready rows in the Lane 3 sheet not in a post yet; the picture is made when a row is used, and the router adds rows when fewer than ${REFILL_BELOW} are left. Lane 2 makes its videos when needed, so it has no count. 🔴 none left, 🟡 3 or fewer, 🟢 more than 3.</p>
+    <p class="hint"><b>Ready videos</b>: videos in the Lane 1 folder not posted or lined up yet. <b>Ready thumbnails</b>: those videos with your own same-name image and .txt, one per video whatever its sizes; the router makes a thumbnail for the others. <b>Image posts</b>: Ready rows in the Lane 3 sheet not in a post yet, used only on a day with no video to post; the picture is made when a row is used, and the router adds rows when fewer than ${REFILL_BELOW} are left. Lane 2 makes its videos when needed, so it has no count. 🔴 none left, 🟡 3 or fewer, 🟢 more than 3.</p>
     <fieldset><legend>Add a funnel</legend>
       <form method="post" action="/api/v1/admin/funnels" class="row">
         <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="tenant" value="${esc(tenantId)}">
