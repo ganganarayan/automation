@@ -102,6 +102,11 @@ export function keepSecFor(totalSec, trimEndSec) {
   return Math.max(1, Math.round((Number(totalSec) - Number(trimEndSec)) * 10) / 10);
 }
 
+/** True when a Drive download ended on Google's sign-in page: the file is private. */
+export function isDriveSignIn(finalUrl = '') {
+  return /^https:\/\/accounts\.google\.com\//.test(String(finalUrl));
+}
+
 /** Where ✂ Clean runs: 'railway' (default) or 'github'. */
 export function normalizeRunner(v) {
   return String(v || '').trim().toLowerCase() === 'github' ? 'github' : 'railway';

@@ -44,10 +44,10 @@ import * as digest from './digestService.js';
 import * as firstCommentsRepo from '../repositories/firstCommentsRepository.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
-import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey, nextImagePrompt, stepDownFallback, STEP_DOWN_PLATFORMS } from '../utils/aiCopySpec.js';
+import { copySystemPrompt, copyUserPrompt, normalizeCopy, keepThumbTag, platformConfigsFor, platformKey, nextImagePrompt, stepDownFallback, STEP_DOWN_PLATFORMS } from '../utils/aiCopySpec.js';
 import * as imageShort from './imageShortService.js';
 import { shortTitle } from '../utils/shortSpec.js';
-import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt } from '../utils/thumbSpec.js';
+import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt, thumbTagFor } from '../utils/thumbSpec.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
 import sharp from 'sharp';
@@ -57,7 +57,7 @@ import { join } from 'node:path';
 import { normalizeCleanOpts, normalizeEndCard, endCardSvg, cleanVideoArgs, cleanWithCardArgs, progressPct, transcriptSrt, clipSrt, parseSrt, captionSampleTimes, captionsVerdict, routerCleanOpts, autoCheckTimes, autoCleanFromFrames, normalizeScheduleClean, cleanFixPlan, swapMediaUrl } from '../utils/cleanSpec.js';
 import { writeFile } from 'node:fs/promises';
 import * as driveConnect from './driveConnectService.js';
-import { signTicket, peekTicket, readTicket, dispatchRequest, normalizeRunner, keepSecFor, DEFAULT_REPO } from '../utils/cleanHookSpec.js';
+import { isDriveSignIn, signTicket, peekTicket, readTicket, dispatchRequest, normalizeRunner, keepSecFor, DEFAULT_REPO } from '../utils/cleanHookSpec.js';
 import { TRANSCRIPT_REVIEW, postOutcome, mergeChannels, channelOutcome, channelText, nextAutoRetry, requestFromPost, canGenerateCopy, readyStage, prepareTranscript, glossaryTerms, whisperPrompt } from '../utils/laneSpec.js';
 import { formatIst } from '../utils/time.js';
 import {
@@ -448,7 +448,7 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
   const { thumbs, sizes, thumbError } = withThumbs
     ? await makeThumbs({
       providers, resolved, driveId, ext, accessToken, costs, comparison,
-      imagePrompt: imagePrompt || copy.title, text: comparison ? tArt.headline || '' : tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '',
+      imagePrompt: imagePrompt || copy.title, text: comparison ? tArt.headline || '' : tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '', tag: copy.thumbTag,
     })
     : { thumbs: saved.thumbs || {}, sizes: saved.sizes || [], thumbError: '' };
   const instanceId = await saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, keepThumbs: !withThumbs }).catch((err) => {
@@ -473,7 +473,7 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
  * the funnel's platforms need with the operator's headline. Never throws: a
  * failure comes back as thumbError. Image costs are pushed onto `costs`.
  */
-async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessToken = '', costs, imagePrompt, text, sub = '', comparison = null }) {
+async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessToken = '', costs, imagePrompt, text, sub = '', tag = '', comparison = null }) {
   const ffmpeg = createFfmpegProvider({}, log);
   let video = null; // downloaded only when a non-public file needs it for the frame
   const getVideo = async () => video || (video = await driveFor(providers, accessToken).download(driveId));
@@ -505,7 +505,8 @@ async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessTok
         : await ffmpeg.extractFrame({ url: publicDlUrl(driveId) }).catch(async () => ffmpeg.extractFrame({ videoBuffer: await getVideo(), ext }));
     }
     // The operator's headline + sub-head (typed at the transcript stage) go on the image.
-    ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text, sub }));
+    const pill = thumbTagFor({ on: resolved.thumbTagOn, tag, fallback: resolved.thumbTagDefault });
+    ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text, sub, tag: pill }));
   } catch (err) {
     thumbError = err.message;
     log.warn({ err: err.message, driveId }, 'thumbnail generation failed (first frame will be used)');
@@ -535,7 +536,7 @@ export async function generateThumbnail({ tenantId = 'default', funnelId, driveI
   if (!head && !comparison) throw new Error('Type the thumbnail headline first');
   const costs = [];
   const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
-  const { thumbs, sizes, thumbError } = await makeThumbs({ providers, resolved, driveId: id, ext, accessToken, costs, imagePrompt: prompt || copy.thumbPrompt || copy.title || head, text: head, sub, comparison });
+  const { thumbs, sizes, thumbError } = await makeThumbs({ providers, resolved, driveId: id, ext, accessToken, costs, imagePrompt: prompt || copy.thumbPrompt || copy.title || head, text: head, sub, tag: copy.thumbTag, comparison });
   let steps = patchStep(base, 'transcript', { artifacts: { headline: head, subhead: sub, imagePrompt: prompt } });
   if (sizes.length) steps = patchStep(steps, 'images', { status: 'done', artifacts: { thumbs, sizes } });
   const at = new Date().toISOString();
@@ -550,7 +551,7 @@ export async function generateThumbnail({ tenantId = 'default', funnelId, driveI
  * hook headline) and upload it to Post for Me. Returns { thumbs: platform ->
  * url, sizes: [{ size, label, url, platforms }] }.
  */
-async function renderThumbs({ providers, platforms, base, text, sub = '', draw = null }) {
+async function renderThumbs({ providers, platforms, base, text, sub = '', tag = '', draw = null }) {
   const postformeKey = providers.resolved.postformeKey || '';
   if (!postformeKey) throw new Error('No Post for Me API key, set it under Setup → Keys and credit');
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
@@ -559,7 +560,7 @@ async function renderThumbs({ providers, platforms, base, text, sub = '', draw =
   for (const [size, spec] of Object.entries(THUMB_SIZES)) {
     const users = platforms.filter((k) => PLATFORM_SIZE[k] === size);
     if (!users.length) continue;
-    const jpg = draw ? await draw(spec) : await composeThumb(base, spec, { text, sub });
+    const jpg = draw ? await draw(spec) : await composeThumb(base, spec, { text, sub, tag });
     const url = await publish.uploadMedia(jpg, 'image/jpeg');
     for (const k of users) thumbs[k] = url;
     sizes.push({ size, label: spec.label, url, platforms: users });
@@ -635,8 +636,8 @@ export async function silentDriveIds({ funnel, resolved, files = [] }) {
  * One size. A full-frame size crops the picture to fill it. A narrow one puts
  * the picture on a panel under the headline, over a soft blurred copy of itself.
  */
-async function composeThumb(base, spec, { text, sub = '' }) {
-  const overlay = { input: Buffer.from(thumbSvg({ ...spec, accent: THUMB_ACCENT, text, sub })) };
+async function composeThumb(base, spec, { text, sub = '', tag = '' }) {
+  const overlay = { input: Buffer.from(thumbSvg({ ...spec, accent: THUMB_ACCENT, text, sub, tag })) };
   const art = thumbArt(spec);
   if (!art) return sharp(base).resize(spec.w, spec.h, { fit: 'cover' }).composite([overlay]).jpeg({ quality: 90 }).toBuffer();
   const panel = await sharp(base).resize(art.w, art.h, { fit: 'cover' }).toBuffer();
@@ -698,13 +699,14 @@ function releaseClean(driveId) {
  * corner watermark leaves the frame, cut the outro), then upload it to Post for
  * Me. The page polls cleanStatus.
  */
-export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endText = '', endLink = '', endSec = 0, subs = false, name = '', source = null, runner = '', baseUrl = '' }) {
+export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endText = '', endLink = '', endSec = 0, subs = false, name = '', source = null, runner = '', baseUrl = '', accessToken = '' }) {
   if (!driveId) throw new Error('driveId required');
   const id = String(driveId);
   const { funnel } = await loadFunnel(funnelId);
   const providers = await buildProviders(funnel.tenant_id);
   const job = cleanJobs.get(id);
   if (job && job.state === 'running') return job;
+  await makeReadable({ tenantId: funnel.tenant_id, providers, driveId: id, accessToken, name });
   const opts = { ...normalizeCleanOpts({ zoomPct, trimEndSec }), ...normalizeEndCard({ endText, endLink, endSec }) };
   // Subtitles from the transcript, only when it has timestamps and the video doesn't already show subtitles.
   if (subs) Object.assign(opts, await subtitlePlan({ funnel, providers, driveId: id, trimEndSec: opts.trimEndSec, name, source }));
@@ -722,6 +724,26 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endTe
       cleanJobs.set(id, { state: 'failed', error: err.message });
     });
   return running;
+}
+
+/**
+ * ffmpeg reads the video by its public link, so share it first with whatever can:
+ * the operator's Google sign-in, the service account, else the connected Drive.
+ * Each may lack access, which is fine when the file is public anyway. A file
+ * still behind Google's sign-in stops here with the fix, before a run is wasted.
+ */
+async function makeReadable({ tenantId, providers, driveId, accessToken = '', name = '' }) {
+  await driveFor(providers, accessToken).shareAnyone(driveId).catch((err) => log.info({ err: err.message, driveId }, 'could not share the video'));
+  const res = await fetch(publicDlUrl(driveId), { headers: { Range: 'bytes=0-0' } }).catch(() => null);
+  if (res) await res.body?.cancel().catch(() => {});
+  if (!res || !isDriveSignIn(res.url)) return;
+  const connected = await driveConnect.drive(tenantId).catch(() => null);
+  if (connected) await connected.client.makePublic(driveId).catch((err) => log.info({ err: err.message, driveId }, 'connected Drive could not share the video'));
+  const again = await fetch(publicDlUrl(driveId), { headers: { Range: 'bytes=0-0' } }).catch(() => null);
+  if (again) await again.body?.cancel().catch(() => {});
+  if (again && isDriveSignIn(again.url)) {
+    throw new Error(`${name || 'This video'} is private in Google Drive, so it can't be read. In Drive set it to "Anyone with the link" (Viewer), then try again`);
+  }
 }
 
 const NO_TIMED_SRT = "This video's transcript has no timestamps, so there are no subtitles to burn. 🎙 Transcribe it (Whisper keeps the timings) or paste an SRT in step 2, then clean again. Editing the transcribed text drops Whisper's timings.";
@@ -1070,9 +1092,9 @@ export async function cleanForRouter({ funnelId, driveId, name = '' }) {
 }
 
 /** ✂ Clean one video and wait for it, wherever it runs. Throws when it fails. */
-async function cleanAndWait({ funnelId, driveId, name = '', source = null, opts }) {
+async function cleanAndWait({ funnelId, driveId, name = '', source = null, opts, accessToken = '' }) {
   const id = String(driveId);
-  await startClean({ funnelId, driveId: id, ...opts, name, source, baseUrl: settings.app.publicBaseUrl });
+  await startClean({ funnelId, driveId: id, ...opts, name, source, accessToken, baseUrl: settings.app.publicBaseUrl });
   const until = Date.now() + ROUTER_CLEAN_WAIT_MS;
   for (;;) {
     const j = cleanJobs.get(id) || { state: 'none' };
@@ -1199,6 +1221,7 @@ export async function cleanStatus({ funnelId, driveId }) {
 async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, edit = false, ctaLink, keepThumbs = false }) {
   const { inst, steps: base, existing } = await ensureInstance({ funnel, driveId, title: copy.title || 'Ready video' });
   let steps = base;
+  if (edit) copy = keepThumbTag(copy, ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).copy);
   const at = new Date().toISOString();
   const prev = ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).generations || [];
   // A manual save (edits) updates the current copy; only a real generation is
@@ -1281,7 +1304,8 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
   if (draft) {
     // The generation (and its cost) is already on the draft, finish it.
     let steps = instanceService.parseSteps(draft);
-    steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, ctaLink } });
+    const kept = keepThumbTag(copy, ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).copy);
+    steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy: kept, ctaLink } });
     steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
     steps = patchStep(steps, 'publish', { status: 'done', artifacts: publishArt });
     await instanceRepo.saveSteps(draft.id, steps, sumInstanceCost(steps));
@@ -1501,7 +1525,7 @@ export async function startPost({ tenantId = 'default', funnelId, selections, ac
     for (const sel of clean) {
       try {
         const saved = sel.cleanOpts ? (await loadDrafts(funnel, [sel.driveId]))[sel.driveId] : null;
-        if (sel.cleanOpts && !(saved && saved.clean)) await cleanAndWait({ funnelId, driveId: sel.driveId, name: sel.name, opts: sel.cleanOpts });
+        if (sel.cleanOpts && !(saved && saved.clean)) await cleanAndWait({ funnelId, driveId: sel.driveId, name: sel.name, opts: sel.cleanOpts, accessToken });
         ready.push(sel);
       } catch (err) {
         refused.push({ driveId: sel.driveId, name: sel.name, ok: false, error: `✂ Clean failed, nothing posted: ${err.message}` });

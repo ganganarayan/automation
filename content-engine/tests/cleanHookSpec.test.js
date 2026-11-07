@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { signTicket, peekTicket, readTicket, driveAuthUrl, normalizeRepo, dispatchRequest, keepSecFor, normalizeRunner, DRIVE_SCOPE } from '../src/utils/cleanHookSpec.js';
+import { isDriveSignIn, signTicket, peekTicket, readTicket, driveAuthUrl, normalizeRepo, dispatchRequest, keepSecFor, normalizeRunner, DRIVE_SCOPE } from '../src/utils/cleanHookSpec.js';
 
 describe('clean job ticket', () => {
   const now = 1_800_000_000_000;
@@ -57,5 +57,17 @@ describe('keepSecFor / normalizeRunner', () => {
     expect(normalizeRunner('GitHub')).toBe('github');
     expect(normalizeRunner('')).toBe('railway');
     expect(normalizeRunner('x')).toBe('railway');
+  });
+});
+
+describe('isDriveSignIn', () => {
+  it('spots a private file sent to the sign-in page', () => {
+    expect(isDriveSignIn('https://accounts.google.com/v3/signin/identifier?continue=x')).toBe(true);
+  });
+
+  it('passes a real download, and a URL only mentioning the host', () => {
+    expect(isDriveSignIn('https://drive.usercontent.google.com/download?id=a&export=download')).toBe(false);
+    expect(isDriveSignIn('https://x.io/?u=https://accounts.google.com/')).toBe(false);
+    expect(isDriveSignIn('')).toBe(false);
   });
 });

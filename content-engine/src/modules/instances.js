@@ -276,10 +276,10 @@ export function register(ctx) {
   router.post('/admin/instances/ready-ai/clean', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      const { funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, subs, name, source, runner } = req.body || {};
+      const { funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, subs, name, source, runner, accessToken } = req.body || {};
       if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
       const baseUrl = `${req.protocol}://${req.get('host')}`;
-      res.json({ ok: true, ...(await readyPost.startClean({ funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, subs: subs === true, name: String(name || ''), source, runner: String(runner || ''), baseUrl })) });
+      res.json({ ok: true, ...(await readyPost.startClean({ funnelId, driveId, zoomPct, trimEndSec, endText, endLink, endSec, subs: subs === true, name: String(name || ''), source, runner: String(runner || ''), baseUrl, accessToken: String(accessToken || '') })) });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -1430,7 +1430,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       try{ localStorage.setItem('cleanOpts', JSON.stringify({ zoomPct, trimEndSec, endText, endLink, endSec:Number($('es',id).value)||0, runner, subs: !!($('sb',id) && $('sb',id).checked) })); }catch(e){}
       cleaning[id]=true; $('cl',id).disabled=true; bar(id, 0, true); $('cs',id).textContent='✂ Starting…';
       try{
-        const j=await post('clean', { driveId:id, zoomPct, trimEndSec, endText, endLink, endSec, subs: !!($('sb',id) && $('sb',id).checked), name:$('nm',id).value, source:SOURCE, runner });
+        const j=await post('clean', { driveId:id, zoomPct, trimEndSec, endText, endLink, endSec, subs: !!($('sb',id) && $('sb',id).checked), name:$('nm',id).value, source:SOURCE, runner, accessToken: await driveToken() });
         if(!j.ok) throw new Error(j.error||'failed');
         pollClean(id);
       }catch(e){ cleaning[id]=false; $('cl',id).disabled=false; bar(id, 0, false); $('cs',id).textContent='⚠ '+e.message; }
