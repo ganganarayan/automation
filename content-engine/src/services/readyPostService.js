@@ -44,10 +44,10 @@ import * as digest from './digestService.js';
 import * as firstCommentsRepo from '../repositories/firstCommentsRepository.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
-import { copySystemPrompt, copyUserPrompt, normalizeCopy, keepThumbTag, platformConfigsFor, platformKey, nextImagePrompt, stepDownFallback, STEP_DOWN_PLATFORMS } from '../utils/aiCopySpec.js';
+import { copySystemPrompt, copyUserPrompt, normalizeCopy, platformConfigsFor, platformKey, nextImagePrompt, stepDownFallback, STEP_DOWN_PLATFORMS } from '../utils/aiCopySpec.js';
 import * as imageShort from './imageShortService.js';
 import { shortTitle } from '../utils/shortSpec.js';
-import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt, thumbTagFor } from '../utils/thumbSpec.js';
+import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt } from '../utils/thumbSpec.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
 import sharp from 'sharp';
@@ -448,7 +448,7 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
   const { thumbs, sizes, thumbError } = withThumbs
     ? await makeThumbs({
       providers, resolved, driveId, ext, accessToken, costs, comparison,
-      imagePrompt: imagePrompt || copy.title, text: comparison ? tArt.headline || '' : tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '', tag: copy.thumbTag,
+      imagePrompt: imagePrompt || copy.title, text: comparison ? tArt.headline || '' : tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || '',
     })
     : { thumbs: saved.thumbs || {}, sizes: saved.sizes || [], thumbError: '' };
   const instanceId = await saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, keepThumbs: !withThumbs }).catch((err) => {
@@ -473,7 +473,7 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
  * the funnel's platforms need with the operator's headline. Never throws: a
  * failure comes back as thumbError. Image costs are pushed onto `costs`.
  */
-async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessToken = '', costs, imagePrompt, text, sub = '', tag = '', comparison = null }) {
+async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessToken = '', costs, imagePrompt, text, sub = '', comparison = null }) {
   const ffmpeg = createFfmpegProvider({}, log);
   let video = null; // downloaded only when a non-public file needs it for the frame
   const getVideo = async () => video || (video = await driveFor(providers, accessToken).download(driveId));
@@ -505,8 +505,7 @@ async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessTok
         : await ffmpeg.extractFrame({ url: publicDlUrl(driveId) }).catch(async () => ffmpeg.extractFrame({ videoBuffer: await getVideo(), ext }));
     }
     // The operator's headline + sub-head (typed at the transcript stage) go on the image.
-    const pill = thumbTagFor({ on: resolved.thumbTagOn, tag, fallback: resolved.thumbTagDefault });
-    ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text, sub, tag: pill }));
+    ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text, sub }));
   } catch (err) {
     thumbError = err.message;
     log.warn({ err: err.message, driveId }, 'thumbnail generation failed (first frame will be used)');
@@ -536,7 +535,7 @@ export async function generateThumbnail({ tenantId = 'default', funnelId, driveI
   if (!head && !comparison) throw new Error('Type the thumbnail headline first');
   const costs = [];
   const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
-  const { thumbs, sizes, thumbError } = await makeThumbs({ providers, resolved, driveId: id, ext, accessToken, costs, imagePrompt: prompt || copy.thumbPrompt || copy.title || head, text: head, sub, tag: copy.thumbTag, comparison });
+  const { thumbs, sizes, thumbError } = await makeThumbs({ providers, resolved, driveId: id, ext, accessToken, costs, imagePrompt: prompt || copy.thumbPrompt || copy.title || head, text: head, sub, comparison });
   let steps = patchStep(base, 'transcript', { artifacts: { headline: head, subhead: sub, imagePrompt: prompt } });
   if (sizes.length) steps = patchStep(steps, 'images', { status: 'done', artifacts: { thumbs, sizes } });
   const at = new Date().toISOString();
@@ -551,7 +550,7 @@ export async function generateThumbnail({ tenantId = 'default', funnelId, driveI
  * hook headline) and upload it to Post for Me. Returns { thumbs: platform ->
  * url, sizes: [{ size, label, url, platforms }] }.
  */
-async function renderThumbs({ providers, platforms, base, text, sub = '', tag = '', draw = null }) {
+async function renderThumbs({ providers, platforms, base, text, sub = '', draw = null }) {
   const postformeKey = providers.resolved.postformeKey || '';
   if (!postformeKey) throw new Error('No Post for Me API key, set it under Setup → Keys and credit');
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
@@ -560,7 +559,7 @@ async function renderThumbs({ providers, platforms, base, text, sub = '', tag = 
   for (const [size, spec] of Object.entries(THUMB_SIZES)) {
     const users = platforms.filter((k) => PLATFORM_SIZE[k] === size);
     if (!users.length) continue;
-    const jpg = draw ? await draw(spec) : await composeThumb(base, spec, { text, sub, tag });
+    const jpg = draw ? await draw(spec) : await composeThumb(base, spec, { text, sub });
     const url = await publish.uploadMedia(jpg, 'image/jpeg');
     for (const k of users) thumbs[k] = url;
     sizes.push({ size, label: spec.label, url, platforms: users });
@@ -636,8 +635,8 @@ export async function silentDriveIds({ funnel, resolved, files = [] }) {
  * One size. A full-frame size crops the picture to fill it. A narrow one puts
  * the picture on a panel under the headline, over a soft blurred copy of itself.
  */
-async function composeThumb(base, spec, { text, sub = '', tag = '' }) {
-  const overlay = { input: Buffer.from(thumbSvg({ ...spec, accent: THUMB_ACCENT, text, sub, tag })) };
+async function composeThumb(base, spec, { text, sub = '' }) {
+  const overlay = { input: Buffer.from(thumbSvg({ ...spec, accent: THUMB_ACCENT, text, sub })) };
   const art = thumbArt(spec);
   if (!art) return sharp(base).resize(spec.w, spec.h, { fit: 'cover' }).composite([overlay]).jpeg({ quality: 90 }).toBuffer();
   const panel = await sharp(base).resize(art.w, art.h, { fit: 'cover' }).toBuffer();
@@ -1221,7 +1220,6 @@ export async function cleanStatus({ funnelId, driveId }) {
 async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, edit = false, ctaLink, keepThumbs = false }) {
   const { inst, steps: base, existing } = await ensureInstance({ funnel, driveId, title: copy.title || 'Ready video' });
   let steps = base;
-  if (edit) copy = keepThumbTag(copy, ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).copy);
   const at = new Date().toISOString();
   const prev = ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).generations || [];
   // A manual save (edits) updates the current copy; only a real generation is
@@ -1304,8 +1302,7 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
   if (draft) {
     // The generation (and its cost) is already on the draft, finish it.
     let steps = instanceService.parseSteps(draft);
-    const kept = keepThumbTag(copy, ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).copy);
-    steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy: kept, ctaLink } });
+    steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, ctaLink } });
     steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
     steps = patchStep(steps, 'publish', { status: 'done', artifacts: publishArt });
     await instanceRepo.saveSteps(draft.id, steps, sumInstanceCost(steps));
