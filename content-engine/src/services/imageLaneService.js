@@ -42,8 +42,10 @@ import { request } from '../core/httpClient.js';
 import { extractRow, composePrompt, composeCaptions, buildPlatformConfigs } from '../utils/postCompose.js';
 import { patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import * as imageShort from './imageShortService.js';
-import { shortTitle } from '../utils/shortSpec.js';
-import { costImages, costAnimation } from '../utils/pricing.js';
+import { shortTitle, imageVideoMode, imageVideoConfigs } from '../utils/shortSpec.js';
+import { platformKey } from '../utils/aiCopySpec.js';
+import { createTtsProvider } from '../providers/ttsProvider.js';
+import { costImages, costAnimation, costTts } from '../utils/pricing.js';
 import { totalClipSeconds } from '../utils/stageSpec.js';
 import { stepDownOf, stepDownPicture, stepDownText, stepDownCaption, stepDownPrompt, stepDownNote } from '../utils/stepDownSpec.js';
 import { headlineImage } from './imageComposer.js';
@@ -379,9 +381,21 @@ export async function approve(approval) {
   const configs = buildPlatformConfigs(full, short);
   const req = { caption: short || full, mediaUrl: (img.image || {}).url || p.mediaUrl, ...(configs ? { platformConfigurations: configs } : {}) };
   const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+  const ytConfig = { title: shortTitle(row.title, short || full), caption: full || short };
+  // Default: every channel gets a video of the picture with music and the
+  // caption read in the funnel's voice. A failed render posts the picture.
+  const video = await videoFor({ row, f, providers, publish, imageUrl: req.mediaUrl, text: short || full, log });
+  if (video) {
+    const platforms = (f.accounts || []).map((id) => platformKey((accountMap[id] || {}).platform));
+    req.platformConfigurations = imageVideoConfigs({ platforms, full, short, title: ytConfig.title, videoUrl: video.url, imageUrl: req.mediaUrl });
+    req.imageUrl = req.mediaUrl;
+    req.mediaUrl = video.url;
+    req.imageVideo = { seconds: video.seconds, voiced: video.voiced, ...(video.voiceError ? { voiceError: video.voiceError } : {}) };
+    accounts.splice(0, accounts.length, ...(f.accounts || []));
+    if (video.chars) steps = addCostToSteps(steps, 'publish', { ...costTts({ provider: 'elevenlabs', chars: video.chars }), at: new Date().toISOString() });
+  }
   // YouTube takes no images: it gets the picture as a Short, on a post of its own.
   const ytAccounts = (f.accounts || []).filter((id) => !accounts.includes(id));
-  const ytConfig = { title: shortTitle(row.title, short || full), caption: full || short };
   let shortUrl = '';
   let shortRef = null;
   let shortError = '';
@@ -438,6 +452,33 @@ export async function approve(approval) {
   await setApprovalStatus(approval.id, 'published');
   log.info({ refs, postAt: postAt || 'now', accounts: accounts.length, shorts: shortRef ? ytAccounts.length : 0 }, 'image post handed to Post for Me');
   return refs[0];
+}
+
+/**
+ * The image post as a video, per Settings (image_video): null when it is set
+ * to the picture, the funnel posts nowhere, or the render failed.
+ */
+async function videoFor({ row, f, providers, publish, imageUrl, text, log }) {
+  const mode = imageVideoMode(providers.resolved.imageVideo);
+  if (mode === 'off' || !(f.accounts || []).length || !imageUrl) return null;
+  try {
+    let tts = null;
+    let noVoice = '';
+    if (mode === 'on') {
+      const cfg = await funnels.getConfig(row.funnel_id).catch(() => ({}));
+      const apiKey = ((providers.resolved.tts || {}).elevenlabsApiKey) || '';
+      if (!cfg.voice_id) noVoice = 'no voice chosen in this funnel\'s lane setup';
+      else if (!apiKey) noVoice = 'no ElevenLabs key on Keys and credit';
+      else tts = createTtsProvider({ provider: cfg.tts_provider, apiKey, voiceId: cfg.voice_id }, log);
+    }
+    const made = await imageShort.makeVideo({ imageUrl, publish, music: providers.resolved.shortMusic, text, tts, log });
+    if (noVoice) made.voiceError = noVoice;
+    log.info({ seconds: made.seconds, voiced: made.voiced, voiceError: made.voiceError || undefined }, 'image post rendered as a video');
+    return made;
+  } catch (err) {
+    log.warn({ err: err.message }, 'image post video failed, posting the picture instead');
+    return null;
+  }
 }
 
 /** Rework (reject with a note): regenerate the image and re-send the approval. */

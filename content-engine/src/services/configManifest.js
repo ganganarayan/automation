@@ -16,7 +16,7 @@
  * 'time' (HH:MM) | 'time_list' (comma list of HH:MM).
  */
 
-import { MUSIC_OPTIONS, DEFAULT_MUSIC, SHORT_SECONDS } from '../utils/shortSpec.js';
+import { MUSIC_OPTIONS, DEFAULT_MUSIC, SHORT_SECONDS, IMAGE_VIDEO_OPTIONS, IMAGE_VIDEO_SECONDS, IMAGE_VIDEO_MAX_SECONDS } from '../utils/shortSpec.js';
 import { DEFAULT_THUMB_RULES } from '../utils/thumbSpec.js';
 import { DEFAULT_COMPARISON_PROMPT } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS, DEFAULT_COMPARISON_BRAND } from '../utils/comparisonFacts.js';
@@ -113,11 +113,19 @@ export const CONFIG_MANIFEST = {
         ],
       },
       {
-        title: 'YouTube Shorts from image posts',
+        title: 'Image posts as video',
         fields: [
           {
+            key: 'image_video',
+            label: 'How image posts go out',
+            type: 'select',
+            default: 'on',
+            options: IMAGE_VIDEO_OPTIONS,
+            help: `When a funnel has no video, its image post is drawn from the sheet's image prompt and sent to every channel as a ${IMAGE_VIDEO_SECONDS}-second video of the picture with the music below. With the voice on, the caption is read aloud in the funnel's chosen ElevenLabs voice (its lane setup), and the video runs as long as the voice needs, up to ${IMAGE_VIDEO_MAX_SECONDS} s. No voice set up = music only. A video that cannot be made falls back to the picture.`,
+          },
+          {
             key: 'short_music',
-            label: 'Music on the Short',
+            label: 'Music (image-post videos and YouTube Shorts)',
             type: 'select',
             default: DEFAULT_MUSIC,
             options: MUSIC_OPTIONS,

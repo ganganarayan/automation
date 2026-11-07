@@ -159,6 +159,9 @@ export async function forTenant(tenantId = 'default') {
       track: pick('short_music', ''),
       url: pick('short_music_url', ''),
     },
+    // Image posts: 'on' = a video with music and the caption read aloud (default),
+    // 'music' = a video with music only, 'off' = the picture.
+    imageVideo: pick('image_video', 'on'),
     // System prompts (API Keys → System prompts). Blank = the built-in default.
     prompts: {
       global: pick('system_prompt_global', ''),

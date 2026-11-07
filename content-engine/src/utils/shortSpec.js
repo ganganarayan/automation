@@ -76,26 +76,106 @@ export function shortTitle(title = '', caption = '') {
   return text.slice(0, 100).trim() || 'Short';
 }
 
+/** An image post sent as a video (every channel) is this long, or longer when the voice needs it. */
+export const IMAGE_VIDEO_SECONDS = 8;
+/** Longest video an image post becomes: a long caption is cut before it is read. */
+export const IMAGE_VIDEO_MAX_SECONDS = 60;
+/** About 14 spoken characters a second, so this keeps the voice inside the max. */
+export const VOICE_MAX_CHARS = 700;
+
+/** Settings: image posts go out as a video (default) or as the picture. */
+export const IMAGE_VIDEO_OPTIONS = [
+  { value: 'on', label: 'Video: the picture with music and the caption read aloud (default)' },
+  { value: 'music', label: 'Video: the picture with music, no voice' },
+  { value: 'off', label: 'Picture (YouTube still gets a Short)' },
+];
+
+/** The image-post mode from Settings; blank or unknown = 'on'. */
+export function imageVideoMode(value) {
+  const v = String(value || '').trim();
+  return IMAGE_VIDEO_OPTIONS.some((o) => o.value === v) ? v : 'on';
+}
+
+/**
+ * The caption as something to read aloud: no links, hashtags, mentions or
+ * emoji, cut at a sentence end under VOICE_MAX_CHARS.
+ */
+export function voiceText(caption = '') {
+  let s = String(caption || '')
+    .replace(/https?:\/\/\S+|www\.\S+/gi, ' ')
+    .replace(/(^|\s)[#@][\p{L}\p{N}_]+/gu, ' ')
+    .replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{20E3}]/gu, '')
+    .replace(/[*_~`>|]+/g, ' ')
+    .split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('. ')
+    .replace(/([.!?:;,])\.\s/g, '$1 ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (s.length > VOICE_MAX_CHARS) {
+    const cut = s.slice(0, VOICE_MAX_CHARS);
+    const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+    s = end > VOICE_MAX_CHARS / 3 ? cut.slice(0, end + 1) : cut.replace(/\s+\S*$/, '');
+  }
+  return /[\p{L}\p{N}]/u.test(s) ? s : '';
+}
+
+const LONG_TEXT = new Set(['linkedin', 'facebook', 'youtube']);
+
+/**
+ * Per-platform configs for an image post sent as a video: the long caption
+ * where there is room, the short one elsewhere, the picture as every cover
+ * (and as the Threads and X step-down art), and YouTube's title.
+ */
+export function imageVideoConfigs({ platforms = [], full = '', short = '', title = '', videoUrl, imageUrl }) {
+  const media = [imageUrl ? { url: videoUrl, thumbnail_url: imageUrl } : { url: videoUrl, thumbnail_timestamp_ms: 0 }];
+  const out = {};
+  for (const k of new Set(platforms)) {
+    if (!k) continue;
+    const caption = LONG_TEXT.has(k) ? (full || short) : (short || full);
+    out[k] = { caption, media, ...(k === 'youtube' ? { title } : {}) };
+  }
+  return out;
+}
+
+/** Video length for a voice of `voiceSec`: at least 8 s, the voice plus 1.5 s, at most 60 s. */
+export function imageVideoSeconds(voiceSec = 0) {
+  const v = Number(voiceSec) || 0;
+  if (v <= 0) return IMAGE_VIDEO_SECONDS;
+  return Math.min(IMAGE_VIDEO_MAX_SECONDS, Math.max(IMAGE_VIDEO_SECONDS, Math.ceil(v + 1.5)));
+}
+
 /**
  * ffmpeg argv: the image, whole, on a blurred copy of itself at 1080x1920, with
- * the music faded in and out.
+ * the music faded in and out. With a voice file, the music drops low and the
+ * voice starts half a second in.
  */
-export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT_SECONDS }) {
+export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT_SECONDS, voicePath = '' }) {
   const audioIn = music.file
     ? ['-stream_loop', '-1', '-i', music.file]
     : ['-f', 'lavfi', '-i', `aevalsrc=exprs='${music.expr}':s=44100:c=stereo`];
+  const voiceIn = voicePath ? ['-i', voicePath] : [];
+  const musicChain = `aresample=44100,aformat=channel_layouts=stereo,${voicePath ? 'volume=0.25,' : ''}afade=t=in:d=1,afade=t=out:st=${seconds - 2}:d=2`;
+  const audio = voicePath
+    ? [
+      `[1:a]${musicChain}[m]`,
+      '[2:a]aresample=44100,aformat=channel_layouts=stereo,adelay=500|500,apad[vo]',
+      '[m][vo]amix=inputs=2:duration=first:normalize=0[a]',
+    ]
+    : [`[1:a]${musicChain}[a]`];
   const filter = [
     '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=30:2[bg]',
     '[0:v]scale=1080:1920:force_original_aspect_ratio=decrease[fg]',
     '[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]',
-    `[1:a]afade=t=in:d=1,afade=t=out:st=${seconds - 2}:d=2[a]`,
+    ...audio,
   ].join(';');
   return [
-    '-y', '-loop', '1', '-framerate', '30', '-i', imagePath, ...audioIn,
+    '-y', '-loop', '1', '-framerate', '30', '-i', imagePath, ...audioIn, ...voiceIn,
     '-filter_complex', filter, '-map', '[v]', '-map', '[a]', '-t', String(seconds),
     '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'stillimage', '-crf', '23',
     '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outPath,
   ];
 }
 
-export default { SHORT_SECONDS, MUSIC_TRACKS, MUSIC_OPTIONS, DEFAULT_MUSIC, OWN_MUSIC, musicLink, pickMusic, shortTitle, imageShortArgs };
+export default {
+  SHORT_SECONDS, MUSIC_TRACKS, MUSIC_OPTIONS, DEFAULT_MUSIC, OWN_MUSIC, musicLink, pickMusic, shortTitle, imageShortArgs,
+  IMAGE_VIDEO_SECONDS, IMAGE_VIDEO_MAX_SECONDS, VOICE_MAX_CHARS, IMAGE_VIDEO_OPTIONS, imageVideoMode, voiceText, imageVideoSeconds, imageVideoConfigs,
+};

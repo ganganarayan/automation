@@ -1739,7 +1739,8 @@ export async function retryFailed({ instanceId, auto = false }) {
   const steppers = (c) => STEP_DOWN_PLATFORMS.includes(platformKey(c.platform));
   // An image post reaches YouTube as a Short, on a post of its own.
   const imagePost = row.source_type === 'sheet' || !!stepDownOf(steps);
-  const isShort = (c) => imagePost && platformKey(c.platform) === 'youtube';
+  // An image post sent as a video already includes YouTube on the one post.
+  const isShort = (c) => imagePost && !req.imageVideo && platformKey(c.platform) === 'youtube';
   const others = failed.filter((c) => !steppers(c) && !isShort(c));
   const shorts = failed.filter(isShort);
   const original = oldRefs[0] ? await firstCommentsRepo.getByPost(oldRefs[0]).catch(() => null) : null;
