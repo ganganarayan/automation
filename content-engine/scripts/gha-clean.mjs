@@ -33,7 +33,7 @@ import { readFile, writeFile, stat } from 'node:fs/promises';
 import { cleanVideoArgs, cleanWithCardArgs, progressSeconds, progressPct, clipSrt } from '../src/utils/cleanSpec.js';
 import { keepSecFor } from '../src/utils/cleanHookSpec.js';
 import { ffmpegConcatArgs, buildSrt } from '../src/utils/stageSpec.js';
-import { imageShortArgs, alignmentCues, evenCues, voiceText, imageVideoSeconds, aspectCropFilter } from '../src/utils/shortSpec.js';
+import { imageShortArgs, alignmentCues, evenCues, voiceText, imageVideoSeconds, aspectCropFilter, pickMusic, notAudio } from '../src/utils/shortSpec.js';
 
 const HOOK = String(process.env.HOOK || '').replace(/\/+$/, '');
 const TICKET = String(process.env.TICKET || '');
@@ -174,8 +174,17 @@ async function imageVideo(job) {
   await writeFile(subPath, buildSrt(voice.cues), 'utf8');
   let music = job.music || {};
   if (music.url) {
-    await run('curl', ['-fsSL', '--retry', '3', '-o', 'music', music.url]);
-    music = { file: 'music' };
+    // A link that fails, or gives a web page, falls back to the default track: the post still goes.
+    try {
+      const res = await fetch(music.url);
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      if (notAudio(res.headers.get('content-type'))) throw new Error('the link gave a web page, not a music file');
+      await writeFile('music', Buffer.from(await res.arrayBuffer()));
+      music = { file: 'music' };
+    } catch (err) {
+      console.log(`Own music unreadable (${err.message}), using the default track`);
+      music = pickMusic({});
+    }
   }
   await progress({ phase: 'encoding', pct: 40 });
   let subtitleError = '';

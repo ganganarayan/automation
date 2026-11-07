@@ -31,7 +31,7 @@
  */
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
 import { navHtml, NAV_CSS } from '../utils/adminNav.js';
-import { MUSIC_TRACKS, musicJsExpr } from '../utils/shortSpec.js';
+import { MUSIC_TRACKS, musicJsExpr, MUSIC_PAGE_SITES } from '../utils/shortSpec.js';
 import { FLOW_MANIFEST, hasFlow } from '../services/flowManifest.js';
 import { WIZARD_STEPS, completeness, stepFields } from '../services/videoWizardManifest.js';
 import * as imageGateService from '../services/imageGateService.js';
@@ -1224,6 +1224,7 @@ function musicPreviewButton(key) {
 <span class="hint" id="mprev-st"></span>
 <script>(function(){
   const TRACKS=${JSON.stringify(tracks).replace(/</g, '\\u003c')};
+  const PAGE=${String(MUSIC_PAGE_SITES).replace(/</g, '\\u003c')};
   let ctx=null,src=null,aud=null;
   const btn=document.getElementById('mprev'),st=document.getElementById('mprev-st');
   function stop(){try{if(src)src.stop();}catch(e){}src=null;if(aud){aud.pause();aud=null;}btn.textContent='▶ Play';}
@@ -1235,6 +1236,7 @@ function musicPreviewButton(key) {
     const sel=document.querySelector('[name="set['+${k}+']"]');const v=sel?sel.value:'';
     st.textContent='';
     if(v==='own'){const u=ownLink();if(!/^https?:/i.test(u)){st.textContent=' 🟡 Paste your music link below first.';return;}
+      if(PAGE.test(u)){st.textContent=' 🟡 That is a web page, not a music file, so videos use the built-in Calm pad instead. Upload an mp3 to Google Drive and paste its share link.';return;}
       aud=new Audio(u);aud.onended=stop;aud.play().then(function(){btn.textContent='■ Stop';}).catch(function(e){st.textContent=' 🟡 Could not play that link: '+e.message;aud=null;});return;}
     const body=TRACKS[v]||Object.values(TRACKS)[0];
     const fn=new Function('t','mod','return '+body);const mod=function(a,b){return a-b*Math.floor(a/b);};

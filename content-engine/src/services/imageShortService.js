@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { createFfmpegProvider } from '../providers/ffmpegProvider.js';
 import {
-  imageShortArgs, pickMusic, voiceText, imageVideoSeconds, alignmentCues, evenCues, IMAGE_VIDEO_SIZES, PRIMARY_SIZE,
+  imageShortArgs, pickMusic, notAudio, voiceText, imageVideoSeconds, alignmentCues, evenCues, IMAGE_VIDEO_SIZES, PRIMARY_SIZE,
 } from '../utils/shortSpec.js';
 import { buildSrt } from '../utils/stageSpec.js';
 
@@ -24,6 +24,7 @@ async function musicFor(choice, dir, log) {
   try {
     const res = await fetch(picked.url);
     if (!res.ok) throw new Error(`status ${res.status}`);
+    if (notAudio(res.headers.get('content-type'))) throw new Error('the link gave a web page, not a music file');
     const file = join(dir, 'music');
     await writeFile(file, Buffer.from(await res.arrayBuffer()));
     return { file };

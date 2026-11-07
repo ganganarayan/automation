@@ -209,3 +209,18 @@ describe('where image-post videos are made', () => {
     expect(m.aspectCropFilter(null)).toBe('');
   });
 });
+
+describe('own music link', () => {
+  it('treats a YouTube or Spotify page as no link, so the default track plays', async () => {
+    const { musicLink, pickMusic, isMusicPage, notAudio, MUSIC_TRACKS } = await import('../src/utils/shortSpec.js');
+    expect(isMusicPage('https://youtu.be/Pz0ERqxZXKQ?si=x')).toBe(true);
+    expect(isMusicPage('https://www.youtube.com/watch?v=abc')).toBe(true);
+    expect(isMusicPage('https://open.spotify.com/track/1')).toBe(true);
+    expect(isMusicPage('https://drive.google.com/file/d/abcdefghijk/view')).toBe(false);
+    expect(musicLink('https://youtu.be/Pz0ERqxZXKQ')).toBe('');
+    expect(pickMusic({ track: 'own', url: 'https://youtu.be/Pz0ERqxZXKQ' })).toEqual({ expr: MUSIC_TRACKS[0].expr });
+    expect(pickMusic({ track: 'own', url: 'https://x.com/a.mp3' })).toEqual({ url: 'https://x.com/a.mp3' });
+    expect(notAudio('text/html; charset=utf-8')).toBe(true);
+    expect(notAudio('audio/mpeg')).toBe(false);
+  });
+});

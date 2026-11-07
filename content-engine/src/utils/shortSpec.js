@@ -61,10 +61,23 @@ export const MUSIC_OPTIONS = [
 
 const DRIVE_ID = /(?:\/d\/|[?&]id=)([\w-]{10,})/;
 
-/** A public link to the music: a Drive share link becomes its download link. */
+/** Sites that give a web page, not a music file (YouTube, Spotify, SoundCloud...). */
+export const MUSIC_PAGE_SITES = /^https?:\/\/([^/]*\.)?(youtube\.com|youtu\.be|spotify\.com|soundcloud\.com|apple\.com|jiosaavn\.com|gaana\.com|wynk\.in)(\/|$)/i;
+
+/** True for a link to a music site's page, which cannot be played or mixed. */
+export function isMusicPage(url) {
+  return MUSIC_PAGE_SITES.test(String(url || '').trim());
+}
+
+/** A web page came back instead of a music file. */
+export function notAudio(contentType = '') {
+  return /text\/html|application\/json/i.test(String(contentType));
+}
+
+/** A public link to the music: a Drive share link becomes its download link. A music site's page gives '' so the default track plays. */
 export function musicLink(url) {
   const s = String(url || '').trim();
-  if (!/^https?:\/\//i.test(s)) return '';
+  if (!/^https?:\/\//i.test(s) || isMusicPage(s)) return '';
   const drive = /google\.com/i.test(s) && s.match(DRIVE_ID);
   return drive ? `https://drive.usercontent.google.com/download?id=${drive[1]}&export=download&confirm=t` : s;
 }
@@ -323,5 +336,5 @@ export default {
   SHORT_SECONDS, MUSIC_TRACKS, MUSIC_OPTIONS, DEFAULT_MUSIC, OWN_MUSIC, musicLink, pickMusic, shortTitle, imageShortArgs,
   IMAGE_VIDEO_SECONDS, IMAGE_VIDEO_MAX_SECONDS, VOICE_MAX_CHARS, VOICE_LEAD_SECONDS, VOICE_TAIL_SECONDS, IMAGE_VIDEO_OPTIONS, imageVideoMode, voiceText, imageVideoSeconds, imageVideoConfigs,
   IMAGE_VIDEO_SIZES, VIDEO_PLATFORM_SIZE, PRIMARY_SIZE, sizeFor, sizesNeeded, sizedPrompt, alignmentCues, evenCues,
-  VIDEO_RUNNER_OPTIONS, FAILSAFE_OPTIONS, videoRunner, otherRunner, failSafeOn, aspectCropFilter, musicJsExpr,
+  VIDEO_RUNNER_OPTIONS, FAILSAFE_OPTIONS, videoRunner, otherRunner, failSafeOn, aspectCropFilter, musicJsExpr, isMusicPage, notAudio,
 };
