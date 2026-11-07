@@ -213,6 +213,11 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
   if (!f.sheetId) throw new LaneError('no content sheet on this funnel');
   if (!(f.accounts || []).length) throw new LaneError('no Post for Me accounts ticked on this funnel');
   const providers = await buildProviders(f.tenantId);
+  // Every image-post video carries the caption in the funnel's voice: no voice, no post (checked before any image is paid for).
+  if (imageVideoMode(providers.resolved.imageVideo) === 'on') {
+    const voice = await voiceSetup({ funnelId: f.id, providers, log });
+    if (voice.error) throw new LaneError(voice.error);
+  }
   const tab = await poster.tabFor(providers.sheets, f);
   let rows = await providers.sheets.readTab(f.sheetId, tab, { fresh: true });
   if (!rows.length) throw new LaneError('the content sheet is empty (no header row)');
@@ -408,14 +413,24 @@ export async function approve(approval) {
   const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
   const ytConfig = { title: shortTitle(row.title, short || full), caption: full || short };
   // Default: every channel gets a video of the picture with music and the
-  // caption read in the funnel's voice. A failed render posts the picture.
+  // caption read in the funnel's voice. No voice = nothing is posted.
   // Each platform gets its own size: 9:16 Reels and Shorts, 4:5 LinkedIn and Threads, 16:9 X.
   const platforms = (f.accounts || []).map((id) => platformKey((accountMap[id] || {}).platform));
   // Older posts (and a stepped-down video) have one picture: the video fits it to each size.
   const pictures = { ...(img.images || {}) };
   const sizes = sizesNeeded(platforms);
   const images = Object.fromEntries(sizes.map((s) => [s, pictures[s] || req.mediaUrl]));
-  const video = await videoFor({ row, f, providers, publish, images, sizes, text: short || full, log });
+  // The whole caption from the sheet is read aloud; the video is as long as the reading.
+  const video = await videoFor({ row, f, providers, publish, images, sizes, text: full || short, log });
+  if (video && video.error) {
+    log.error({ err: video.error }, 'voice video not made; nothing posted');
+    await stepLog.fail(row.id, 'publish');
+    steps = patchStep(steps, 'publish', { status: 'failed', error: video.error });
+    await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
+    await instanceRepo.setStatus(row.id, 'failed', `Voice video not made, nothing posted: ${video.error}`);
+    await markRow({ status: SHEET_STATUS.ready });
+    return null;
+  }
   if (video) {
     req.platformConfigurations = imageVideoConfigs({ platforms, full, short, title: ytConfig.title, videos: video.videos, images });
     req.imageUrl = req.mediaUrl;
@@ -489,29 +504,35 @@ export async function approve(approval) {
 }
 
 /**
- * The image post as a video, per Settings (image_video): null when it is set
- * to the picture, the funnel posts nowhere, or the render failed.
+ * The funnel's voice for image-post videos: { tts } or { error } saying what
+ * to set up. Both the voice (lane setup) and the ElevenLabs key are needed.
+ */
+async function voiceSetup({ funnelId, providers, log }) {
+  const cfg = await funnels.getConfig(funnelId).catch(() => ({}));
+  const apiKey = ((providers.resolved.tts || {}).elevenlabsApiKey) || '';
+  if (!cfg.voice_id) return { error: 'no voice chosen for this funnel: pick one in its lane setup (Lane 2, Voice)' };
+  if (!apiKey) return { error: 'no ElevenLabs key: add it on Keys and credit' };
+  if (String(cfg.tts_provider || 'elevenlabs').toLowerCase() !== 'elevenlabs') return { error: 'image-post videos need an ElevenLabs voice (this funnel uses another voice provider)' };
+  return { tts: createTtsProvider({ provider: 'elevenlabs', apiKey, voiceId: cfg.voice_id }, log) };
+}
+
+/**
+ * The image post as voiced videos, per Settings (image_video): null when it is
+ * set to the picture or the funnel posts nowhere; { error } when the voice or
+ * the render failed (nothing is posted then: every video carries the voice).
  */
 async function videoFor({ row, f, providers, publish, images, sizes, text, log }) {
   const mode = imageVideoMode(providers.resolved.imageVideo);
-  if (mode === 'off' || !(f.accounts || []).length || !Object.values(images || {}).some(Boolean)) return null;
+  if (mode === 'off' || !(f.accounts || []).length) return null;
+  if (!Object.values(images || {}).some(Boolean)) return { error: 'no picture to make the video from' };
+  const voice = await voiceSetup({ funnelId: row.funnel_id, providers, log });
+  if (voice.error) return { error: voice.error };
   try {
-    let tts = null;
-    let noVoice = '';
-    if (mode === 'on') {
-      const cfg = await funnels.getConfig(row.funnel_id).catch(() => ({}));
-      const apiKey = ((providers.resolved.tts || {}).elevenlabsApiKey) || '';
-      if (!cfg.voice_id) noVoice = 'no voice chosen in this funnel\'s lane setup';
-      else if (!apiKey) noVoice = 'no ElevenLabs key on Keys and credit';
-      else tts = createTtsProvider({ provider: cfg.tts_provider, apiKey, voiceId: cfg.voice_id }, log);
-    }
-    const made = await imageShort.makeVideo({ images, sizes, publish, music: providers.resolved.shortMusic, text, tts, log });
-    if (noVoice) made.voiceError = noVoice;
-    log.info({ seconds: made.seconds, voiced: made.voiced, subtitled: made.subtitled, sizes: Object.keys(made.videos), voiceError: made.voiceError || undefined }, 'image post rendered as videos');
+    const made = await imageShort.makeVideo({ images, sizes, publish, music: providers.resolved.shortMusic, text, tts: voice.tts, requireVoice: true, log });
+    log.info({ seconds: made.seconds, subtitled: made.subtitled, sizes: Object.keys(made.videos) }, 'image post rendered as voiced videos');
     return made;
   } catch (err) {
-    log.warn({ err: err.message }, 'image post video failed, posting the picture instead');
-    return null;
+    return { error: String(err.message).slice(0, 300) };
   }
 }
 

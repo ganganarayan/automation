@@ -92,7 +92,7 @@ describe('image post as a video', () => {
   it('defaults to video with voice', () => {
     expect(imageVideoMode('')).toBe('on');
     expect(imageVideoMode('junk')).toBe('on');
-    expect(imageVideoMode('music')).toBe('music');
+    expect(imageVideoMode('music')).toBe('on');
     expect(imageVideoMode('off')).toBe('off');
   });
 
@@ -103,17 +103,23 @@ describe('image post as a video', () => {
   });
 
   it('cuts a long caption at a sentence end', () => {
-    const long = Array.from({ length: 80 }, (_, i) => `Sentence number ${i} here.`).join(' ');
+    const long = Array.from({ length: 200 }, (_, i) => `Sentence number ${i} here.`).join(' ');
     const t = voiceText(long);
     expect(t.length).toBeLessThanOrEqual(VOICE_MAX_CHARS);
     expect(t.endsWith('.')).toBe(true);
   });
 
-  it('is 8 s, or the voice plus 1.5 s, up to 60 s', () => {
+  it('is exactly as long as the voice (plus its lead and hold), 8 s with no voice', () => {
     expect(imageVideoSeconds(0)).toBe(IMAGE_VIDEO_SECONDS);
-    expect(imageVideoSeconds(4)).toBe(8);
-    expect(imageVideoSeconds(12.2)).toBe(14);
-    expect(imageVideoSeconds(200)).toBe(60);
+    expect(imageVideoSeconds(4)).toBe(5.5);
+    expect(imageVideoSeconds(34.27)).toBe(35.8);
+    expect(imageVideoSeconds(1)).toBe(3);
+    expect(imageVideoSeconds(400)).toBe(175);
+  });
+
+  it('reads a caption of normal length whole', () => {
+    const cap = Array.from({ length: 30 }, (_, i) => `Line number ${i} of the caption.`).join('\n');
+    expect(voiceText(cap).split('. ').length).toBe(30);
   });
 
   it('mixes the voice over quieter music', () => {

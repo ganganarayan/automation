@@ -68,7 +68,8 @@ async function localPng(url, path) {
  * images: size -> URL (the primary size must be there, or imageUrl is used).
  * Returns { videos: size -> URL, seconds, chars, voiced, subtitled, voiceError, subtitleError }.
  */
-export async function makeVideo({ imageUrl = '', images = {}, sizes = [PRIMARY_SIZE], publish, music = {}, text = '', tts = null, log }) {
+export async function makeVideo({ imageUrl = '', images = {}, sizes = [PRIMARY_SIZE], publish, music = {}, text = '', tts = null, requireVoice = false, log }) {
+  if (requireVoice && !tts) throw new Error('no voice set up');
   const pics = { ...images };
   if (!pics[PRIMARY_SIZE] && imageUrl) pics[PRIMARY_SIZE] = imageUrl;
   if (!pics[PRIMARY_SIZE]) throw new Error('no image to make the video from');
@@ -80,6 +81,7 @@ export async function makeVideo({ imageUrl = '', images = {}, sizes = [PRIMARY_S
     let chars = 0;
     let voiceError = '';
     let cues = [];
+    if (requireVoice && !voiceText(text)) throw new Error('the caption has nothing to read aloud');
     const spoken = tts ? voiceText(text) : '';
     if (tts && !spoken) voiceError = 'the caption has nothing to read aloud';
     if (spoken) {
@@ -92,6 +94,7 @@ export async function makeVideo({ imageUrl = '', images = {}, sizes = [PRIMARY_S
         cues = out.alignment ? alignmentCues(out.alignment) : [];
         if (!cues.length) cues = evenCues(spoken, voiceSec);
       } catch (err) {
+        if (requireVoice) throw new Error(`the voice could not be made: ${String(err.message).slice(0, 200)}`);
         voiceError = String(err.message).slice(0, 200);
         voicePath = '';
         if (log) log.warn({ err: err.message }, 'image video voice failed, music only');

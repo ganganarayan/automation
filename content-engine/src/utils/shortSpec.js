@@ -76,21 +76,26 @@ export function shortTitle(title = '', caption = '') {
   return text.slice(0, 100).trim() || 'Short';
 }
 
-/** An image post sent as a video (every channel) is this long, or longer when the voice needs it. */
+/** An image post sent as a video with no voice (music only) is this long. */
 export const IMAGE_VIDEO_SECONDS = 8;
-/** Longest video an image post becomes: a long caption is cut before it is read. */
-export const IMAGE_VIDEO_MAX_SECONDS = 60;
+/**
+ * Longest video an image post becomes: under 3 minutes, so YouTube still takes
+ * it as a Short. Only a caption longer than about VOICE_MAX_CHARS is cut.
+ */
+export const IMAGE_VIDEO_MAX_SECONDS = 175;
 /** About 14 spoken characters a second, so this keeps the voice inside the max. */
-export const VOICE_MAX_CHARS = 700;
+export const VOICE_MAX_CHARS = 2400;
+/** The voice starts this far in, and the picture holds this long after it ends. */
+export const VOICE_LEAD_SECONDS = 0.5;
+export const VOICE_TAIL_SECONDS = 1;
 
 /** Settings: image posts go out as a video (default) or as the picture. */
 export const IMAGE_VIDEO_OPTIONS = [
   { value: 'on', label: 'Video: the picture with music and the caption read aloud (default)' },
-  { value: 'music', label: 'Video: the picture with music, no voice' },
   { value: 'off', label: 'Picture (YouTube still gets a Short)' },
 ];
 
-/** The image-post mode from Settings; blank or unknown = 'on'. */
+/** The image-post mode from Settings; blank, unknown or the retired 'music' (no voice) = 'on'. */
 export function imageVideoMode(value) {
   const v = String(value || '').trim();
   return IMAGE_VIDEO_OPTIONS.some((o) => o.value === v) ? v : 'on';
@@ -238,11 +243,12 @@ export function evenCues(text = '', seconds = 0, offset = 0.5) {
   return groupWords(words);
 }
 
-/** Video length for a voice of `voiceSec`: at least 8 s, the voice plus 1.5 s, at most 60 s. */
+/** Video length: exactly the voice (plus its half-second lead and a one-second hold), else 8 s with no voice. */
 export function imageVideoSeconds(voiceSec = 0) {
   const v = Number(voiceSec) || 0;
   if (v <= 0) return IMAGE_VIDEO_SECONDS;
-  return Math.min(IMAGE_VIDEO_MAX_SECONDS, Math.max(IMAGE_VIDEO_SECONDS, Math.ceil(v + 1.5)));
+  const len = Math.round((VOICE_LEAD_SECONDS + v + VOICE_TAIL_SECONDS) * 10) / 10;
+  return Math.min(IMAGE_VIDEO_MAX_SECONDS, Math.max(3, len));
 }
 
 /**
@@ -262,7 +268,7 @@ export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT
   const audio = voicePath
     ? [
       `[1:a]${musicChain}[m]`,
-      '[2:a]aresample=44100,aformat=channel_layouts=stereo,adelay=500|500,apad[vo]',
+      `[2:a]aresample=44100,aformat=channel_layouts=stereo,adelay=${VOICE_LEAD_SECONDS * 1000}|${VOICE_LEAD_SECONDS * 1000},apad[vo]`,
       '[m][vo]amix=inputs=2:duration=first:normalize=0[a]',
     ]
     : [`[1:a]${musicChain}[a]`];
@@ -283,6 +289,6 @@ export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT
 
 export default {
   SHORT_SECONDS, MUSIC_TRACKS, MUSIC_OPTIONS, DEFAULT_MUSIC, OWN_MUSIC, musicLink, pickMusic, shortTitle, imageShortArgs,
-  IMAGE_VIDEO_SECONDS, IMAGE_VIDEO_MAX_SECONDS, VOICE_MAX_CHARS, IMAGE_VIDEO_OPTIONS, imageVideoMode, voiceText, imageVideoSeconds, imageVideoConfigs,
+  IMAGE_VIDEO_SECONDS, IMAGE_VIDEO_MAX_SECONDS, VOICE_MAX_CHARS, VOICE_LEAD_SECONDS, VOICE_TAIL_SECONDS, IMAGE_VIDEO_OPTIONS, imageVideoMode, voiceText, imageVideoSeconds, imageVideoConfigs,
   IMAGE_VIDEO_SIZES, VIDEO_PLATFORM_SIZE, PRIMARY_SIZE, sizeFor, sizesNeeded, sizedPrompt, alignmentCues, evenCues,
 };
