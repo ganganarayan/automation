@@ -19,6 +19,12 @@
  * them with the SAME args as Railway (src/utils/stageSpec.js ffmpegConcatArgs,
  * captions burned when the job has them), upload, tell the app.
  *
+ * A ticket of kind 'imagevideo' is an image post's whole video (Lane 3): draw
+ * each size's picture (OpenAI), read the caption in the funnel's voice
+ * (ElevenLabs, with timings), render one video per size with the SAME args as
+ * Railway (src/utils/shortSpec.js imageShortArgs, subtitles burned), upload the
+ * pictures and the videos, tell the app.
+ *
  * Env: HOOK (the app's https address), TICKET (signed job ticket: the only
  * credential this run holds; it expires in a few hours).
  */
@@ -26,7 +32,8 @@ import { spawn } from 'node:child_process';
 import { readFile, writeFile, stat } from 'node:fs/promises';
 import { cleanVideoArgs, cleanWithCardArgs, progressSeconds, progressPct, clipSrt } from '../src/utils/cleanSpec.js';
 import { keepSecFor } from '../src/utils/cleanHookSpec.js';
-import { ffmpegConcatArgs } from '../src/utils/stageSpec.js';
+import { ffmpegConcatArgs, buildSrt } from '../src/utils/stageSpec.js';
+import { imageShortArgs, alignmentCues, evenCues, voiceText, imageVideoSeconds, aspectCropFilter } from '../src/utils/shortSpec.js';
 
 const HOOK = String(process.env.HOOK || '').replace(/\/+$/, '');
 const TICKET = String(process.env.TICKET || '');
@@ -71,16 +78,16 @@ async function probe(file) {
   };
 }
 
-async function uploadToDrive({ file, name, folderId, token }) {
+async function uploadToDrive({ file, name, folderId, token, mime = 'video/mp4' }) {
   const size = (await stat(file)).size;
   const init = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': 'video/mp4', 'X-Upload-Content-Length': String(size) },
-    body: JSON.stringify({ name, parents: folderId ? [folderId] : undefined, mimeType: 'video/mp4' }),
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': mime, 'X-Upload-Content-Length': String(size) },
+    body: JSON.stringify({ name, parents: folderId ? [folderId] : undefined, mimeType: mime }),
   });
   if (!init.ok) throw new Error(`Drive upload start ${init.status}: ${(await init.text()).slice(0, 200)}`);
   const where = init.headers.get('location');
-  const put = await fetch(where, { method: 'PUT', headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(size) }, body: await readFile(file) });
+  const put = await fetch(where, { method: 'PUT', headers: { 'Content-Type': mime, 'Content-Length': String(size) }, body: await readFile(file) });
   if (!put.ok) throw new Error(`Drive upload ${put.status}: ${(await put.text()).slice(0, 200)}`);
   return (await put.json()).id;
 }
@@ -111,11 +118,100 @@ async function assemble(job) {
   console.log(`Done: Drive file ${fileId}, ${Math.round(done.durationSec)} s`);
 }
 
+/** One picture from OpenAI for a size, cropped to its aspect by ffmpeg. */
+async function drawPicture(job, size) {
+  const spec = job.specs[size];
+  const res = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${job.openaiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: job.imageModel, prompt: job.prompts[size], size: spec.genSize, n: 1 }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`OpenAI image (${size}) ${res.status}: ${((j.error || {}).message || '').slice(0, 200)}`);
+  const item = (j.data || [])[0] || {};
+  let buf;
+  if (item.b64_json) buf = Buffer.from(item.b64_json, 'base64');
+  else if (item.url) buf = Buffer.from(await (await fetch(item.url)).arrayBuffer());
+  else throw new Error(`OpenAI image (${size}) had no image data`);
+  await writeFile(`raw-${size}.png`, buf);
+  const crop = aspectCropFilter(spec.aspect);
+  if (!crop) return `raw-${size}.png`;
+  await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', `raw-${size}.png`, '-vf', crop, '-frames:v', '1', `pic-${size}.png`]);
+  return `pic-${size}.png`;
+}
+
+/** The caption in the funnel's voice, with character timings for the subtitles. */
+async function makeVoice(job) {
+  const spoken = voiceText(job.text);
+  if (!spoken) throw new Error('the caption has nothing to read aloud');
+  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(job.voiceId)}/with-timestamps`, {
+    method: 'POST',
+    headers: { 'xi-api-key': job.elevenlabsKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ text: spoken, model_id: job.voiceModel }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.audio_base64) throw new Error(`ElevenLabs voice ${res.status}: ${JSON.stringify(j.detail || j).slice(0, 200)}`);
+  await writeFile('voice.mp3', Buffer.from(j.audio_base64, 'base64'));
+  const seconds = (await probe('voice.mp3')).durationSec || spoken.length / 14;
+  let cues = alignmentCues(j.alignment || j.normalized_alignment || {});
+  if (!cues.length) cues = evenCues(spoken, seconds);
+  return { seconds, cues, chars: spoken.length };
+}
+
+/** An image post's whole video: pictures, voice, subtitles, one video per size, all to Drive. */
+async function imageVideo(job) {
+  for (const k of [job.openaiKey, job.elevenlabsKey]) if (k) console.log(`::add-mask::${k}`);
+  if (!job.openaiKey) throw new Error('no OpenAI key to draw the pictures');
+  if (!job.elevenlabsKey || !job.voiceId) throw new Error('no ElevenLabs key or voice');
+  console.log(`Image-post video: sizes ${job.sizes.join(', ')}`);
+  await progress({ phase: 'pictures', pct: 0 });
+  const pics = {};
+  for (const size of job.sizes) pics[size] = await drawPicture(job, size);
+  await progress({ phase: 'voice', pct: 30 });
+  const voice = await makeVoice(job);
+  const seconds = imageVideoSeconds(voice.seconds);
+  let subPath = 'subs.srt';
+  await writeFile(subPath, buildSrt(voice.cues), 'utf8');
+  let music = job.music || {};
+  if (music.url) {
+    await run('curl', ['-fsSL', '--retry', '3', '-o', 'music', music.url]);
+    music = { file: 'music' };
+  }
+  await progress({ phase: 'encoding', pct: 40 });
+  let subtitleError = '';
+  for (const size of job.sizes) {
+    const spec = job.specs[size];
+    const args = (withSubs) => imageShortArgs({ imagePath: pics[size], outPath: `video-${size}.mp4`, music, seconds, voicePath: 'voice.mp3', width: spec.w, height: spec.h, subPath: withSubs ? subPath : '' });
+    try {
+      await run('ffmpeg', args(!!subPath));
+    } catch (err) {
+      if (!subPath) throw err;
+      subtitleError = err.message.slice(-200);
+      console.log(`Subtitles would not burn, rendering without them: ${subtitleError}`);
+      subPath = '';
+      await run('ffmpeg', args(false));
+    }
+  }
+  await progress({ phase: 'uploading', pct: 90 });
+  const fresh = await hook('token');
+  console.log(`::add-mask::${fresh.accessToken}`);
+  const folderId = fresh.folderId || job.folderId;
+  const images = {};
+  const videos = {};
+  for (const size of job.sizes) {
+    images[size] = await uploadToDrive({ file: pics[size], name: `${job.name} ${size}.png`, folderId, token: fresh.accessToken, mime: 'image/png' });
+    videos[size] = await uploadToDrive({ file: `video-${size}.mp4`, name: `${job.name} ${size}.mp4`, folderId, token: fresh.accessToken });
+  }
+  await hook('done', { images, videos, seconds, chars: voice.chars, made: job.sizes.length, subtitled: !!subPath, subtitleError });
+  console.log(`Done: ${job.sizes.length} sizes, ${seconds} s`);
+}
+
 async function main() {
   if (!/^https:\/\//.test(HOOK) || !TICKET) throw new Error('HOOK (https) and TICKET are required');
   const job = await hook('job');
   console.log(`::add-mask::${job.accessToken}`);
   if (job.kind === 'assemble') return assemble(job);
+  if (job.kind === 'imagevideo') return imageVideo(job);
   console.log(`Cleaning Drive file ${job.driveId}: zoom ${job.zoomPct}%, cut last ${job.trimEndSec}s, end card ${job.endSec}s, subtitles ${job.srt ? 'on' : 'off'}`);
 
   await run('curl', ['-fsSL', '--retry', '3', '-o', 'in.mp4', job.downloadUrl]);

@@ -25,6 +25,7 @@ import { keyOk, gateState } from '../services/accessService.js';
 import * as driveConnect from '../services/driveConnectService.js';
 import * as readyPost from '../services/readyPostService.js';
 import * as assemble from '../services/assembleService.js';
+import * as imageVideoJob from '../services/imageVideoJobService.js';
 import { peekTicket } from '../utils/cleanHookSpec.js';
 
 const baseUrlOf = (req) => `${req.protocol}://${req.get('host')}`;
@@ -101,17 +102,42 @@ export function register(ctx) {
       res.status(bad ? 403 : 400).json({ ok: false, error: err.message });
     }
   };
-  // An 'assemble' ticket is an AI video's final stitch (assembleService); any other is a ✂ Clean.
-  const asm = assemble.isAssembleTicket;
-  router.get('/hooks/clean/job', hook((ticket) => (asm(ticket) ? assemble.hookJob({ ticket }) : readyPost.cleanHookJob({ ticket }))));
-  router.get('/hooks/clean/token', hook((ticket) => (asm(ticket) ? assemble.hookToken({ ticket }) : readyPost.cleanHookToken({ ticket }))));
+  // A ticket's kind picks who answers: 'assemble' = an AI video's final stitch
+  // (assembleService), 'imagevideo' = an image post's whole video
+  // (imageVideoJobService), anything else = a ✂ Clean (readyPostService).
+  const who = (ticket) => {
+    if (imageVideoJob.isTicket(ticket)) {
+      return {
+        job: () => imageVideoJob.hookJob({ ticket }),
+        token: () => imageVideoJob.hookToken({ ticket }),
+        progress: (b) => imageVideoJob.hookProgress({ ticket, ...b }),
+        done: (b) => imageVideoJob.hookDone({ ticket, body: b }),
+        fail: (b) => imageVideoJob.hookFail({ ticket, error: b.error }),
+      };
+    }
+    if (assemble.isAssembleTicket(ticket)) {
+      return {
+        job: () => assemble.hookJob({ ticket }),
+        token: () => assemble.hookToken({ ticket }),
+        progress: (b) => assemble.hookProgress({ ticket, ...b }),
+        done: (b) => assemble.hookDone({ ticket, fileId: b.fileId, durationSec: b.durationSec }),
+        fail: (b) => assemble.hookFail({ ticket, error: b.error }),
+      };
+    }
+    return {
+      job: () => readyPost.cleanHookJob({ ticket }),
+      token: () => readyPost.cleanHookToken({ ticket }),
+      progress: (b) => readyPost.cleanHookProgress({ ticket, ...b }),
+      done: (b) => readyPost.cleanHookDone({ ticket, fileId: b.fileId, durationSec: b.durationSec }),
+      fail: (b) => readyPost.cleanHookFail({ ticket, error: b.error }),
+    };
+  };
+  router.get('/hooks/clean/job', hook((ticket) => who(ticket).job()));
+  router.get('/hooks/clean/token', hook((ticket) => who(ticket).token()));
   router.get('/hooks/clean/card.png', hook((ticket, req) => readyPost.cleanHookCard({ ticket, w: req.query.w, h: req.query.h })));
-  router.post('/hooks/clean/progress', hook((ticket, req) => (asm(ticket) ? assemble.hookProgress({ ticket, ...(req.body || {}) }) : readyPost.cleanHookProgress({ ticket, ...(req.body || {}) }))));
-  router.post('/hooks/clean/done', hook((ticket, req) => {
-    const b = req.body || {};
-    return asm(ticket) ? assemble.hookDone({ ticket, fileId: b.fileId, durationSec: b.durationSec }) : readyPost.cleanHookDone({ ticket, fileId: b.fileId, durationSec: b.durationSec });
-  }));
-  router.post('/hooks/clean/fail', hook((ticket, req) => (asm(ticket) ? assemble.hookFail({ ticket, error: (req.body || {}).error }) : readyPost.cleanHookFail({ ticket, error: (req.body || {}).error }))));
+  router.post('/hooks/clean/progress', hook((ticket, req) => who(ticket).progress(req.body || {})));
+  router.post('/hooks/clean/done', hook((ticket, req) => who(ticket).done(req.body || {})));
+  router.post('/hooks/clean/fail', hook((ticket, req) => who(ticket).fail(req.body || {})));
 }
 
 export default { register };

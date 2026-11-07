@@ -42,7 +42,11 @@ import { request } from '../core/httpClient.js';
 import { extractRow, composePrompt, composeCaptions, buildPlatformConfigs } from '../utils/postCompose.js';
 import { patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import * as imageShort from './imageShortService.js';
-import { shortTitle, imageVideoMode, imageVideoConfigs, IMAGE_VIDEO_SIZES, sizedPrompt, sizesNeeded } from '../utils/shortSpec.js';
+import {
+  shortTitle, imageVideoMode, imageVideoConfigs, IMAGE_VIDEO_SIZES, sizedPrompt, sizesNeeded, videoRunner, otherRunner, failSafeOn,
+} from '../utils/shortSpec.js';
+import * as imageVideoJob from './imageVideoJobService.js';
+import { settings } from '../settings/index.js';
 import { imageSpec } from '../utils/imageGateSpec.js';
 import { platformKey } from '../utils/aiCopySpec.js';
 import { createTtsProvider } from '../providers/ttsProvider.js';
@@ -115,79 +119,229 @@ async function refill({ f, providers, tab, rows, log }) {
 }
 
 /**
- * Generate the image for an instance, save it on the instance and send the
- * approval. Leaves the instance at image_review.
+ * Make an instance's post and send the approval: the pictures, and in video
+ * mode (the default) the voice, subtitles and one video per size, all before
+ * the approval opens, so what you approve is what goes out. The whole job runs
+ * in ONE place: GitHub Actions or Railway (Settings, image_video_runner); if
+ * it fails there and the fail-safe is on, the other place does it all again.
+ * GitHub answers later through imageVideoJobService's hooks; Railway answers
+ * now. Leaves the instance at image_review (or failed, with the reason).
  */
 async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '', log }) {
   const inst = await instanceRepo.get(instanceId);
   if (!inst) throw new Error(`instance ${instanceId} not found`);
   const { full, short } = composeCaptions(fields, { ctaLink: f.ctaLink, audiencePrefix: f.audiencePrefix });
   const prompt = composePrompt(fields, note);
-  await stepLog.start(instanceId, 'images');
-  let upload;
-  // One picture per size the platforms take (9:16, 4:5, 16:9), from the same
-  // prompt composed for each frame. The 4:5 one is the preview and the
-  // picture-mode post; a size that fails uses it.
-  const sized = {};
-  let made = 0;
-  try {
-    const name = (size) => `${poster.slug(f.name)}-${poster.slug(sheet.key)}-r${inst.round || 1}${size === 'feed' ? '' : `-${size}`}.png`;
-    const draw = async (size) => {
-      const spec = IMAGE_VIDEO_SIZES[size];
-      // Gemini draws square only: cropping that to 9:16 could cut the headline, so it stays whole
-      // (the video fits it on a blurred copy of itself).
-      const key = providers.resolved?.openai?.apiKey ? spec.gen : 'square';
-      const image = await poster.generate(providers, sizedPrompt(prompt, size), imageSpec(spec.gen).size, key);
-      made += 1;
-      const up = await providers.storage.uploadPng(f.driveFolder, name(size), image);
-      if (!up || !up.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
-      return up;
-    };
-    upload = await draw('feed');
-    sized.feed = upload.downloadUrl;
-    for (const size of ['portrait', 'landscape']) {
-      try {
-        sized[size] = (await draw(size)).downloadUrl;
-      } catch (err) {
-        log.warn({ err: err.message, size }, 'one image size failed, the 4:5 picture stands in');
-      }
-    }
-  } catch (err) {
-    await stepLog.fail(instanceId, 'images');
-    throw err;
-  }
-  await stepLog.end(instanceId, 'images');
-
-  const { id: approvalId } = await approvalService.createRequest({
-    tenantId: f.tenantId,
-    kind: KIND,
-    payload: { instanceId, funnelId: f.id, mediaUrl: upload.downloadUrl, thumbnailUrl: upload.thumbnailUrl, captionFull: full, captionShort: short },
-  });
-
+  // Everything a runner needs is saved first, so a fail-safe can start over from the instance.
   let steps = instanceService.parseSteps(inst);
   for (const k of ['animate', 'voiceover', 'transcript', 'stitch']) steps = patchStep(steps, k, { status: 'skipped' });
   steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: short || full, copy: { title: fields.headline || '', description: full }, captionFull: full, captionShort: short } });
+  steps = patchStep(steps, 'images', { status: 'running', startedAt: new Date().toISOString(), artifacts: { prompt, note: note || '', row: fields, sheet, tried: [] } });
+  await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
+  await stepLog.start(instanceId, 'images');
+  const video = imageVideoMode(providers.resolved.imageVideo) === 'on';
+  const runner = video ? videoRunner(providers.resolved.imageVideoRunner) : 'railway';
+  await makeWith(runner, { instanceId, f, providers, video, log });
+  return null;
+}
+
+/** Run the whole job in `runner`; on failure, the fail-safe (or the instance fails and this throws). */
+async function makeWith(runner, ctx) {
+  const { instanceId, log } = ctx;
+  await markTried(instanceId, runner);
+  try {
+    if (runner === 'github') await startOnGithub(ctx);
+    else await makeOnRailway(ctx);
+  } catch (err) {
+    await fallBack(instanceId, runner, err.message, ctx.providers, log);
+  }
+}
+
+async function markTried(instanceId, runner) {
+  const inst = await instanceRepo.get(instanceId);
+  const img = art(instanceService.parseSteps(inst), 'images');
+  const tried = [...new Set([...(img.tried || []), runner])];
+  await instanceService.updateStep(instanceId, 'images', { artifacts: { ...img, tried, runner } });
+}
+
+/** The runner failed: the other one does it all, once, when the fail-safe is on; else the instance fails. */
+async function fallBack(instanceId, runner, error, providers, log) {
+  const inst = await instanceRepo.get(instanceId);
+  const img = art(instanceService.parseSteps(inst), 'images');
+  const other = otherRunner(runner);
+  log.warn({ instance: instanceId, runner, err: error }, 'image-post video failed');
+  if (imageVideoMode(providers.resolved.imageVideo) === 'on' && failSafeOn(providers.resolved.imageVideoFailSafe) && !(img.tried || []).includes(other)) {
+    log.info({ instance: instanceId, from: runner, to: other }, 'fail-safe: the other place makes it');
+    const ctx = await contextOf(inst, log);
+    if (ctx) return makeWith(other, ctx);
+  }
+  await stepLog.fail(instanceId, 'images');
+  await instanceService.updateStep(instanceId, 'images', { status: 'failed', error: String(error).slice(0, 300) });
+  const where = runner === 'github' ? 'GitHub' : 'Railway';
+  await instanceRepo.setStatus(instanceId, 'failed', `Video not made on ${where}: ${String(error).slice(0, 300)}`);
+  throw new Error(`video not made on ${where}: ${error}`);
+}
+
+/** Rebuild a runner's context from the instance alone (hooks and timeouts arrive with only its id). */
+async function contextOf(inst, log) {
+  const funnelRow = inst && inst.funnel_id ? await funnels.get(inst.funnel_id) : null;
+  if (!funnelRow) return null;
+  const f = await funnels.resolve(funnelRow);
+  const providers = await buildProviders(f.tenantId);
+  return { instanceId: inst.id, f, providers, video: imageVideoMode(providers.resolved.imageVideo) === 'on', log };
+}
+
+/** Hand the whole job to GitHub; its done hook continues in githubDone. */
+async function startOnGithub({ instanceId, f, providers }) {
+  const inst = await instanceRepo.get(instanceId);
+  const steps = instanceService.parseSteps(inst);
+  const img = art(steps, 'images');
+  const script = art(steps, 'script');
+  const cfg = await funnels.getConfig(f.id).catch(() => ({}));
+  const sizes = Object.keys(IMAGE_VIDEO_SIZES);
+  const job = {
+    sizes,
+    prompts: Object.fromEntries(sizes.map((s) => [s, sizedPrompt(img.prompt || '', s)])),
+    text: script.captionFull || script.captionShort || '',
+    voiceId: cfg.voice_id || '',
+    name: `${poster.slug(f.name)}-${poster.slug((img.sheet || {}).key || '')}-r${inst.round || 1}`,
+  };
+  await imageVideoJob.start({ instance: inst, providers, job, baseUrl: settings.app.publicBaseUrl });
+}
+
+/** GitHub made everything: record it and open the approval. */
+export async function githubDone(instanceId, result) {
+  const log = baseLog.child({ instance: instanceId });
+  const inst = await instanceRepo.get(instanceId);
+  let steps = inst ? instanceService.parseSteps(inst) : [];
+  const img = art(steps, 'images');
+  if (!inst || inst.status !== 'running' || img.runner !== 'github') return log.info({ status: inst && inst.status }, 'GitHub video arrived late; ignored');
+  const feedId = (result.imageIds || {}).feed;
   steps = patchStep(steps, 'images', {
-    status: 'done',
-    finishedAt: new Date().toISOString(),
     artifacts: {
+      ...img,
+      image: { url: result.images.feed, thumbnailUrl: feedId ? `https://drive.google.com/thumbnail?id=${feedId}&sz=w1000` : result.images.feed, driveId: feedId || null },
+      images: result.images,
+      render: { runner: 'github', videos: result.videos, videoIds: result.videoIds || {}, seconds: result.seconds, subtitled: result.subtitled, ...(result.subtitleError ? { subtitleError: result.subtitleError } : {}) },
+    },
+  });
+  const at = new Date().toISOString();
+  if (result.made) steps = addCostToSteps(steps, 'images', { ...costImages({ count: result.made, size: '1024x1536' }), at });
+  if (result.chars) steps = addCostToSteps(steps, 'images', { ...costTts({ provider: 'elevenlabs', chars: result.chars }), at });
+  await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
+  const ctx = await contextOf(inst, log);
+  if (ctx) await finishReview(instanceId, ctx.f, log);
+}
+
+/** GitHub failed or went quiet: the fail-safe, else the instance fails. */
+export async function githubFailed(instanceId, error) {
+  const log = baseLog.child({ instance: instanceId });
+  const inst = await instanceRepo.get(instanceId);
+  if (!inst || inst.status !== 'running' || art(instanceService.parseSteps(inst), 'images').runner !== 'github') return null;
+  const ctx = await contextOf(inst, log);
+  if (!ctx) return instanceRepo.setStatus(instanceId, 'failed', 'funnel not found');
+  try {
+    await fallBack(instanceId, 'github', error, ctx.providers, log);
+  } catch (err) {
+    log.warn({ err: err.message }, 'image post not made');
+  }
+  return null;
+}
+
+/** Draw the three pictures on Railway (OpenAI, else Gemini) and upload them to Drive. */
+async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
+  const sized = {};
+  let made = 0;
+  const name = (size) => `${poster.slug(f.name)}-${poster.slug((img.sheet || {}).key || '')}-r${round || 1}${size === 'feed' ? '' : `-${size}`}.png`;
+  const draw = async (size) => {
+    const spec = IMAGE_VIDEO_SIZES[size];
+    // Gemini draws square only: cropping that to 9:16 could cut the headline, so it stays whole
+    // (the video fits it on a blurred copy of itself).
+    const key = providers.resolved?.openai?.apiKey ? spec.gen : 'square';
+    const image = await poster.generate(providers, sizedPrompt(img.prompt || '', size), imageSpec(spec.gen).size, key);
+    made += 1;
+    const up = await providers.storage.uploadPng(f.driveFolder, name(size), image);
+    if (!up || !up.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
+    return up;
+  };
+  // The 4:5 one is the preview and the picture-mode post; a size that fails uses it.
+  const upload = await draw('feed');
+  sized.feed = upload.downloadUrl;
+  for (const size of ['portrait', 'landscape']) {
+    try {
+      sized[size] = (await draw(size)).downloadUrl;
+    } catch (err) {
+      log.warn({ err: err.message, size, instance: instanceId }, 'one image size failed, the 4:5 picture stands in');
+    }
+  }
+  return { upload, sized, made };
+}
+
+/** The whole job on Railway: pictures, and in video mode the voice and the videos; then the approval. */
+async function makeOnRailway(ctx) {
+  const { instanceId, f, providers, video, log } = ctx;
+  const inst = await instanceRepo.get(instanceId);
+  let steps = instanceService.parseSteps(inst);
+  const img = art(steps, 'images');
+  const script = art(steps, 'script');
+  const { upload, sized, made } = await drawOnRailway(ctx, img, inst.round);
+  const at = new Date().toISOString();
+  let render = null;
+  let chars = 0;
+  if (video) {
+    const voiceCfg = await voiceSetup({ funnelId: f.id, providers, log });
+    if (voiceCfg.error) throw new Error(voiceCfg.error);
+    const voice = await imageShort.makeVoice({ tts: voiceCfg.tts, text: script.captionFull || script.captionShort || '', log });
+    chars = voice.chars;
+    const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+    const images = Object.fromEntries(Object.keys(IMAGE_VIDEO_SIZES).map((s) => [s, sized[s] || sized.feed]));
+    const made2 = await imageShort.renderVideos({
+      images, sizes: Object.keys(IMAGE_VIDEO_SIZES), voice, music: providers.resolved.shortMusic, upload: (path) => publish.uploadFile(path, 'video/mp4'), log,
+    });
+    render = { runner: 'railway', videos: made2.videos, seconds: made2.seconds, subtitled: made2.subtitled, ...(made2.subtitleError ? { subtitleError: made2.subtitleError } : {}) };
+  }
+  steps = instanceService.parseSteps(await instanceRepo.get(instanceId));
+  steps = patchStep(steps, 'images', {
+    artifacts: {
+      ...art(steps, 'images'),
       image: { url: upload.downloadUrl, thumbnailUrl: upload.thumbnailUrl, driveId: upload.id || null },
       images: sized,
-      prompt, note: note || '', row: fields, sheet, approvalId,
+      video,
+      ...(render ? { render } : {}),
     },
   });
   // Real cost when OpenAI made it (Gemini has no per-image price table here).
-  if (providers.resolved?.openai?.apiKey && made) {
-    steps = addCostToSteps(steps, 'images', { ...costImages({ count: made, size: '1024x1536' }), at: new Date().toISOString() });
-  }
+  if (providers.resolved?.openai?.apiKey && made) steps = addCostToSteps(steps, 'images', { ...costImages({ count: made, size: '1024x1536' }), at });
+  if (chars) steps = addCostToSteps(steps, 'images', { ...costTts({ provider: 'elevenlabs', chars }), at });
+  await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
+  await finishReview(instanceId, f, log);
+}
+
+/** Everything is made: open the approval (the daily email carries the link; the Library's Approve works too). */
+async function finishReview(instanceId, f, log) {
+  let steps = instanceService.parseSteps(await instanceRepo.get(instanceId));
+  const img = art(steps, 'images');
+  const script = art(steps, 'script');
+  const image = img.image || {};
+  // A GitHub video is in Drive: its player page plays it instead of downloading it.
+  const vid = ((img.render || {}).videoIds || {}).portrait;
+  const videoUrl = vid ? `https://drive.google.com/file/d/${vid}/view` : (((img.render || {}).videos || {}).portrait || '');
+  const { id: approvalId } = await approvalService.createRequest({
+    tenantId: f.tenantId,
+    kind: KIND,
+    payload: {
+      instanceId, funnelId: f.id, mediaUrl: image.url, thumbnailUrl: image.thumbnailUrl,
+      ...(videoUrl ? { videoUrl } : {}), captionFull: script.captionFull || '', captionShort: script.captionShort || '',
+    },
+  });
+  steps = patchStep(steps, 'images', { status: 'done', finishedAt: new Date().toISOString(), artifacts: { ...img, approvalId } });
   await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
   await instanceRepo.setStatus(instanceId, IMAGE_REVIEW);
-
-  // The daily email carries the approval link; the Library's Approve works too.
+  await stepLog.end(instanceId, 'images');
   await stepLog.start(instanceId, 'review_image', { email: 'digest' });
-  log.info({ instance: instanceId, row: sheet.key, round: inst.round }, 'image post waiting for approval');
-  return null;
+  log.info({ instance: instanceId, row: (img.sheet || {}).key, video: !!videoUrl, runner: (img.render || {}).runner }, 'image post waiting for approval');
 }
+
 
 /** ↻ Retry a failed image post on the same instance: its sheet row again, back to approval. */
 export async function retry({ instanceId, log = baseLog }) {
@@ -420,8 +574,13 @@ export async function approve(approval) {
   const pictures = { ...(img.images || {}) };
   const sizes = sizesNeeded(platforms);
   const images = Object.fromEntries(sizes.map((s) => [s, pictures[s] || req.mediaUrl]));
-  // The whole caption from the sheet is read aloud; the video is as long as the reading.
-  const video = await videoFor({ row, f, providers, publish, images, sizes, text: full || short, log });
+  // The videos were made before the approval (what you approved is what goes
+  // out); a post prepared before that is made now. The whole caption is read
+  // aloud and the video is as long as the reading.
+  const ready = img.render && img.render.videos && img.render.videos.portrait ? img.render : null;
+  const video = ready
+    ? { videos: ready.videos, url: ready.videos.portrait, seconds: ready.seconds, voiced: true, subtitled: ready.subtitled, subtitleError: ready.subtitleError || '', chars: 0, runner: ready.runner }
+    : await videoFor({ row, f, providers, publish, images, sizes, text: full || short, log });
   if (video && video.error) {
     log.error({ err: video.error }, 'voice video not made; nothing posted');
     await stepLog.fail(row.id, 'publish');

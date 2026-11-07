@@ -60,51 +60,53 @@ async function localPng(url, path) {
 }
 
 /**
- * Image post → videos for every channel, one per size it needs: each size's
- * own picture (else the primary one, fitted on a blurred copy) with music and,
- * when a voice is given, the caption read aloud with burned subtitles.
- * A voice that fails leaves the music only (voiceError says why); subtitles
- * that fail to burn leave them out (subtitleError); a render that fails throws.
- * images: size -> URL (the primary size must be there, or imageUrl is used).
- * Returns { videos: size -> URL, seconds, chars, voiced, subtitled, voiceError, subtitleError }.
+ * The caption read in the funnel's voice: { buffer, seconds, cues, chars }.
+ * cues time the subtitles (ElevenLabs' character timings, else spread evenly).
+ * Throws when there is nothing to read or the voice cannot be made.
  */
-export async function makeVideo({ imageUrl = '', images = {}, sizes = [PRIMARY_SIZE], publish, music = {}, text = '', tts = null, requireVoice = false, log }) {
-  if (requireVoice && !tts) throw new Error('no voice set up');
-  const pics = { ...images };
-  if (!pics[PRIMARY_SIZE] && imageUrl) pics[PRIMARY_SIZE] = imageUrl;
-  if (!pics[PRIMARY_SIZE]) throw new Error('no image to make the video from');
+export async function makeVoice({ tts, text = '', log }) {
+  if (!tts) throw new Error('no voice set up');
+  const spoken = voiceText(text);
+  if (!spoken) throw new Error('the caption has nothing to read aloud');
+  let out;
+  try {
+    out = tts.synthesizeTimed ? await tts.synthesizeTimed({ text: spoken }) : await tts.synthesize({ text: spoken });
+  } catch (err) {
+    throw new Error(`the voice could not be made: ${String(err.message).slice(0, 200)}`);
+  }
+  const dir = await mkdtemp(join(tmpdir(), 'voice-'));
+  try {
+    const path = join(dir, 'voice.mp3');
+    await writeFile(path, out.buffer);
+    const seconds = (await createFfmpegProvider({}, log).probeDuration({ url: path })) || spoken.length / 14;
+    let cues = out.alignment ? alignmentCues(out.alignment) : [];
+    if (!cues.length) cues = evenCues(spoken, seconds);
+    return { buffer: out.buffer, seconds, cues, chars: out.chars || spoken.length };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * One video per size: each size's own picture (else the primary one, fitted
+ * on a blurred copy) with the music and the voice, subtitles burned in.
+ * Subtitles that fail to burn are left out (subtitleError). upload(path) puts
+ * a finished file somewhere public and returns its URL.
+ * Returns { videos: size -> URL, seconds, subtitled, subtitleError }.
+ */
+export async function renderVideos({ images = {}, sizes = [PRIMARY_SIZE], voice, music = {}, upload, log }) {
+  if (!images[PRIMARY_SIZE]) throw new Error('no image to make the video from');
+  if (!voice || !voice.buffer) throw new Error('no voice to put on the video');
   const dir = await mkdtemp(join(tmpdir(), 'imgvid-'));
   try {
     const ffmpeg = createFfmpegProvider({}, log);
-    let voicePath = '';
-    let voiceSec = 0;
-    let chars = 0;
-    let voiceError = '';
-    let cues = [];
-    if (requireVoice && !voiceText(text)) throw new Error('the caption has nothing to read aloud');
-    const spoken = tts ? voiceText(text) : '';
-    if (tts && !spoken) voiceError = 'the caption has nothing to read aloud';
-    if (spoken) {
-      try {
-        const out = tts.synthesizeTimed ? await tts.synthesizeTimed({ text: spoken }) : await tts.synthesize({ text: spoken });
-        chars = out.chars || spoken.length;
-        voicePath = join(dir, 'voice.mp3');
-        await writeFile(voicePath, out.buffer);
-        voiceSec = (await ffmpeg.probeDuration({ url: voicePath })) || spoken.length / 14;
-        cues = out.alignment ? alignmentCues(out.alignment) : [];
-        if (!cues.length) cues = evenCues(spoken, voiceSec);
-      } catch (err) {
-        if (requireVoice) throw new Error(`the voice could not be made: ${String(err.message).slice(0, 200)}`);
-        voiceError = String(err.message).slice(0, 200);
-        voicePath = '';
-        if (log) log.warn({ err: err.message }, 'image video voice failed, music only');
-      }
-    }
-    const seconds = imageVideoSeconds(voiceSec);
+    const voicePath = join(dir, 'voice.mp3');
+    await writeFile(voicePath, voice.buffer);
+    const seconds = imageVideoSeconds(voice.seconds);
     let subPath = '';
-    if (voicePath && cues.length) {
+    if (voice.cues && voice.cues.length) {
       subPath = 'subs.srt';
-      await writeFile(join(dir, subPath), buildSrt(cues), 'utf8');
+      await writeFile(join(dir, subPath), buildSrt(voice.cues), 'utf8');
     }
     const track = await musicFor(music, dir, log);
     const local = {};
@@ -113,7 +115,7 @@ export async function makeVideo({ imageUrl = '', images = {}, sizes = [PRIMARY_S
     for (const size of [...new Set([PRIMARY_SIZE, ...sizes])]) {
       const spec = IMAGE_VIDEO_SIZES[size];
       if (!spec) continue;
-      const src = pics[size] || pics[PRIMARY_SIZE];
+      const src = images[size] || images[PRIMARY_SIZE];
       if (!local[src]) local[src] = await localPng(src, join(dir, `in-${Object.keys(local).length}.png`));
       const outPath = join(dir, `video-${size}.mp4`);
       const args = (withSubs) => imageShortArgs({
@@ -129,12 +131,24 @@ export async function makeVideo({ imageUrl = '', images = {}, sizes = [PRIMARY_S
         subPath = '';
         await ffmpeg.imageToShort({ args: args(false), cwd: dir });
       }
-      videos[size] = await publish.uploadFile(outPath, 'video/mp4');
+      videos[size] = await upload(outPath);
     }
-    return { videos, url: videos[PRIMARY_SIZE], seconds, chars, voiced: !!voicePath, subtitled: !!subPath, voiceError, subtitleError };
+    return { videos, seconds, subtitled: !!subPath, subtitleError };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-export default { make, makeVideo };
+/**
+ * Voice + videos in one go (an approval prepared before videos were made
+ * ahead of it). Returns { videos, url, seconds, chars, voiced, subtitled, subtitleError }.
+ */
+export async function makeVideo({ imageUrl = '', images = {}, sizes = [PRIMARY_SIZE], publish, music = {}, text = '', tts = null, log }) {
+  const pics = { ...images };
+  if (!pics[PRIMARY_SIZE] && imageUrl) pics[PRIMARY_SIZE] = imageUrl;
+  const voice = await makeVoice({ tts, text, log });
+  const made = await renderVideos({ images: pics, sizes, voice, music, upload: (path) => publish.uploadFile(path, 'video/mp4'), log });
+  return { ...made, url: made.videos[PRIMARY_SIZE], chars: voice.chars, voiced: true };
+}
+
+export default { make, makeVoice, renderVideos, makeVideo };

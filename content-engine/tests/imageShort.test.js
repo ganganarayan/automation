@@ -190,3 +190,22 @@ describe('image post as a video', () => {
     expect(() => imageShortArgs({ imagePath: 'i', outPath: 'o', music: { expr: '1' }, subPath: 'C:/x/subs.srt' })).toThrow();
   });
 });
+
+describe('where image-post videos are made', () => {
+  it('defaults to GitHub with the fail-safe on', async () => {
+    const m = await import('../src/utils/shortSpec.js');
+    expect(m.videoRunner('')).toBe('github');
+    expect(m.videoRunner('railway')).toBe('railway');
+    expect(m.videoRunner('junk')).toBe('github');
+    expect(m.otherRunner('github')).toBe('railway');
+    expect(m.otherRunner('railway')).toBe('github');
+    expect(m.failSafeOn('')).toBe(true);
+    expect(m.failSafeOn('off')).toBe(false);
+  });
+
+  it('crops to each aspect on a runner without sharp', async () => {
+    const m = await import('../src/utils/shortSpec.js');
+    expect(m.aspectCropFilter('9:16')).toBe("crop=w='min(iw,ih*9/16)':h='min(ih,iw*16/9)'");
+    expect(m.aspectCropFilter(null)).toBe('');
+  });
+});

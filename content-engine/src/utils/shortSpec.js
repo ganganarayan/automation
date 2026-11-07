@@ -243,6 +243,29 @@ export function evenCues(text = '', seconds = 0, offset = 0.5) {
   return groupWords(words);
 }
 
+/** Settings: where image-post videos are made, start to finish (pictures, voice, subtitles, videos). */
+export const VIDEO_RUNNER_OPTIONS = [
+  { value: 'github', label: 'GitHub Actions (no Railway egress or memory; files go to your Google Drive)' },
+  { value: 'railway', label: 'Railway (this server)' },
+];
+export const FAILSAFE_OPTIONS = [
+  { value: 'on', label: 'Yes: if it fails there, make it on the other one' },
+  { value: 'off', label: 'No: stop and say why' },
+];
+/** The chosen place; blank or unknown = GitHub. */
+export const videoRunner = (v) => (String(v || '').trim() === 'railway' ? 'railway' : 'github');
+export const otherRunner = (r) => (r === 'github' ? 'railway' : 'github');
+/** The fail-safe; blank = on. */
+export const failSafeOn = (v) => String(v || '').trim() !== 'off';
+
+/** ffmpeg crop to an aspect ('9:16'), centred, for runners without sharp. '' = none. */
+export function aspectCropFilter(aspect) {
+  const m = /^(\d+):(\d+)$/.exec(String(aspect || ''));
+  if (!m) return '';
+  const [w, h] = [m[1], m[2]];
+  return `crop=w='min(iw,ih*${w}/${h})':h='min(ih,iw*${h}/${w})'`;
+}
+
 /** Video length: exactly the voice (plus its half-second lead and a one-second hold), else 8 s with no voice. */
 export function imageVideoSeconds(voiceSec = 0) {
   const v = Number(voiceSec) || 0;
@@ -291,4 +314,5 @@ export default {
   SHORT_SECONDS, MUSIC_TRACKS, MUSIC_OPTIONS, DEFAULT_MUSIC, OWN_MUSIC, musicLink, pickMusic, shortTitle, imageShortArgs,
   IMAGE_VIDEO_SECONDS, IMAGE_VIDEO_MAX_SECONDS, VOICE_MAX_CHARS, VOICE_LEAD_SECONDS, VOICE_TAIL_SECONDS, IMAGE_VIDEO_OPTIONS, imageVideoMode, voiceText, imageVideoSeconds, imageVideoConfigs,
   IMAGE_VIDEO_SIZES, VIDEO_PLATFORM_SIZE, PRIMARY_SIZE, sizeFor, sizesNeeded, sizedPrompt, alignmentCues, evenCues,
+  VIDEO_RUNNER_OPTIONS, FAILSAFE_OPTIONS, videoRunner, otherRunner, failSafeOn, aspectCropFilter,
 };

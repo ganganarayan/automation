@@ -162,6 +162,10 @@ export async function forTenant(tenantId = 'default') {
     // Image posts: 'on' = a video with music and the caption read aloud (default),
     // 'music' = a video with music only, 'off' = the picture.
     imageVideo: pick('image_video', 'on'),
+    // Where image-post videos are made, start to finish: 'github' (default) or 'railway';
+    // the fail-safe ('on' default) makes it in the other place when that fails.
+    imageVideoRunner: pick('image_video_runner', 'github'),
+    imageVideoFailSafe: pick('image_video_failsafe', 'on'),
     // System prompts (API Keys → System prompts). Blank = the built-in default.
     prompts: {
       global: pick('system_prompt_global', ''),

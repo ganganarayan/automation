@@ -16,7 +16,7 @@
  * 'time' (HH:MM) | 'time_list' (comma list of HH:MM).
  */
 
-import { MUSIC_OPTIONS, DEFAULT_MUSIC, SHORT_SECONDS, IMAGE_VIDEO_OPTIONS, IMAGE_VIDEO_SECONDS, IMAGE_VIDEO_MAX_SECONDS } from '../utils/shortSpec.js';
+import { MUSIC_OPTIONS, DEFAULT_MUSIC, SHORT_SECONDS, IMAGE_VIDEO_OPTIONS, IMAGE_VIDEO_SECONDS, IMAGE_VIDEO_MAX_SECONDS, VIDEO_RUNNER_OPTIONS, FAILSAFE_OPTIONS } from '../utils/shortSpec.js';
 import { DEFAULT_THUMB_RULES } from '../utils/thumbSpec.js';
 import { DEFAULT_COMPARISON_PROMPT } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS, DEFAULT_COMPARISON_BRAND } from '../utils/comparisonFacts.js';
@@ -122,6 +122,22 @@ export const CONFIG_MANIFEST = {
             default: 'on',
             options: IMAGE_VIDEO_OPTIONS,
             help: `When a funnel has no video, its image post is made from the sheet's image prompt, drawn in three sizes (9:16 for Instagram, Facebook and YouTube, 4:5 for LinkedIn and Threads, 16:9 for X) and sent to every channel as a video of the picture with the music below. With the voice on, the whole caption is read aloud in the funnel's chosen ElevenLabs voice (its lane setup) with subtitles burned in, and the video is exactly as long as the reading (up to ${IMAGE_VIDEO_MAX_SECONDS} s). Every video has the voice: a funnel with no voice chosen, or no ElevenLabs key, posts nothing and says why.`,
+          },
+          {
+            key: 'image_video_runner',
+            label: 'Where the videos are made (pictures, voice, subtitles and videos, all in one place)',
+            type: 'select',
+            default: 'github',
+            options: VIDEO_RUNNER_OPTIONS,
+            help: 'GitHub uses no Railway memory and almost no Railway egress: it needs the GitHub token under Video clean, Google Drive connected and an OpenAI key. The finished files go to your Google Drive app folder.',
+          },
+          {
+            key: 'image_video_failsafe',
+            label: 'Fail-safe: if it fails there, make it in the other place',
+            type: 'select',
+            default: 'on',
+            options: FAILSAFE_OPTIONS,
+            help: 'GitHub counts as failed when it reports an error or has not finished within an hour.',
           },
           {
             key: 'short_music',
