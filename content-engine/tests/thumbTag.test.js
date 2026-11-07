@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import sharp from 'sharp';
 import { THUMB_SIZES, THUMB_ACCENT, thumbArt, thumbSvg, thumbTagClean, thumbTagFor, thumbTagBox } from '../src/utils/thumbSpec.js';
-import { copySystemPrompt, keepThumbTag, normalizeCopy } from '../src/utils/aiCopySpec.js';
+import { copySystemPrompt, keepHiddenCopy, nextImagePrompt, normalizeCopy } from '../src/utils/aiCopySpec.js';
 import { copyFromCaption } from '../src/utils/routerSpec.js';
 import { WIZARD_STEPS } from '../src/services/videoWizardManifest.js';
 
@@ -65,10 +65,36 @@ describe('copy carries thumbTag', () => {
   });
   it('a page save keeps the stored tag; the page sends only four fields', () => {
     const fromPage = normalizeCopy({ title: 't', description: 'd', igCaption: 'i', short: 's' });
-    expect(keepThumbTag(fromPage, { thumbTag: 'For founders' }).thumbTag).toBe('For founders');
-    expect(keepThumbTag(fromPage, {}).thumbTag).toBe('');
-    expect(keepThumbTag(fromPage, undefined).thumbTag).toBe('');
-    expect(keepThumbTag({ title: 't', thumbTag: 'For coaches' }, { thumbTag: 'For founders' }).thumbTag).toBe('For coaches');
+    expect(keepHiddenCopy(fromPage, { thumbTag: 'For founders' }).thumbTag).toBe('For founders');
+    expect(keepHiddenCopy(fromPage, {}).thumbTag).toBe('');
+    expect(keepHiddenCopy(fromPage, undefined).thumbTag).toBe('');
+    expect(keepHiddenCopy({ title: 't', thumbTag: 'For coaches' }, { thumbTag: 'For founders' }).thumbTag).toBe('For coaches');
+  });
+});
+
+describe('a page save keeps what the page does not show', () => {
+  const fromPage = normalizeCopy({ title: 't', description: 'd', igCaption: 'i', short: 's' });
+  const stored = { thumbText: 'The hook', thumbTag: 'For founders', thumbPrompt: 'A falling chart' };
+
+  it('keeps the hook and the image prompt, and leaves the shown fields alone', () => {
+    expect(keepHiddenCopy(fromPage, stored)).toEqual({ title: 't', description: 'd', igCaption: 'i', short: 's', ...stored });
+  });
+  it('a new value wins over the stored one', () => {
+    const c = keepHiddenCopy({ ...fromPage, thumbText: 'New hook', thumbPrompt: 'New chart' }, stored);
+    expect(c.thumbText).toBe('New hook');
+    expect(c.thumbPrompt).toBe('New chart');
+  });
+  it('an old record with none of them stays blank', () => {
+    for (const old of [undefined, null, {}]) {
+      const c = keepHiddenCopy(fromPage, old);
+      expect([c.thumbText, c.thumbTag, c.thumbPrompt]).toEqual(['', '', '']);
+    }
+  });
+  it('after a save, the writer\'s image prompt still follows new copy', () => {
+    const saved = keepHiddenCopy(fromPage, stored);
+    expect(nextImagePrompt('A falling chart', fromPage.thumbPrompt, 'A new chart')).toBe('A falling chart'); // the old bug
+    expect(nextImagePrompt('A falling chart', saved.thumbPrompt, 'A new chart')).toBe('A new chart');
+    expect(nextImagePrompt('My own prompt', saved.thumbPrompt, 'A new chart')).toBe('My own prompt');
   });
 });
 

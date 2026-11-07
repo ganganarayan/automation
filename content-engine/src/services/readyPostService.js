@@ -44,7 +44,7 @@ import * as digest from './digestService.js';
 import * as firstCommentsRepo from '../repositories/firstCommentsRepository.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import { costText, costTranscript, costImages } from '../utils/pricing.js';
-import { copySystemPrompt, copyUserPrompt, normalizeCopy, keepThumbTag, platformConfigsFor, platformKey, nextImagePrompt, stepDownFallback, STEP_DOWN_PLATFORMS } from '../utils/aiCopySpec.js';
+import { copySystemPrompt, copyUserPrompt, normalizeCopy, keepHiddenCopy, platformConfigsFor, platformKey, nextImagePrompt, stepDownFallback, STEP_DOWN_PLATFORMS } from '../utils/aiCopySpec.js';
 import * as imageShort from './imageShortService.js';
 import { shortTitle } from '../utils/shortSpec.js';
 import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt, thumbTagFor } from '../utils/thumbSpec.js';
@@ -1221,7 +1221,7 @@ export async function cleanStatus({ funnelId, driveId }) {
 async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, edit = false, ctaLink, keepThumbs = false }) {
   const { inst, steps: base, existing } = await ensureInstance({ funnel, driveId, title: copy.title || 'Ready video' });
   let steps = base;
-  if (edit) copy = keepThumbTag(copy, ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).copy);
+  if (edit) copy = keepHiddenCopy(copy, ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).copy);
   const at = new Date().toISOString();
   const prev = ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).generations || [];
   // A manual save (edits) updates the current copy; only a real generation is
@@ -1304,7 +1304,7 @@ async function recordPostedInstance({ funnel, driveId, caption, scheduledIso, re
   if (draft) {
     // The generation (and its cost) is already on the draft, finish it.
     let steps = instanceService.parseSteps(draft);
-    const kept = keepThumbTag(copy, ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).copy);
+    const kept = keepHiddenCopy(copy, ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).copy);
     steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy: kept, ctaLink } });
     steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
     steps = patchStep(steps, 'publish', { status: 'done', artifacts: publishArt });

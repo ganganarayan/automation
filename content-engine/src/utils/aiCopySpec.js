@@ -112,9 +112,20 @@ export function normalizeCopy(raw) {
   };
 }
 
-/** The page edits and posts only the fields it shows: the stored thumbTag stays unless a new one came with the copy. */
-export function keepThumbTag(copy, stored) {
-  return { ...copy, thumbTag: (copy && copy.thumbTag) || thumbTagClean(stored && stored.thumbTag) };
+/**
+ * The page edits and posts only the fields it shows, so the ones it doesn't stay
+ * as stored unless new ones came with the copy. Losing thumbPrompt would also make
+ * nextImagePrompt take the writer's prompt for one you wrote, and the picture
+ * would stop following new copy.
+ */
+export function keepHiddenCopy(copy, stored) {
+  const s = stored && typeof stored === 'object' ? stored : {};
+  return {
+    ...copy,
+    thumbText: (copy && copy.thumbText) || String(s.thumbText || ''),
+    thumbTag: (copy && copy.thumbTag) || thumbTagClean(s.thumbTag),
+    thumbPrompt: (copy && copy.thumbPrompt) || String(s.thumbPrompt || ''),
+  };
 }
 
 /** Append a link on its own line when it's set and not already in the text. */
@@ -241,7 +252,7 @@ export function imagePromptOf(steps) {
 }
 
 export default {
-  LIMITS, extractAudioArgs, copySystemPrompt, copyUserPrompt, clip, normalizeCopy, keepThumbTag,
+  LIMITS, extractAudioArgs, copySystemPrompt, copyUserPrompt, clip, normalizeCopy, keepHiddenCopy,
   withLink, xPost, threadsPost, platformKey, platformConfigsFor, noDashes, stripTrailingLink,
   nextImagePrompt, imagePromptOf,
 };
