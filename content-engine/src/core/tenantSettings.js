@@ -124,6 +124,11 @@ export async function forTenant(tenantId = 'default') {
       imageModel: pick('image_model', settings.openai.imageModel),
       textModel: pick('text_model', settings.openai.textModel),
     },
+    // The Ready video copy writer. No key = the OpenAI text model, as before.
+    claude: {
+      apiKey: String(pick('anthropic_api_key', '') || '').trim(),
+      model: pick('claude_model', ''),
+    },
     gemini: {
       apiKey: pick('gemini_api_key', settings.gemini.apiKey),
       imageModel: pick('gemini_image_model', settings.gemini.imageModel),
@@ -158,6 +163,7 @@ export async function forTenant(tenantId = 'default') {
     prompts: {
       global: pick('system_prompt_global', ''),
       copy: pick('system_prompt_copy', ''),
+      claudeContext: pick('claude_context', ''),
       thumbnail: pick('system_prompt_thumbnail', ''),
       comparison: pick('system_prompt_comparison', ''),
       script: pick('system_prompt_script', ''),

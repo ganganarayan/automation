@@ -41,6 +41,11 @@ export const CONFIG_MANIFEST = {
           { key: 'openai_api_key', label: 'OpenAI API key', type: 'secret' },
           { key: 'image_model', label: 'OpenAI image model', type: 'model_select', catalog: 'openai_image', placeholder: 'gpt-image-2' },
           { key: 'text_model', label: 'OpenAI text model', type: 'model_select', catalog: 'openai_text', placeholder: 'gpt-5-mini' },
+          { key: 'anthropic_api_key', label: 'Claude API key (Ready video copy and image prompts; blank = the OpenAI text model)', type: 'secret', help: 'From console.anthropic.com. This is API billing, separate from a Claude chat subscription.' },
+          {
+            key: 'claude_model', label: 'Claude model', type: 'select', default: 'claude-opus-5',
+            options: [{ value: 'claude-opus-5', label: 'Claude Opus 5' }, { value: 'claude-opus-5-5', label: 'Claude Opus 5.5 (newer, costs less)' }],
+          },
           { key: 'gemini_api_key', label: 'Gemini API key', type: 'secret' },
           { key: 'gemini_image_model', label: 'Gemini image model', type: 'model_select', catalog: 'gemini_image', placeholder: 'models/gemini-3.1-flash-image' },
         ],
@@ -135,6 +140,7 @@ export const CONFIG_MANIFEST = {
         title: 'System prompts (used by every LLM call)',
         fields: [
           { key: 'system_prompt_global', label: 'Global system prompt: added before every LLM call', type: 'textarea', help: 'House rules for all AI text: voice, language, words to avoid. Leave blank for none.' },
+          { key: 'claude_context', label: 'Claude background: what Claude should know, sent with every video', type: 'textarea', help: 'Paste what your Claude chats worked out: who you are, who each funnel is for, your rules, and above all image prompts that gave pictures you liked, with a note on why. Claude reads all of it before writing each video. About 33,000 tokens (roughly 25,000 words) adds about $0.17 a video on Opus 5. Used only when a Claude API key is set.' },
           { key: 'system_prompt_copy', label: 'Ready video copy writer (title, description, captions, thumbnail hook + image prompt)', type: 'textarea', default: DEFAULT_COPY_PROMPT, help: 'The app always adds the JSON output keys, the funnel comment keyword, brand brief and audience after this.' },
           { key: 'system_prompt_thumbnail', label: 'Thumbnail image rules: added after every image prompt', type: 'textarea', default: DEFAULT_THUMB_RULES, help: 'Layout and style for the AI thumbnail picture. The prompt for each video is in its Image prompt box. Comparison videos use no AI picture.' },
           { key: 'system_prompt_comparison', label: 'Comparison video copy writer: added after the copy writer for comparison videos', type: 'textarea', default: DEFAULT_COMPARISON_PROMPT, help: 'The app adds the two product names and the facts from the list below.' },

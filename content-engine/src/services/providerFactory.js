@@ -18,6 +18,7 @@ import { settings } from '../settings/index.js';
 import { logger } from '../core/logger.js';
 
 import { createLlmProvider } from '../providers/llmProvider.js';
+import { createClaudeProvider } from '../providers/claudeProvider.js';
 import { createGoogleDriveProvider } from '../providers/storageProvider.js';
 import * as driveConnect from './driveConnectService.js';
 import { createGoogleSheetsProvider } from '../providers/sheetsProvider.js';
@@ -47,6 +48,8 @@ export async function buildProviders(tenantId = 'default') {
   return {
     // Tenant-scoped credentials (from the app UI; env is only a default).
     llm: createLlmProvider({ openai: r.openai, gemini: r.gemini, globalSystem: r.prompts.global }, log),
+    // Only with a key in Settings; the Ready video copy falls back to llm without one.
+    claude: r.claude.apiKey ? createClaudeProvider({ apiKey: r.claude.apiKey, model: r.claude.model, context: r.prompts.claudeContext, globalSystem: r.prompts.global }, log) : null,
     publish: createPostForMeProvider({ apiKey: r.postformeKey }, log),
     video: createJson2VideoProvider(r.video, log),
 

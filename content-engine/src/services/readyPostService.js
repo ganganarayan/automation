@@ -43,11 +43,11 @@ import * as firstComment from './firstCommentService.js';
 import * as digest from './digestService.js';
 import * as firstCommentsRepo from '../repositories/firstCommentsRepository.js';
 import { buildInitialSteps, patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
-import { costText, costTranscript, costImages } from '../utils/pricing.js';
-import { copySystemPrompt, copyUserPrompt, normalizeCopy, keepHiddenCopy, platformConfigsFor, platformKey, nextImagePrompt, stepDownFallback, STEP_DOWN_PLATFORMS } from '../utils/aiCopySpec.js';
+import { costText, costClaude, costTranscript, costImages } from '../utils/pricing.js';
+import { copySystemPrompt, copyUserPrompt, COPY_SCHEMA, normalizeCopy, keepHiddenCopy, platformConfigsFor, platformKey, nextImagePrompt, stepDownFallback, STEP_DOWN_PLATFORMS } from '../utils/aiCopySpec.js';
 import * as imageShort from './imageShortService.js';
 import { shortTitle } from '../utils/shortSpec.js';
-import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt, thumbTagFor } from '../utils/thumbSpec.js';
+import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt, thumbTagFor, IMAGE_PROMPT_MAX } from '../utils/thumbSpec.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
 import sharp from 'sharp';
@@ -377,7 +377,7 @@ export async function saveTranscript({ funnelId, driveId, name = '', text = '', 
   const next = prepareTranscript(text);
   const head = String(headline || '').replace(/\s+/g, ' ').trim().slice(0, 80);
   const sub = String(subhead || '').replace(/\s+/g, ' ').trim().slice(0, 120);
-  const prompt = String(imagePrompt || '').trim().slice(0, 1500);
+  const prompt = String(imagePrompt || '').trim().slice(0, IMAGE_PROMPT_MAX);
   if (approve && !next.text) {
     const providers = await buildProviders(funnel.tenant_id || 'default');
     if (!comparisonFor({ settings: providers.resolved.comparison, name, choice: prev.comparison })) throw new Error('The transcript is empty: transcribe the video, or type / paste the text, first');
@@ -429,12 +429,15 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
   const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
   const comparison = comparisonFor({ settings: providers.resolved.comparison, name, transcript, choice: tArt.comparison });
 
-  const { data, model, usage } = await providers.llm.generateJsonDetailed({
-    system: copySystemPrompt({ brief: cfg && cfg.direct_copy_brief, audience: resolved.audiencePrefix, keyword: resolved.captureKeyword, base: providers.resolved.prompts.copy, comparison: !!comparison, comparisonPrompt: providers.resolved.prompts.comparison }),
-    user: copyUserPrompt({ transcript, fileName: name, glossary: glossaryTerms(providers.resolved.prompts?.glossary), comparison, note }),
-    maxTokens: 8000,
+  // Claude writes it when its key is in Settings, with your background; a Claude failure stops here rather than quietly using another model.
+  const claude = providers.claude;
+  const { data, model, usage } = await (claude || providers.llm).generateJsonDetailed({
+    system: copySystemPrompt({ freePrompt: !!claude, brief: cfg && cfg.direct_copy_brief, audience: resolved.audiencePrefix, keyword: resolved.captureKeyword, base: providers.resolved.prompts.copy, comparison: !!comparison, comparisonPrompt: providers.resolved.prompts.comparison }),
+    user: copyUserPrompt({ transcript, fileName: name, glossary: glossaryTerms(providers.resolved.prompts?.glossary), comparison, note, ...(claude ? { limit: 200000 } : {}) }),
+    maxTokens: claude ? 16000 : 8000,
+    schema: COPY_SCHEMA,
   });
-  costs.push({ step: 'script', ...costText({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, model }) });
+  costs.push({ step: 'script', ...(claude ? costClaude({ ...usage, model }) : costText({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, model })) });
   const copy = normalizeCopy(data);
   if (!copy.title && !copy.description) throw new Error('the model returned empty copy, try again');
   log.info({ funnel: funnel.name, driveId, words: transcript.split(/\s+/).filter(Boolean).length }, 'ready video copy generated');
@@ -493,7 +496,7 @@ async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessTok
     const imageModel = /^gpt-image/.test(String(providers.resolved.openai?.imageModel || '')) ? providers.resolved.openai.imageModel : 'gpt-image-1';
     let base = null;
     try {
-      base = await providers.llm.generateImage({ prompt: thumbImagePrompt(imagePrompt, providers.resolved.prompts?.thumbnail, text), size: THUMB_ART_SIZE, model: imageModel });
+      base = await providers.llm.generateImage({ prompt: thumbImagePrompt(imagePrompt, providers.resolved.prompts?.thumbnail, text, { asWritten: !!providers.claude }), size: THUMB_ART_SIZE, model: imageModel });
       costs.push({ step: 'images', ...costImages({ count: 1, size: THUMB_ART_SIZE, model: imageModel }) });
     } catch (err) {
       log.warn({ err: err.message }, 'thumbnail artwork failed (using a video frame)');
@@ -528,16 +531,17 @@ export async function generateThumbnail({ tenantId = 'default', funnelId, driveI
   const { inst, steps: base } = await ensureInstance({ funnel, driveId: id, name, source });
   const tArt = ((base.find((x) => x.key === 'transcript') || {}).artifacts) || {};
   const copy = ((base.find((x) => x.key === 'script') || {}).artifacts || {}).copy || {};
-  const head = String(headline ?? tArt.headline ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const typed = String(headline ?? tArt.headline ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const head = typed || String(copy.thumbText || ''); // blank: the hook the copy writer wrote, not saved as yours
   const sub = String(subhead ?? tArt.subhead ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
-  const prompt = String(imagePrompt ?? tArt.imagePrompt ?? '').trim().slice(0, 1500);
+  const prompt = String(imagePrompt ?? tArt.imagePrompt ?? '').trim().slice(0, IMAGE_PROMPT_MAX);
   const providers = await buildProviders(funnel.tenant_id || tenantId);
   const comparison = comparisonFor({ settings: providers.resolved.comparison, name, transcript: tArt.text, choice: tArt.comparison });
-  if (!head && !comparison) throw new Error('Type the thumbnail headline first');
+  if (!head && !comparison) throw new Error('Type the thumbnail headline, or write the copy first');
   const costs = [];
   const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
   const { thumbs, sizes, thumbError } = await makeThumbs({ providers, resolved, driveId: id, ext, accessToken, costs, imagePrompt: prompt || copy.thumbPrompt || copy.title || head, text: head, sub, tag: copy.thumbTag, comparison });
-  let steps = patchStep(base, 'transcript', { artifacts: { headline: head, subhead: sub, imagePrompt: prompt } });
+  let steps = patchStep(base, 'transcript', { artifacts: { headline: typed, subhead: sub, imagePrompt: prompt } });
   if (sizes.length) steps = patchStep(steps, 'images', { status: 'done', artifacts: { thumbs, sizes } });
   const at = new Date().toISOString();
   for (const { step, ...c } of costs) steps = addCostToSteps(steps, 'images', { ...c, costUsd: Number(c.costUsd) || 0, at });

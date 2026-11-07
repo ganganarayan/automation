@@ -18,7 +18,7 @@
  */
 
 import { DEFAULT_COMPARISON_PROMPT, comparisonCopyFacts, stripCc } from './comparisonSpec.js';
-import { thumbMedia, thumbTagClean } from './thumbSpec.js';
+import { thumbMedia, thumbTagClean, IMAGE_PROMPT_MAX } from './thumbSpec.js';
 
 export const LIMITS = {
   title: 100, // YouTube title
@@ -52,14 +52,34 @@ export const DEFAULT_COPY_PROMPT = [
   'Write in the same language as the transcript.',
 ].join('\n');
 
-/** System prompt for the copy writer: the editable prompt + the fixed output format + funnel context. */
-export function copySystemPrompt({ brief = '', audience = '', keyword = '', base = '', comparison = false, comparisonPrompt = '' } = {}) {
+const THUMB_PROMPT_LINE = /^ {2}"thumbPrompt":.*$/m;
+
+/** What Claude is asked for: the prompt it would write if you asked it directly, not the fixed literal-chart recipe. */
+const CLAUDE_THUMB_PROMPT_LINE = '  "thumbPrompt": the complete prompt for an image model, in English, written the way you would write it if the owner asked you directly for the best thumbnail picture for this video. Decide the subject, composition, style, colour and light yourself, following what the owner has approved before. It goes to the image model exactly as you write it, so it must stand alone. Under 3000 characters.';
+
+/** The output keys, for a provider that can hold the model to a schema. */
+export const COPY_SCHEMA = {
+  type: 'object',
+  properties: Object.fromEntries(['title', 'description', 'igCaption', 'short', 'thumbText', 'thumbTag', 'thumbPrompt'].map((k) => [k, { type: 'string' }])),
+  required: ['title', 'description', 'igCaption', 'short', 'thumbText', 'thumbTag', 'thumbPrompt'],
+  additionalProperties: false,
+};
+
+/**
+ * System prompt for the copy writer: the editable prompt + the fixed output format
+ * + funnel context. freePrompt (Claude writes): the image prompt is Claude's own
+ * decision. A copy prompt you changed yourself stays as you wrote it.
+ */
+export function copySystemPrompt({ brief = '', audience = '', keyword = '', base = '', comparison = false, comparisonPrompt = '', freePrompt = false } = {}) {
+  const saved = String(base || '').trim();
+  const lead = saved || DEFAULT_COPY_PROMPT;
   return [
-    String(base || '').trim() || DEFAULT_COPY_PROMPT,
+    freePrompt && lead === DEFAULT_COPY_PROMPT ? lead.replace(THUMB_PROMPT_LINE, CLAUDE_THUMB_PROMPT_LINE) : lead,
     comparison ? String(comparisonPrompt || '').trim() || DEFAULT_COMPARISON_PROMPT : '',
     'Return ONLY a JSON object with exactly these string keys: "title", "description", "igCaption", "short", "thumbText", "thumbTag", "thumbPrompt".',
     '"thumbTag" names who the video is for, drawn as a small label on the thumbnail: 2 to 4 words, at most 24 characters, such as "For founders" or "For GCC leaders". No hashtags, no emojis, no punctuation at the end.',
-    comparison ? '' : 'The title, description, thumbText and thumbPrompt must all make the same one point. thumbPrompt must show that point literally, whatever shows it most directly: a chart, a product screen, a before and after, a diagram, or a real close-up of the exact thing. Example, for viewers leaving a video: a retention line chart, horizontal axis 0% to 100% of the video, the line falling sharply at 68% with a bold red marker labelled "68%". Illustrative numbers on a chart are allowed. Clean, bright, product-marketing look. Never a metaphor, never someone at a desk, never silhouettes, and no mood, lighting or camera directions.',
+    freePrompt && !comparison ? 'The title, description, thumbText and thumbPrompt must all make the same one point.' : '',
+    comparison || freePrompt ? '' : 'The title, description, thumbText and thumbPrompt must all make the same one point. thumbPrompt must show that point literally, whatever shows it most directly: a chart, a product screen, a before and after, a diagram, or a real close-up of the exact thing. Example, for viewers leaving a video: a retention line chart, horizontal axis 0% to 100% of the video, the line falling sharply at 68% with a bold red marker labelled "68%". Illustrative numbers on a chart are allowed. Clean, bright, product-marketing look. Never a metaphor, never someone at a desk, never silhouettes, and no mood, lighting or camera directions.',
     'Never use em dashes or en dashes anywhere. Use a comma, a full stop or a colon instead.',
     keyword ? `Comment keyword: tell people to comment "${keyword}" to get the link in their DMs.` : '',
     brief ? `Brand / voice brief:\n${brief}` : '',
@@ -68,7 +88,7 @@ export function copySystemPrompt({ brief = '', audience = '', keyword = '', base
 }
 
 /** User prompt: the transcript (or, for a silent video, just its file name). */
-export function copyUserPrompt({ transcript = '', fileName: rawName = '', glossary = [], comparison = null, note = '' } = {}) {
+export function copyUserPrompt({ transcript = '', fileName: rawName = '', glossary = [], comparison = null, note = '', limit = 12000 } = {}) {
   const t = String(transcript || '').trim();
   const fileName = stripCc(rawName); // CC is the operator's own marker, never part of the topic
   const terms = (Array.isArray(glossary) ? glossary : []).filter(Boolean);
@@ -76,10 +96,10 @@ export function copyUserPrompt({ transcript = '', fileName: rawName = '', glossa
   const spell = `${terms.length ? `\n\nSpell these names and terms exactly as written: ${terms.join(', ')}.` : ''}${change ? `\n\nThe owner rejected the last version and asked for this change, follow it: ${change}` : ''}`;
   // A comparison is written from its facts: the file name stays out of it.
   if (comparison) {
-    return `${comparisonCopyFacts(comparison)}\n\n${t ? `Transcript:\n${t.slice(0, 12000)}` : 'The video has no speech (music / visuals only). Write the copy from the facts and the brand brief.'}${spell}`;
+    return `${comparisonCopyFacts(comparison)}\n\n${t ? `Transcript:\n${t.slice(0, limit)}` : 'The video has no speech (music / visuals only). Write the copy from the facts and the brand brief.'}${spell}`;
   }
   return t
-    ? `Video file: ${fileName}\n\nTranscript:\n${t.slice(0, 12000)}${spell}`
+    ? `Video file: ${fileName}\n\nTranscript:\n${t.slice(0, limit)}${spell}`
     : `Video file: ${fileName}\n\nThe video has no speech (music / visuals only). Write the copy from the file name and the brand brief.${spell}`;
 }
 
@@ -108,7 +128,7 @@ export function normalizeCopy(raw) {
     short: str(o.short ?? o.shortPost ?? o.short_post),
     thumbText: clip(str(o.thumbText ?? o.thumb_text ?? o.thumbnailText).replace(/[#"“”]/g, ''), 60),
     thumbTag: thumbTagClean(str(o.thumbTag ?? o.thumb_tag)),
-    thumbPrompt: clip(str(o.thumbPrompt ?? o.thumb_prompt ?? o.imagePrompt), 1500),
+    thumbPrompt: clip(str(o.thumbPrompt ?? o.thumb_prompt ?? o.imagePrompt), IMAGE_PROMPT_MAX),
   };
 }
 
@@ -252,7 +272,7 @@ export function imagePromptOf(steps) {
 }
 
 export default {
-  LIMITS, extractAudioArgs, copySystemPrompt, copyUserPrompt, clip, normalizeCopy, keepHiddenCopy,
+  LIMITS, extractAudioArgs, copySystemPrompt, copyUserPrompt, COPY_SCHEMA, clip, normalizeCopy, keepHiddenCopy,
   withLink, xPost, threadsPost, platformKey, platformConfigsFor, noDashes, stripTrailingLink,
   nextImagePrompt, imagePromptOf,
 };

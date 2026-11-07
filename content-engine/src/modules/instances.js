@@ -1085,7 +1085,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
             <label class="fl">Comparison video: the copy and thumbnail come from the facts in Settings, with no AI picture<select id="cp-${id}" onchange="setComp('${id}')"><option value="">Auto-detect</option><option value="off">Off: normal video</option>${comparison.names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></label>
             <div class="hint" id="ch-${id}"></div>
             <label class="fl">Edit the transcript, or paste an SRT, cue numbers and timestamps are removed before the AI reads it (the SRT itself is kept)<textarea id="tx-${id}" rows="7" oninput="txEdited('${id}')"></textarea></label>
-            <label class="fl">Thumbnail headline: big text on the image (you write it)<input id="hl-${id}" maxlength="80" placeholder="e.g. Why STHIRA works"></label>
+            <label class="fl">Thumbnail headline: big text on the image (blank = the AI's hook)<input id="hl-${id}" maxlength="80" placeholder="e.g. Why STHIRA works"></label>
             <label class="fl">Thumbnail sub-head: smaller line under it (optional)<input id="su-${id}" maxlength="120"></label>
             <label class="fl">Image prompt: the artwork you want on the thumbnail (left blank, ✅ Approve + generate copy writes one here; yours is never replaced)<textarea id="ip-${id}" rows="4"></textarea></label>
             <div class="nowrow">
@@ -1361,7 +1361,6 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     const thumbBusy = {};
     async function genThumb(id){
       if(thumbBusy[id]) return;
-      if(!$('hl',id).value.trim() && !compOn[id]){ $('gs',id).textContent='🟡 Type the thumbnail headline in step 2 first.'; $('hl',id).focus(); return; }
       thumbBusy[id]=true; $('gt',id).disabled=true; $('gs',id).textContent='🖼 Designing the thumbnail… (under a minute): your copy is not touched';
       try{
         const j=await post('thumbnail', { driveId:id, name:$('nm',id).value, source:SOURCE, accounts: pickedAccounts(), accessToken: await driveToken(), headline:$('hl',id).value, subhead:$('su',id).value, imagePrompt:$('ip',id).value });

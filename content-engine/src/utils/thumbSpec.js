@@ -16,7 +16,7 @@
  *                 (text = the headline, sub = an optional smaller sub-head, tag = the audience pill)
  *               - thumbTagClean / thumbTagFor: the audience call-out's rules and fallback
  *               - thumbTagBox: where the audience pill goes in each size
- *               - thumbImagePrompt(prompt, rules, headline): the image-model prompt (rules = the Settings field)
+ *               - thumbImagePrompt(prompt, rules, headline, { asWritten }): the image-model prompt (rules = the Settings field)
  *               - thumbMedia(videoUrl, thumbUrl): Post for Me media item
  * Dependencies: none.
  */
@@ -212,11 +212,26 @@ export const DEFAULT_THUMB_RULES = 'Clear, bright, sharply lit marketing image i
 // The rules this replaced: a Settings page saved while still holding them is not a choice you made.
 const OLD_THUMB_RULES = 'Thumbnail artwork, square composition. Show only what is described above: no person or face unless it asks for one. Place the main subject on the LEFT side of the frame (the left 55%), whole and well lit, with room around it. Keep the RIGHT 45% of the frame calm and empty: a plain dark wall, a soft out-of-focus background or sky, nothing important there, so a headline can sit on it. Bold cinematic lighting, high contrast, one clear focal subject. Absolutely no text, letters, words, captions, logos or watermarks.';
 
-/** Image-model prompt for the thumbnail artwork. The app draws the headline; the model is told it so the picture proves it. */
-export function thumbImagePrompt(prompt, rules = '', headline = '') {
-  const subject = String(prompt || '').trim().slice(0, 1500) || 'A clear image of the exact thing the video is about';
+/** The longest image prompt kept: a Claude prompt must reach the image model whole. */
+export const IMAGE_PROMPT_MAX = 4000;
+
+/** All the app adds to a prompt Claude wrote: where its own headline and label go. */
+export const THUMB_LAYOUT_ONLY = 'Landscape format. The app places a headline over the top 30% of the frame afterwards and a small label at the bottom left, so keep anything important out of those two areas. Do not write the headline or a caption into the image.';
+
+/**
+ * Image-model prompt for the thumbnail artwork. The app draws the headline; the
+ * model is told it so the picture proves it. asWritten (Claude wrote the prompt):
+ * the prompt goes as it is, with only the layout note, or rules you changed
+ * yourself under System prompts; the built-in style rules would override it.
+ */
+export function thumbImagePrompt(prompt, rules = '', headline = '', { asWritten = false } = {}) {
+  const subject = String(prompt || '').trim().slice(0, IMAGE_PROMPT_MAX) || 'A clear image of the exact thing the video is about';
   const saved = String(rules || '').trim();
   const head = String(headline || '').trim();
+  if (asWritten) {
+    const yours = saved && saved !== OLD_THUMB_RULES && saved !== DEFAULT_THUMB_RULES;
+    return [subject, yours ? saved : THUMB_LAYOUT_ONLY].join('\n\n');
+  }
   return [
     subject,
     head ? `The headline going over this image is "${head}". The picture must make that headline obvious at a glance. Do not write the headline in the image.` : '',
@@ -229,4 +244,4 @@ export function thumbMedia(videoUrl, thumbUrl) {
   return thumbUrl ? { url: videoUrl, thumbnail_url: thumbUrl } : { url: videoUrl, thumbnail_timestamp_ms: 0 };
 }
 
-export default { THUMB_ART_SIZE, THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, thumbSvg, thumbTagClean, thumbTagFor, thumbTagBox, DEFAULT_THUMB_RULES, thumbImagePrompt, thumbMedia };
+export default { THUMB_ART_SIZE, THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, thumbSvg, thumbTagClean, thumbTagFor, thumbTagBox, DEFAULT_THUMB_RULES, THUMB_LAYOUT_ONLY, IMAGE_PROMPT_MAX, thumbImagePrompt, thumbMedia };

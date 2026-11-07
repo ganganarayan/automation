@@ -78,6 +78,20 @@ export function costText({ inputTokens = 0, outputTokens = 0, model = 'default' 
   };
 }
 
+/** Claude's prices, USD per 1,000,000 tokens: cache reads and writes are charged apart from plain input. */
+export const CLAUDE_PRICES = {
+  'claude-opus-5': { inPer1M: 5, outPer1M: 25, cacheReadPer1M: 0.5, cacheWritePer1M: 6.25 },
+  'claude-opus-5-5': { inPer1M: 4, outPer1M: 20, cacheReadPer1M: 0.2, cacheWritePer1M: 5 },
+};
+
+/** The Claude copy writer's cost from real token usage (the dearer Opus when the model is unknown). */
+export function costClaude({ inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheWriteTokens = 0, model = 'claude-opus-5' }) {
+  const p = CLAUDE_PRICES[model] || CLAUDE_PRICES['claude-opus-5'];
+  const costUsd = r4((inputTokens * p.inPer1M + outputTokens * p.outPer1M + cacheReadTokens * p.cacheReadPer1M + cacheWriteTokens * p.cacheWritePer1M) / 1e6);
+  const total = (Number(inputTokens) || 0) + (Number(cacheReadTokens) || 0) + (Number(cacheWriteTokens) || 0);
+  return { provider: 'anthropic', model, unit: 'tokens', quantity: total + (Number(outputTokens) || 0), unitPriceUsd: null, costUsd, inputTokens: total, outputTokens: Number(outputTokens) || 0 };
+}
+
 /** Image generation cost from the real number of images at a size. */
 export function costImages({ count = 0, size = 'default', model = 'gpt-image-1' }, prices = DEFAULT_PRICES) {
   const unitPriceUsd = pick(prices.image, size);
