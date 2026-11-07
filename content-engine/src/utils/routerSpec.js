@@ -13,7 +13,7 @@
  * fail-safe); 'none' when nothing could be lined up for that day.
  */
 import { DateTime } from 'luxon';
-import { extractRow, locate } from './postCompose.js';
+import { extractRow, sheetColumnIndex } from './postCompose.js';
 import { byFileOrder } from './readyPostSpec.js';
 
 const ZONE = 'Asia/Kolkata';
@@ -303,15 +303,15 @@ export function sheetHistory(rows = []) {
 
 /** Which content columns this sheet has (so the LLM only writes what fits). */
 export function sheetColumns(rawHeader = []) {
-  const h = rawHeader.map(norm);
+  const c = sheetColumnIndex(rawHeader);
   return {
-    prompt: locate(h, ['image_prompt', 'prompt'], ['image prompt']) !== -1,
-    caption: locate(h, ['caption']) !== -1,
-    captionFull: locate(h, ['caption_full', 'full caption'], ['linkedin long caption']) !== -1,
-    captionShort: locate(h, ['caption_short'], ['short caption']) !== -1,
-    headline: locate(h, ['headline']) !== -1,
-    subhead: locate(h, ['subhead', 'subheadline']) !== -1,
-    hashtags: locate(h, ['hashtags']) !== -1,
+    prompt: c.prompt !== -1,
+    caption: c.caption !== -1,
+    captionFull: c.full !== -1,
+    captionShort: c.short !== -1,
+    headline: c.headline !== -1,
+    subhead: c.subhead !== -1,
+    hashtags: c.hashtags !== -1,
   };
 }
 
@@ -368,17 +368,17 @@ export function normalizeRefill(data, count = REFILL_COUNT) {
  * has one. Columns the sheet doesn't have are dropped.
  */
 export function rowsForSheet(rawHeader = [], posts = [], keys = []) {
-  const h = rawHeader.map(norm);
+  const c = sheetColumnIndex(rawHeader);
   const at = {
-    status: locate(h, ['status']),
-    match: locate(h, ['post #', 'post no', 'post number', 'day', 'id']),
-    prompt: locate(h, ['image_prompt', 'prompt'], ['image prompt']),
-    caption: locate(h, ['caption']),
-    full: locate(h, ['caption_full', 'full caption'], ['linkedin long caption']),
-    short: locate(h, ['caption_short'], ['short caption']),
-    headline: locate(h, ['headline']),
-    subhead: locate(h, ['subhead', 'subheadline']),
-    hashtags: locate(h, ['hashtags']),
+    status: c.status,
+    match: c.match,
+    prompt: c.prompt,
+    caption: c.caption,
+    full: c.full,
+    short: c.short,
+    headline: c.headline,
+    subhead: c.subhead,
+    hashtags: c.hashtags,
     source: colIndex(rawHeader, SOURCE_COL),
   };
   return posts.map((p, i) => {

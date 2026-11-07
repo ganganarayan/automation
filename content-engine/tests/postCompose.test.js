@@ -101,3 +101,31 @@ describe('buildPlatformConfigs', () => {
     expect(buildPlatformConfigs('', '')).toBeNull();
   });
 });
+
+describe('a sheet in its own wording (HNI Parents)', () => {
+  const header = ['#', 'Week', 'Arc', 'Post Day', 'Post Time', 'Audience Call-Out (IN the image)', 'Headline (largest type)', 'Sub-line', 'Visual Direction', 'Caption (post copy)', 'CTA', 'Hashtags', 'Channels', 'Status', 'title', 'posted at', 'pfm_post_id', 'posted links'];
+  const row = ['1', 'Week 1', 'Recognition', 'Mon', '11:30 AM IST', 'For Indian parents.', 'He will inherit everything you built.', 'Does he know what it was for?', 'A father in a boardroom at dusk', 'You built something.', 'Comment INHERIT for the note.', '#Gita', 'All 7', 'Ready', '', '', '', ''];
+
+  it('is read as a ready image post', () => {
+    const f = extractRow(header, row);
+    expect(f.hasSchema).toBe(true);
+    expect(f.isReady).toBe(true);
+    expect(f.matchColName).toBe('#');
+    expect(f.matchKey).toBe('1');
+    expect(f.imagePrompt).toBe('A father in a boardroom at dusk');
+    expect(f.headline).toBe('He will inherit everything you built.');
+    expect(f.subhead).toBe('Does he know what it was for?');
+    expect(f.caption).toBe('You built something.');
+    expect(f.callout).toBe('For Indian parents.');
+    expect(f.audience).toBe('');
+    expect(f.cta).toBe('Comment INHERIT for the note.');
+  });
+
+  it('draws the call-out on the image and ends the caption with the CTA', () => {
+    const f = extractRow(header, row);
+    expect(composePrompt(f)).toContain('AUDIENCE CALL-OUT (small text above the headline, render exactly and verbatim): "For Indian parents."');
+    const { full } = composeCaptions(f, { ctaLink: 'https://x.co' });
+    expect(full).toContain('You built something.\n\nComment INHERIT for the note.');
+    expect(full.endsWith('https://x.co')).toBe(true);
+  });
+});
