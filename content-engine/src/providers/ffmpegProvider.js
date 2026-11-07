@@ -92,8 +92,8 @@ export function createFfmpegProvider(cfg = {}, log) {
     },
 
     /** Render an image post's Short (the argv comes from utils/shortSpec). */
-    async imageToShort({ args }) {
-      await run(bin, args, { maxBuffer: 64 * 1024 * 1024, timeout: 300000 });
+    async imageToShort({ args, cwd }) {
+      await run(bin, args, { maxBuffer: 64 * 1024 * 1024, timeout: 300000, ...(cwd ? { cwd } : {}) });
     },
 
     /**

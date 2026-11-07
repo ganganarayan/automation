@@ -45,6 +45,40 @@ export function createTtsProvider(cfg = {}, log) {
       log?.info?.({ chars: body.length, bytes: buffer.length }, 'tts synthesized');
       return { buffer, mime: 'audio/mpeg', chars: body.length };
     },
+
+    /**
+     * The voice plus when each character is spoken (for subtitles), from the
+     * same ElevenLabs call at the same price. If that endpoint fails, the plain
+     * voice comes back with alignment null.
+     */
+    async synthesizeTimed({ text }) {
+      const body = String(text || '').trim();
+      if (!body) throw new ExternalAPIError('TTS needs non-empty script text');
+      if (provider !== 'elevenlabs') throw new ExternalAPIError(`TTS provider not supported: ${provider}`);
+      if (!apiKey) throw new ExternalAPIError('TTS not configured (voice clone API key missing)');
+      if (!voiceId) throw new ExternalAPIError('TTS not configured (voice_id missing)');
+      try {
+        const res = await fetch(`${ELEVEN_BASE}/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps`, {
+          method: 'POST',
+          headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ text: body, model_id: model }),
+        });
+        if (!res.ok) {
+          const detail = await res.text().catch(() => '');
+          throw new ExternalAPIError(`ElevenLabs TTS failed (${res.status}): ${detail.slice(0, 300)}`);
+        }
+        const data = await res.json();
+        if (!data || !data.audio_base64) throw new ExternalAPIError('ElevenLabs returned no audio');
+        const buffer = Buffer.from(data.audio_base64, 'base64');
+        log?.info?.({ chars: body.length, bytes: buffer.length }, 'tts synthesized with timings');
+        return { buffer, mime: 'audio/mpeg', chars: body.length, alignment: data.alignment || data.normalized_alignment || null };
+      } catch (err) {
+        // A key or voice problem fails the plain call too; anything else gets the plain voice.
+        if (/\((401|403|404|422)\)/.test(String(err.message))) throw err;
+        log?.warn?.({ err: err.message }, 'timed TTS failed, plain voice instead');
+        return { ...(await this.synthesize({ text: body })), alignment: null };
+      }
+    },
   };
 }
 

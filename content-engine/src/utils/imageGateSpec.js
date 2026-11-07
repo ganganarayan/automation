@@ -17,6 +17,7 @@ export const IMAGE_SIZES = {
   square: { size: '1024x1024', aspect: null },
   portrait: { size: '1024x1536', aspect: null },
   story: { size: '1024x1536', aspect: '9:16' },
+  feed: { size: '1024x1536', aspect: '4:5' },
   landscape: { size: '1536x1024', aspect: '16:9' },
 };
 

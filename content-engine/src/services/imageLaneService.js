@@ -42,7 +42,8 @@ import { request } from '../core/httpClient.js';
 import { extractRow, composePrompt, composeCaptions, buildPlatformConfigs } from '../utils/postCompose.js';
 import { patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import * as imageShort from './imageShortService.js';
-import { shortTitle, imageVideoMode, imageVideoConfigs } from '../utils/shortSpec.js';
+import { shortTitle, imageVideoMode, imageVideoConfigs, IMAGE_VIDEO_SIZES, sizedPrompt, sizesNeeded } from '../utils/shortSpec.js';
+import { imageSpec } from '../utils/imageGateSpec.js';
 import { platformKey } from '../utils/aiCopySpec.js';
 import { createTtsProvider } from '../providers/ttsProvider.js';
 import { costImages, costAnimation, costTts } from '../utils/pricing.js';
@@ -124,10 +125,33 @@ async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '
   const prompt = composePrompt(fields, note);
   await stepLog.start(instanceId, 'images');
   let upload;
+  // One picture per size the platforms take (9:16, 4:5, 16:9), from the same
+  // prompt composed for each frame. The 4:5 one is the preview and the
+  // picture-mode post; a size that fails uses it.
+  const sized = {};
+  let made = 0;
   try {
-    const image = await poster.generate(providers, prompt, f.imageSize, f.imageKey);
-    upload = await providers.storage.uploadPng(f.driveFolder, `${poster.slug(f.name)}-${poster.slug(sheet.key)}-r${inst.round || 1}.png`, image);
-    if (!upload || !upload.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
+    const name = (size) => `${poster.slug(f.name)}-${poster.slug(sheet.key)}-r${inst.round || 1}${size === 'feed' ? '' : `-${size}`}.png`;
+    const draw = async (size) => {
+      const spec = IMAGE_VIDEO_SIZES[size];
+      // Gemini draws square only: cropping that to 9:16 could cut the headline, so it stays whole
+      // (the video fits it on a blurred copy of itself).
+      const key = providers.resolved?.openai?.apiKey ? spec.gen : 'square';
+      const image = await poster.generate(providers, sizedPrompt(prompt, size), imageSpec(spec.gen).size, key);
+      made += 1;
+      const up = await providers.storage.uploadPng(f.driveFolder, name(size), image);
+      if (!up || !up.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
+      return up;
+    };
+    upload = await draw('feed');
+    sized.feed = upload.downloadUrl;
+    for (const size of ['portrait', 'landscape']) {
+      try {
+        sized[size] = (await draw(size)).downloadUrl;
+      } catch (err) {
+        log.warn({ err: err.message, size }, 'one image size failed, the 4:5 picture stands in');
+      }
+    }
   } catch (err) {
     await stepLog.fail(instanceId, 'images');
     throw err;
@@ -148,12 +172,13 @@ async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '
     finishedAt: new Date().toISOString(),
     artifacts: {
       image: { url: upload.downloadUrl, thumbnailUrl: upload.thumbnailUrl, driveId: upload.id || null },
+      images: sized,
       prompt, note: note || '', row: fields, sheet, approvalId,
     },
   });
   // Real cost when OpenAI made it (Gemini has no per-image price table here).
-  if (providers.resolved?.openai?.apiKey) {
-    steps = addCostToSteps(steps, 'images', { ...costImages({ count: 1, size: f.imageSize }), at: new Date().toISOString() });
+  if (providers.resolved?.openai?.apiKey && made) {
+    steps = addCostToSteps(steps, 'images', { ...costImages({ count: made, size: '1024x1536' }), at: new Date().toISOString() });
   }
   await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
   await instanceRepo.setStatus(instanceId, IMAGE_REVIEW);
@@ -384,13 +409,22 @@ export async function approve(approval) {
   const ytConfig = { title: shortTitle(row.title, short || full), caption: full || short };
   // Default: every channel gets a video of the picture with music and the
   // caption read in the funnel's voice. A failed render posts the picture.
-  const video = await videoFor({ row, f, providers, publish, imageUrl: req.mediaUrl, text: short || full, log });
+  // Each platform gets its own size: 9:16 Reels and Shorts, 4:5 LinkedIn and Threads, 16:9 X.
+  const platforms = (f.accounts || []).map((id) => platformKey((accountMap[id] || {}).platform));
+  // Older posts (and a stepped-down video) have one picture: the video fits it to each size.
+  const pictures = { ...(img.images || {}) };
+  const sizes = sizesNeeded(platforms);
+  const images = Object.fromEntries(sizes.map((s) => [s, pictures[s] || req.mediaUrl]));
+  const video = await videoFor({ row, f, providers, publish, images, sizes, text: short || full, log });
   if (video) {
-    const platforms = (f.accounts || []).map((id) => platformKey((accountMap[id] || {}).platform));
-    req.platformConfigurations = imageVideoConfigs({ platforms, full, short, title: ytConfig.title, videoUrl: video.url, imageUrl: req.mediaUrl });
+    req.platformConfigurations = imageVideoConfigs({ platforms, full, short, title: ytConfig.title, videos: video.videos, images });
     req.imageUrl = req.mediaUrl;
     req.mediaUrl = video.url;
-    req.imageVideo = { seconds: video.seconds, voiced: video.voiced, ...(video.voiceError ? { voiceError: video.voiceError } : {}) };
+    req.imageVideo = {
+      seconds: video.seconds, voiced: video.voiced, subtitled: video.subtitled, sizes: Object.keys(video.videos),
+      ...(video.voiceError ? { voiceError: video.voiceError } : {}),
+      ...(video.subtitleError ? { subtitleError: video.subtitleError } : {}),
+    };
     accounts.splice(0, accounts.length, ...(f.accounts || []));
     if (video.chars) steps = addCostToSteps(steps, 'publish', { ...costTts({ provider: 'elevenlabs', chars: video.chars }), at: new Date().toISOString() });
   }
@@ -458,9 +492,9 @@ export async function approve(approval) {
  * The image post as a video, per Settings (image_video): null when it is set
  * to the picture, the funnel posts nowhere, or the render failed.
  */
-async function videoFor({ row, f, providers, publish, imageUrl, text, log }) {
+async function videoFor({ row, f, providers, publish, images, sizes, text, log }) {
   const mode = imageVideoMode(providers.resolved.imageVideo);
-  if (mode === 'off' || !(f.accounts || []).length || !imageUrl) return null;
+  if (mode === 'off' || !(f.accounts || []).length || !Object.values(images || {}).some(Boolean)) return null;
   try {
     let tts = null;
     let noVoice = '';
@@ -471,9 +505,9 @@ async function videoFor({ row, f, providers, publish, imageUrl, text, log }) {
       else if (!apiKey) noVoice = 'no ElevenLabs key on Keys and credit';
       else tts = createTtsProvider({ provider: cfg.tts_provider, apiKey, voiceId: cfg.voice_id }, log);
     }
-    const made = await imageShort.makeVideo({ imageUrl, publish, music: providers.resolved.shortMusic, text, tts, log });
+    const made = await imageShort.makeVideo({ images, sizes, publish, music: providers.resolved.shortMusic, text, tts, log });
     if (noVoice) made.voiceError = noVoice;
-    log.info({ seconds: made.seconds, voiced: made.voiced, voiceError: made.voiceError || undefined }, 'image post rendered as a video');
+    log.info({ seconds: made.seconds, voiced: made.voiced, subtitled: made.subtitled, sizes: Object.keys(made.videos), voiceError: made.voiceError || undefined }, 'image post rendered as videos');
     return made;
   } catch (err) {
     log.warn({ err: err.message }, 'image post video failed, posting the picture instead');

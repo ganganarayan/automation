@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MUSIC_TRACKS, MUSIC_OPTIONS, pickMusic, musicLink, shortTitle, imageShortArgs, DEFAULT_MUSIC, imageVideoMode, voiceText, imageVideoSeconds, imageVideoConfigs, IMAGE_VIDEO_SECONDS, VOICE_MAX_CHARS } from '../src/utils/shortSpec.js';
+import { MUSIC_TRACKS, MUSIC_OPTIONS, pickMusic, musicLink, shortTitle, imageShortArgs, DEFAULT_MUSIC, imageVideoMode, voiceText, imageVideoSeconds, imageVideoConfigs, IMAGE_VIDEO_SECONDS, VOICE_MAX_CHARS, sizesNeeded, sizedPrompt, alignmentCues, evenCues } from '../src/utils/shortSpec.js';
 import { stepDownFallback, platformConfigsFor } from '../src/utils/aiCopySpec.js';
 import { nextAutoRetry } from '../src/utils/laneSpec.js';
 import { retryAction } from '../src/utils/retrySpec.js';
@@ -127,14 +127,60 @@ describe('image post as a video', () => {
     expect(a[a.indexOf('-t') + 1]).toBe('14');
   });
 
-  it('gives each platform the video with the picture as cover, long text where there is room', () => {
-    const c = imageVideoConfigs({ platforms: ['youtube', 'instagram', 'linkedin', 'x', 'youtube'], full: 'F', short: 'S', title: 'T', videoUrl: 'v', imageUrl: 'i' });
-    expect(Object.keys(c)).toEqual(['youtube', 'instagram', 'linkedin', 'x']);
-    expect(c.youtube).toEqual({ caption: 'F', title: 'T', media: [{ url: 'v', thumbnail_url: 'i' }] });
-    expect(c.instagram.caption).toBe('S');
-    expect(c.linkedin.caption).toBe('F');
-    // X steps down to the picture and text when the video is refused.
+  it('gives each platform its own size of video with its own size of picture as cover', () => {
+    const videos = { portrait: 'v916', feed: 'v45', landscape: 'v169' };
+    const images = { portrait: 'i916', feed: 'i45', landscape: 'i169' };
+    const c = imageVideoConfigs({ platforms: ['youtube', 'instagram', 'linkedin', 'x', 'threads', 'youtube'], full: 'F', short: 'S', title: 'T', videos, images });
+    expect(Object.keys(c)).toEqual(['youtube', 'instagram', 'linkedin', 'x', 'threads']);
+    expect(c.youtube).toEqual({ caption: 'F', title: 'T', media: [{ url: 'v916', thumbnail_url: 'i916' }] });
+    expect(c.instagram.media[0].url).toBe('v916');
+    expect(c.linkedin).toEqual({ caption: 'F', media: [{ url: 'v45', thumbnail_url: 'i45' }] });
+    expect(c.threads.media[0].url).toBe('v45');
+    expect(c.x.media[0]).toEqual({ url: 'v169', thumbnail_url: 'i169' });
+    // X steps down to its own picture and text when the video is refused.
     expect(stepDownFallback('x', c, 'S').as).toBe('image and text');
-    expect(stepDownFallback('x', c, 'S').config.media).toEqual([{ url: 'i' }]);
+    expect(stepDownFallback('x', c, 'S').config.media).toEqual([{ url: 'i169' }]);
+  });
+
+  it('uses the primary size when a size is missing', () => {
+    const c = imageVideoConfigs({ platforms: ['x'], videos: { portrait: 'v' }, images: { portrait: 'i' } });
+    expect(c.x.media).toEqual([{ url: 'v', thumbnail_url: 'i' }]);
+  });
+
+  it('needs the primary size plus each platform size', () => {
+    expect(sizesNeeded(['instagram', 'linkedin', 'x', 'youtube'])).toEqual(['portrait', 'feed', 'landscape']);
+    expect(sizesNeeded(['instagram'])).toEqual(['portrait']);
+    expect(sizesNeeded([])).toEqual(['portrait']);
+  });
+
+  it('composes the prompt for each frame', () => {
+    expect(sizedPrompt('A scene', 'landscape')).toContain('wide horizontal 16:9 frame');
+    expect(sizedPrompt('A scene', 'nope')).toBe('A scene');
+  });
+
+  it('times subtitles from the voice, a few words a line, from half a second in', () => {
+    const text = 'Stay calm. Do your duty now and always.';
+    const chars = [...text];
+    const al = { characters: chars, character_start_times_seconds: chars.map((_, i) => i * 0.1), character_end_times_seconds: chars.map((_, i) => i * 0.1 + 0.1) };
+    const cues = alignmentCues(al);
+    expect(cues.map((c) => c.text)).toEqual(['Stay calm.', 'Do your duty now and', 'always.']);
+    expect(cues[0].start).toBeCloseTo(0.5);
+    for (let i = 1; i < cues.length; i++) expect(cues[i - 1].end).toBeGreaterThanOrEqual(cues[i].start);
+  });
+
+  it('spreads subtitles evenly when there are no timings', () => {
+    const cues = evenCues('one two three four five six seven', 7);
+    expect(cues.length).toBe(2);
+    expect(cues[0].start).toBeCloseTo(0.5);
+    expect(cues.at(-1).end).toBeGreaterThan(7);
+    expect(evenCues('', 5)).toEqual([]);
+  });
+
+  it('burns subtitles at the asked size and refuses a path ffmpeg would misread', () => {
+    const a = imageShortArgs({ imagePath: 'i.png', outPath: 'o.mp4', music: { expr: 'sin(t)' }, width: 1920, height: 1080, subPath: 'subs.srt', voicePath: 'v.mp3' });
+    const f = a[a.indexOf('-filter_complex') + 1];
+    expect(f).toContain('crop=1920:1080');
+    expect(f).toContain("subtitles=subs.srt:force_style='Fontsize=16");
+    expect(() => imageShortArgs({ imagePath: 'i', outPath: 'o', music: { expr: '1' }, subPath: 'C:/x/subs.srt' })).toThrow();
   });
 });
