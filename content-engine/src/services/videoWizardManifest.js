@@ -35,6 +35,7 @@ export const WIZARD_STEPS = [
     desc: 'Set once for every lane. Each day the router picks the lane itself: a ready video from Drive first, else an AI video when there is credit, else an image post. It then lines up the content and emails you for approval. You only fill in each lane’s details on the next pages.',
     required: ['approval_email', 'cta_link'],
     fields: [
+      { key: 'funnel_name', label: 'Funnel name', funnelName: true, help: 'Shown on the Funnels page, Library and Log. Must be unique.' },
       { key: 'approval_email', label: 'Approval email' },
       { key: 'cta_link', label: 'CTA / assessment link' },
       { key: 'landing_page_url', label: 'Landing page links (one per line)', type: 'textarea', placeholder: 'https://…\nhttps://…', help: 'The router researches new topics (AI video, image posts) from all of these pages.' },

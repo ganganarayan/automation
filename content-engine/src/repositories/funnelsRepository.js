@@ -113,6 +113,25 @@ export async function create({ tenantId = 'default', name }) {
   return rows[0] || findByName(tenantId, name);
 }
 
+/**
+ * Rename a funnel. Names are unique per tenant, so a clash is refused with a
+ * readable error. Instances keep a copy of the funnel name for the Library and
+ * Log; those rows follow the new name (deleted_instances stays as history).
+ */
+export async function rename(id, newName) {
+  const name = String(newName || '').trim();
+  if (!name) throw new Error('Funnel name cannot be empty');
+  if (name.length > 120) throw new Error('Funnel name is too long (120 characters max)');
+  const funnel = await get(id);
+  if (!funnel) throw new Error('funnel not found');
+  if (funnel.name === name) return funnel;
+  const clash = await findByName(funnel.tenant_id, name);
+  if (clash && clash.id !== funnel.id) throw new Error(`Another funnel is already called "${name}"`);
+  await query('UPDATE funnels SET name = $2 WHERE id = $1', [id, name]);
+  await query('UPDATE instances SET funnel_name = $2 WHERE funnel_id = $1', [id, name]).catch(() => {});
+  return { ...funnel, name };
+}
+
 export async function setActive(id, active) {
   await query('UPDATE funnels SET active = $2 WHERE id = $1', [id, !!active]);
 }

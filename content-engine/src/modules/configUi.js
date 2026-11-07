@@ -288,8 +288,14 @@ export function register(ctx) {
       const step = WIZARD_STEPS[stepIndex];
       if (!step) return res.status(400).json({ ok: false, error: 'bad step' });
       const set = req.body?.set || {};
+      // The funnel name lives on the funnels row, not funnel_config: rename first
+      // so a clash or empty name is refused before anything else is saved.
+      let newName = null;
       for (const field of stepFields(step)) {
-        if (!(field.key in set)) continue;
+        if (field.funnelName && field.key in set) newName = (await funnels.rename(id, set[field.key])).name;
+      }
+      for (const field of stepFields(step)) {
+        if (!(field.key in set) || field.funnelName) continue;
         const val = String(set[field.key] ?? '');
         if (field.type === 'secret') {
           if (val.trim() !== '') await funnels.setConfig(id, field.key, val);
@@ -300,7 +306,7 @@ export function register(ctx) {
         }
       }
       const cfg = await funnels.getConfig(id).catch(() => ({}));
-      res.json({ ok: true, complete: completeness(cfg) });
+      res.json({ ok: true, complete: completeness(cfg), name: newName });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -966,6 +972,7 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
       if (field.key === 'postforme_api_key') return funnelKeyRow(field, cfg, funnel.id);
       if (field.key === 'postforme_accounts') return pfmAccountsRow(cfg, funnel.id);
       if (field.key === 'account_map') return '';
+      if (field.funnelName) return fieldRow(field, { ...cfg, [field.key]: funnel.name });
       return fieldRow(field, cfg);
     })
     .join('');
@@ -1089,7 +1096,7 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
      const r=await fetch(SAVE_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({step:STEP,set:collectSet()})});
      const j=await r.json().catch(()=>({}));
      if(!r.ok||!j.ok){toast('Save failed'+(j.error?': '+j.error:''),true);return false;}
-     updateTicks(j.complete);toast('Saved');return true;
+     updateTicks(j.complete);if(j.name){const b=document.querySelector('.brand');if(b)b.textContent=j.name;document.title=j.name+', lane setup';}toast('Saved');return true;
    }catch(e){toast('Save failed: '+e.message,true);return false;}
  }
  async function nav(i){if(i<0||i>=TOTAL||i===STEP)return;const ok=await save();if(ok!==false)location.href=BASE+'?step='+i;}
