@@ -459,7 +459,7 @@ export function ownThumbnailCount(videos = [], files = []) {
 export function copyFromCaption(text = '') {
   const body = String(text || '').replace(/^﻿/, '').replace(/\r\n/g, '\n').trim();
   const first = (body.split('\n').find((l) => l.trim()) || '').trim();
-  return { title: first.slice(0, 100), description: body, igCaption: body, short: body, thumbText: '', thumbPrompt: '' };
+  return { title: first.slice(0, 100), description: body, igCaption: body, short: body, thumbText: '', thumbTag: '', thumbPrompt: '' };
 }
 
 /** The same thumbnail URL for every platform that takes one. */

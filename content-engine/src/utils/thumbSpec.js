@@ -12,8 +12,10 @@
  *               - PLATFORM_SIZE: platform -> size; THUMB_SPECS: platform -> its size spec
  *               - wrapText(text, maxChars, maxLines): lines
  *               - thumbBox / thumbArt: where the text and the artwork go
- *               - thumbSvg({ w, h, text, sub, layout, accent }): SVG overlay string
- *                 (text = the headline, sub = an optional smaller sub-head)
+ *               - thumbSvg({ w, h, text, sub, layout, accent, tag }): SVG overlay string
+ *                 (text = the headline, sub = an optional smaller sub-head, tag = the audience pill)
+ *               - thumbTagClean / thumbTagFor: the audience call-out's rules and fallback
+ *               - thumbTagBox: where the audience pill goes in each size
  *               - thumbImagePrompt(prompt, rules, headline): the image-model prompt (rules = the Settings field)
  *               - thumbMedia(videoUrl, thumbUrl): Post for Me media item
  * Dependencies: none.
@@ -116,7 +118,7 @@ export function thumbArt({ w, h, layout = 'top' }) {
  * outline, sized to fit and never cut, and the sub-head under it in the accent
  * colour.
  */
-export function thumbSvg({ w, h, text, sub = '', layout = 'top', accent = '#FFFFFF' }) {
+export function thumbSvg({ w, h, text, sub = '', layout = 'top', accent = '#FFFFFF', tag = '' }) {
   const box = thumbBox({ w, h, layout });
   const boxW = box.x1 - box.x0;
   const boxH = box.y1 - box.y0;
@@ -147,7 +149,61 @@ export function thumbSvg({ w, h, text, sub = '', layout = 'top', accent = '#FFFF
   const subText = subLines.length ? `
 <text text-anchor="middle" ${font} font-weight="700" font-size="${subSize}" fill="${accent}" ${stroke(subSize)}>${subSpans}</text>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">${stops}</linearGradient></defs><rect width="${w}" height="${hazeH}" fill="url(#g)"/>
-<text text-anchor="middle" ${font} font-weight="800" font-size="${size}" fill="#FFFFFF" ${stroke(size)}>${tspans}</text>${subText}</svg>`;
+<text text-anchor="middle" ${font} font-weight="800" font-size="${size}" fill="#FFFFFF" ${stroke(size)}>${tspans}</text>${subText}${tag ? thumbTagSvg({ w, h, layout, tag }) : ''}</svg>`;
+}
+
+/**
+ * The audience call-out ("For founders"): 2 to 4 words, at most 24 characters,
+ * no hashtags, no emojis, no punctuation at the end. Anything else comes back
+ * '', never an error: a bad tag must not stop a thumbnail.
+ */
+export function thumbTagClean(raw) {
+  const tag = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  const words = tag.split(' ').filter(Boolean).length;
+  if (words < 2 || words > 4 || tag.length > 24) return '';
+  if (tag.includes('#')) return '';
+  if (/[\p{Extended_Pictographic}\p{Regional_Indicator}\u200D\uFE0F\u20E3]/u.test(tag)) return '';
+  if (/[\p{P}\p{S}]$/u.test(tag)) return '';
+  return tag;
+}
+
+/** The tag a thumbnail draws: the video's own, else the funnel's default, else none. Off = none. */
+export function thumbTagFor({ on = true, tag = '', fallback = '' } = {}) {
+  if (!on) return '';
+  return thumbTagClean(tag) || thumbTagClean(fallback);
+}
+
+// Bold capitals run wider than the headline's mixed case; the text is centred, so a wide word eats padding evenly.
+const TAG_GLYPH = 0.68;
+const TAG_PAD = 0.45; // each side, in em
+
+/**
+ * Where the pill goes. Bottom-left of the picture: the frame in 16:9, the picture
+ * panel in 9:16 and 4:5 (in 9:16 the frame's own bottom is a blurred strip that
+ * Instagram's grid crops). It starts on the headline's 5% margin and never runs
+ * past 55% of the width. The size is set by the width, not the headline's, so it
+ * still reads at 160px wide: a long tag shrinks only as far as it must to fit.
+ */
+export function thumbTagBox({ w, h, layout = 'top', tag = '' }) {
+  const label = String(tag).toUpperCase();
+  const art = thumbArt({ w, h, layout });
+  const x = Math.round(w * 0.05);
+  const maxW = Math.round(w * 0.55) - x;
+  const size = Math.floor(Math.min(art ? w / 30 : w / 32, maxW / (label.length * TAG_GLYPH + TAG_PAD * 2)));
+  const pillW = Math.min(maxW, Math.round((label.length * TAG_GLYPH + TAG_PAD * 2) * size));
+  const pillH = Math.round(size * 1.5);
+  const bottom = (art ? art.top + art.h : h) - Math.round(h * 0.04);
+  return { x, y: bottom - pillH, w: pillW, h: pillH, size, label };
+}
+
+/** The pill: solid accent, black bold capitals. */
+function thumbTagSvg({ w, h, layout, tag }) {
+  const b = thumbTagBox({ w, h, layout, tag });
+  const font = 'font-family="Noto Sans, Noto Sans Devanagari, DejaVu Sans, sans-serif"';
+  const cx = Math.round(b.x + b.w / 2);
+  const baseline = Math.round(b.y + b.h / 2 + b.size * 0.357); // half the cap height, so the capitals sit centred
+  return `
+<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="${Math.round(b.size * 0.2)}" fill="${THUMB_ACCENT}"/><text x="${cx}" y="${baseline}" text-anchor="middle" ${font} font-weight="800" font-size="${b.size}" fill="#000000">${xmlEsc(b.label)}</text>`;
 }
 
 /** The rules added after every image prompt. Editable under System prompts. */
@@ -173,4 +229,4 @@ export function thumbMedia(videoUrl, thumbUrl) {
   return thumbUrl ? { url: videoUrl, thumbnail_url: thumbUrl } : { url: videoUrl, thumbnail_timestamp_ms: 0 };
 }
 
-export default { THUMB_ART_SIZE, THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, thumbSvg, DEFAULT_THUMB_RULES, thumbImagePrompt, thumbMedia };
+export default { THUMB_ART_SIZE, THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, thumbSvg, thumbTagClean, thumbTagFor, thumbTagBox, DEFAULT_THUMB_RULES, thumbImagePrompt, thumbMedia };

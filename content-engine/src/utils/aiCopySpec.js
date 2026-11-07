@@ -18,7 +18,7 @@
  */
 
 import { DEFAULT_COMPARISON_PROMPT, comparisonCopyFacts, stripCc } from './comparisonSpec.js';
-import { thumbMedia } from './thumbSpec.js';
+import { thumbMedia, thumbTagClean } from './thumbSpec.js';
 
 export const LIMITS = {
   title: 100, // YouTube title
@@ -57,7 +57,8 @@ export function copySystemPrompt({ brief = '', audience = '', keyword = '', base
   return [
     String(base || '').trim() || DEFAULT_COPY_PROMPT,
     comparison ? String(comparisonPrompt || '').trim() || DEFAULT_COMPARISON_PROMPT : '',
-    'Return ONLY a JSON object with exactly these string keys: "title", "description", "igCaption", "short", "thumbText", "thumbPrompt".',
+    'Return ONLY a JSON object with exactly these string keys: "title", "description", "igCaption", "short", "thumbText", "thumbTag", "thumbPrompt".',
+    '"thumbTag" names who the video is for, drawn as a small label on the thumbnail: 2 to 4 words, at most 24 characters, such as "For founders" or "For GCC leaders". No hashtags, no emojis, no punctuation at the end.',
     comparison ? '' : 'The title, description, thumbText and thumbPrompt must all make the same one point. thumbPrompt must show that point literally, whatever shows it most directly: a chart, a product screen, a before and after, a diagram, or a real close-up of the exact thing. Example, for viewers leaving a video: a retention line chart, horizontal axis 0% to 100% of the video, the line falling sharply at 68% with a bold red marker labelled "68%". Illustrative numbers on a chart are allowed. Clean, bright, product-marketing look. Never a metaphor, never someone at a desk, never silhouettes, and no mood, lighting or camera directions.',
     'Never use em dashes or en dashes anywhere. Use a comma, a full stop or a colon instead.',
     keyword ? `Comment keyword: tell people to comment "${keyword}" to get the link in their DMs.` : '',
@@ -96,7 +97,7 @@ export function noDashes(text) {
   return String(text ?? '').replace(/\s*[\u2014\u2013]\s*/g, ', ').replace(/^, |, $/g, '').replace(/,\s*([,.:;!?])/g, '$1');
 }
 
-/** Normalise the model's JSON (or an edited copy from the UI) into the four fields. */
+/** Normalise the model's JSON (or an edited copy from the UI) into its fields. */
 export function normalizeCopy(raw) {
   const o = raw && typeof raw === 'object' ? raw : {};
   const str = (v) => noDashes(String(v ?? '').trim()).trim();
@@ -106,8 +107,14 @@ export function normalizeCopy(raw) {
     igCaption: clip(str(o.igCaption ?? o.ig_caption ?? o.caption), LIMITS.igCaption),
     short: str(o.short ?? o.shortPost ?? o.short_post),
     thumbText: clip(str(o.thumbText ?? o.thumb_text ?? o.thumbnailText).replace(/[#"“”]/g, ''), 60),
+    thumbTag: thumbTagClean(str(o.thumbTag ?? o.thumb_tag)),
     thumbPrompt: clip(str(o.thumbPrompt ?? o.thumb_prompt ?? o.imagePrompt), 1500),
   };
+}
+
+/** The page edits and posts only the fields it shows: the stored thumbTag stays unless a new one came with the copy. */
+export function keepThumbTag(copy, stored) {
+  return { ...copy, thumbTag: (copy && copy.thumbTag) || thumbTagClean(stored && stored.thumbTag) };
 }
 
 /** Append a link on its own line when it's set and not already in the text. */
@@ -234,7 +241,7 @@ export function imagePromptOf(steps) {
 }
 
 export default {
-  LIMITS, extractAudioArgs, copySystemPrompt, copyUserPrompt, clip, normalizeCopy,
+  LIMITS, extractAudioArgs, copySystemPrompt, copyUserPrompt, clip, normalizeCopy, keepThumbTag,
   withLink, xPost, threadsPost, platformKey, platformConfigsFor, noDashes, stripTrailingLink,
   nextImagePrompt, imagePromptOf,
 };

@@ -29,6 +29,14 @@ export const FUNNEL_FIELDS = [
   { key: 'cta_link', label: 'CTA / assessment link' },
   { key: 'landing_page_url', label: 'Landing page links (one per line)', type: 'textarea', placeholder: 'https://…' },
   { key: 'audience_prefix', label: 'Audience prefix (caption line, optional)' },
+  {
+    key: 'thumb_tag', label: 'Thumbnail audience tag', type: 'select', default: 'on',
+    options: [
+      { value: 'on', label: 'On: draw the tag on each new thumbnail' },
+      { value: 'off', label: 'Off: thumbnails as they were, no tag' },
+    ],
+  },
+  { key: 'thumb_tag_default', label: 'Thumbnail tag default (2 to 4 words, max 24 characters)', placeholder: 'e.g. For founders' },
   { key: 'generate_time', label: 'Generate/approval time (IST)', type: 'time', default: '22:00' },
   { key: 'generate_days', label: 'Days to run (blank = every day)', type: 'weekdays' },
   { key: 'publish_time', label: 'Publish time (IST)', type: 'time', default: '08:02' },
@@ -161,6 +169,9 @@ export async function resolve(funnel) {
     // landing_page_url; the funnel form must list it in FUNNEL_FIELDS to save it).
     landingPageUrl: (c.landing_page_url || '').trim(),
     audiencePrefix: c.audience_prefix || '',
+    // The pill on Lane 1's thumbnails: on unless switched off; the default is used when the AI's tag is missing or invalid.
+    thumbTagOn: String(c.thumb_tag || 'on').toLowerCase() !== 'off',
+    thumbTagDefault: c.thumb_tag_default || '',
     generateTime: c.generate_time || '22:00',
     generateDays: c.generate_days || '', // '' = daily
     publishTime: c.publish_time || '08:02',

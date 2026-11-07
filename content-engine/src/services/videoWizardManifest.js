@@ -57,6 +57,16 @@ export const WIZARD_STEPS = [
       { key: 'direct_copy_brief', label: 'AI copy: brand / voice brief (title, description, captions for each video)', type: 'textarea', placeholder: 'e.g. calm, practical tone; speak to founders; always use #gitawisdom' },
       { key: 'direct_caption', label: 'Fallback caption (Instagram & LinkedIn caption, YouTube description; the CTA link is appended)', type: 'textarea', placeholder: 'default caption for these posts' },
       { key: 'direct_yt_title', label: 'Fallback YouTube title', placeholder: 'title shown on YouTube' },
+      { type: 'heading', label: 'Thumbnail audience tag' },
+      {
+        key: 'thumb_tag', label: 'Draw the tag on thumbnails', type: 'select', default: 'on',
+        options: [
+          { value: 'on', label: 'On: a small label at the bottom left of each new thumbnail' },
+          { value: 'off', label: 'Off: thumbnails as they were, no tag' },
+        ],
+        help: 'The AI writes a tag for each video. Thumbnails already made stay as they are until you make them again. Comparison thumbnails and your own same-name images never get one.',
+      },
+      { key: 'thumb_tag_default', label: 'Tag default for this funnel (2 to 4 words, max 24 characters)', placeholder: 'e.g. For founders', help: 'Used when the AI gives no usable tag, or the thumbnail is made before any copy. No hashtags, emojis or punctuation at the end. Blank or invalid = no tag in those cases.' },
       { type: 'heading', label: 'Clean (remove the watermark and the outro)' },
       {
         key: 'direct_clean', label: 'Clean each video before it posts', type: 'select', default: 'off',
