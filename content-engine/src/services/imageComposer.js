@@ -7,9 +7,12 @@
  *               - gitaBand(image, label): dark top band + centered gold label.
  *               - vidapulseStrip(image, stripPng): composite the brand strip.
  *               - factoryCaptionBar(image, lines, fontSize): bottom caption bar.
- * Dependencies: sharp, wrap util.
+ *               - headlineImage(image, { text, sub }): headline + sub-head over a picture.
+ * Dependencies: sharp, wrap util, utils/{thumbSpec,stepDownSpec}.
  */
 import sharp from 'sharp';
+import { thumbSvg, THUMB_ACCENT } from '../utils/thumbSpec.js';
+import { stepDownSize } from '../utils/stepDownSpec.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -83,6 +86,23 @@ export async function factoryCaptionBar(imageBuffer, lines, fontSize) {
     .toBuffer();
 }
 
+/**
+ * Draw a headline and sub-head over a picture, for an image post made from a
+ * still. The still's shape picks the size (utils/stepDownSpec); the design is the
+ * thumbnails' own.
+ * @param {Buffer} imageBuffer
+ * @param {{ text: string, sub?: string }} words
+ */
+export async function headlineImage(imageBuffer, { text, sub = '' }) {
+  const { w, h } = stepDownSize(await sharp(imageBuffer).metadata());
+  const svg = thumbSvg({ w, h, text, sub, layout: 'top', accent: THUMB_ACCENT });
+  return sharp(imageBuffer)
+    .resize(w, h, { fit: 'cover' })
+    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+}
+
 function isPng(buf) {
   return (
     Buffer.isBuffer(buf) &&
@@ -92,4 +112,4 @@ function isPng(buf) {
 }
 
 export { isPng };
-export default { gitaBand, vidapulseStrip, factoryCaptionBar, isPng };
+export default { gitaBand, vidapulseStrip, factoryCaptionBar, headlineImage, isPng };

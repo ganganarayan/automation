@@ -17,11 +17,13 @@
  *               - rework: regenerate the image with the note, re-send approval.
  *               - onPosted: the post check found it live → sheet row Posted +
  *                 the Post for Me post id.
+ *               - stepDown: a Lane 2 video whose animation failed becomes an image
+ *                 post on its own instance, from its own still (utils/stepDownSpec).
  * Dependencies: funnelPosterService (sheet tab, image generation, approval
  *               email, sheet writes, capture/IG extras), approvalService,
  *               instanceService/instanceRepository, providerFactory,
- *               publishProvider, firstCommentService, utils/{routerSpec,
- *               postCompose,instanceSpec,pricing,time}, httpClient.
+ *               publishProvider, firstCommentService, imageComposer, utils/{routerSpec,
+ *               postCompose,instanceSpec,pricing,stepDownSpec,time}, httpClient.
  *
  * Instance statuses: running (image being made) → image_review (approval link
  * out) → approved → scheduled → posted | partial | failed.
@@ -41,7 +43,10 @@ import { extractRow, composePrompt, composeCaptions, buildPlatformConfigs } from
 import { patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import * as imageShort from './imageShortService.js';
 import { shortTitle } from '../utils/shortSpec.js';
-import { costImages } from '../utils/pricing.js';
+import { costImages, costAnimation } from '../utils/pricing.js';
+import { totalClipSeconds } from '../utils/stageSpec.js';
+import { stepDownOf, stepDownPicture, stepDownText, stepDownCaption, stepDownPrompt, stepDownNote } from '../utils/stepDownSpec.js';
+import { headlineImage } from './imageComposer.js';
 import { formatIst } from '../utils/time.js';
 import {
   IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, LINKS_COL, SOURCE_COL, SHEET_STATUS,
@@ -220,7 +225,118 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
   return inst;
 }
 
-/** The sheet row an image instance came from (for status writes). */
+/** A still's bytes: from Drive, else its public link (stills are shared when uploaded). */
+async function stillBuffer(providers, still) {
+  if (still.driveId) {
+    try {
+      return await providers.storage.download(still.driveId);
+    } catch (err) {
+      if (!still.url) throw err;
+    }
+  }
+  const res = await fetch(still.url, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`the still could not be downloaded (${res.status})`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/** Open the image approval for what the instance holds. Leaves it at image_review. */
+async function openApproval({ row, funnelId, image, captionFull, captionShort }) {
+  const { id: approvalId } = await approvalService.createRequest({
+    tenantId: row.tenant_id,
+    kind: KIND,
+    payload: { instanceId: row.id, funnelId, mediaUrl: image.url, thumbnailUrl: image.thumbnailUrl, captionFull, captionShort },
+  });
+  return approvalId;
+}
+
+/**
+ * A router AI video's animation failed: the same instance becomes an image post,
+ * from the still already made for animating, with the headline and sub-head drawn
+ * on it. No new image is paid for unless a reviewer sends it back with a note, and
+ * no sheet is needed. Then the usual image approval. Returns false when the instance
+ * has moved on; throws when the still can't be used (the caller tries the sheet).
+ */
+export async function stepDown({ instanceId, reason = '', note = '', log = baseLog }) {
+  const row = await instanceRepo.get(instanceId);
+  const funnelRow = row && row.funnel_id ? await funnels.get(row.funnel_id) : null;
+  if (!funnelRow) throw new LaneError('funnel not found');
+  const f = await funnels.resolve(funnelRow);
+  if (!(f.accounts || []).length) throw new LaneError('no Post for Me accounts ticked on this funnel');
+  const steps = instanceService.parseSteps(row);
+  const still = stepDownPicture(steps);
+  if (!still) throw new LaneError('no generated still to reuse');
+  const brief = art(steps, 'script').brief || {};
+  const { headline, subhead } = stepDownText(brief, row.title);
+  if (!headline) throw new LaneError('no headline to draw');
+  // Atomic: from failed, or from running when a rework or a retry already claimed it.
+  if (!(await instanceRepo.transition(row.id, row.status, 'running'))) return false;
+
+  try {
+    const providers = await buildProviders(f.tenantId);
+    const cfg = await funnels.getConfig(f.id).catch(() => ({}));
+    await stepLog.start(row.id, 'draw_image');
+    let upload;
+    try {
+      const base = note
+        ? await poster.generate(providers, stepDownPrompt(still.prompt, note), f.imageSize, f.imageKey)
+        : await stillBuffer(providers, still);
+      const png = await headlineImage(base, { text: headline, sub: subhead });
+      upload = await providers.storage.uploadPng(cfg.drive_folder_id || f.driveFolder || '', `${poster.slug(f.name)}-stepdown-${String(row.id).slice(0, 8)}-r${row.round || 1}.png`, png);
+      if (!upload || !upload.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
+    } catch (err) {
+      await stepLog.fail(row.id, 'draw_image');
+      throw err;
+    }
+    await stepLog.end(row.id, 'draw_image');
+
+    const image = { url: upload.downloadUrl, thumbnailUrl: upload.thumbnailUrl, driveId: upload.id || null };
+    const caption = stepDownCaption({ brief, ctaLink: f.ctaLink, audiencePrefix: f.audiencePrefix, title: row.title });
+    const approvalId = await openApproval({ row, funnelId: f.id, image, captionFull: caption, captionShort: caption });
+
+    const first = !stepDownOf(steps);
+    const why = stepDownOf(steps)?.reason || reason;
+    const info = { from: 'animate', reason: why, note: stepDownNote(why), stillDriveId: still.driveId || null, headline, subhead, at: new Date().toISOString() };
+    let next = steps;
+    for (const k of ['voiceover', 'transcript', 'stitch']) next = patchStep(next, k, { status: 'skipped' });
+    next = patchStep(next, 'script', { artifacts: { copy: { title: headline, description: caption }, captionFull: caption, captionShort: caption } });
+    next = patchStep(next, 'images', { artifacts: { image, prompt: still.prompt || '', note: note || '', row: {}, sheet: {}, approvalId, stepDown: info } });
+    // The clips made before the failure were paid for, and nothing else will record them.
+    const anim = art(steps, 'animate');
+    if (first && (anim.clips || []).length && !((steps.find((s) => s.key === 'animate') || {}).costs || []).length) {
+      next = addCostToSteps(next, 'animate', { ...costAnimation({ provider: anim.provider, seconds: totalClipSeconds(cfg.clip_length, anim.clips.length, anim.provider) }), at: new Date().toISOString() });
+    }
+    if (note && providers.resolved?.openai?.apiKey) {
+      next = addCostToSteps(next, 'images', { ...costImages({ count: 1, size: f.imageSize }), at: new Date().toISOString() });
+    }
+    await instanceRepo.saveSteps(row.id, next, sumInstanceCost(next));
+    if (first) await stepLog.mark(row.id, 'step_down', info.note);
+    await instanceRepo.setStatus(row.id, IMAGE_REVIEW, info.note);
+    await stepLog.start(row.id, 'review_image', { email: 'digest' });
+    log.info({ instance: row.id, still: still.driveId, reason: why }, 'animation failed; image post from the still waiting for approval');
+    return true;
+  } catch (err) {
+    await instanceRepo.setStatus(row.id, 'failed', `Image step-down: ${err.message}`).catch(() => {});
+    throw err;
+  }
+}
+
+/** ↻ Retry a stepped-down post that failed: the image it has, back to approval. */
+export async function retryStepDown({ instanceId, log = baseLog }) {
+  const row = await instanceRepo.get(instanceId);
+  if (!row) throw new LaneError('instance not found');
+  const steps = instanceService.parseSteps(row);
+  const img = art(steps, 'images');
+  if (!(img.image && img.image.url)) return stepDown({ instanceId, reason: stepDownOf(steps)?.reason || '', log });
+  const script = art(steps, 'script');
+  const approvalId = await openApproval({ row, funnelId: row.funnel_id, image: img.image, captionFull: script.captionFull || '', captionShort: script.captionShort || '' });
+  const next = patchStep(steps, 'images', { artifacts: { approvalId } });
+  await instanceRepo.saveSteps(row.id, next, sumInstanceCost(next));
+  await instanceRepo.setStatus(row.id, IMAGE_REVIEW);
+  await stepLog.start(row.id, 'review_image', { email: 'digest' });
+  return true;
+}
+
+/** The sheet row an image instance came from (for status writes). A stepped-down video has none. */
 async function sheetFor(row) {
   const funnel = row.funnel_id ? await funnels.get(row.funnel_id) : null;
   if (!funnel) return null;
@@ -228,7 +344,7 @@ async function sheetFor(row) {
   const providers = await buildProviders(f.tenantId);
   const steps = instanceService.parseSteps(row);
   const sheet = art(steps, 'images').sheet || {};
-  const tab = sheet.tab || (await poster.tabFor(providers.sheets, f));
+  const tab = sheet.tab || (stepDownOf(steps) ? '' : await poster.tabFor(providers.sheets, f));
   return { f, providers, steps, sheet, tab };
 }
 
@@ -249,7 +365,9 @@ export async function approve(approval) {
   const { f, providers, sheet, tab } = ctx;
   let { steps } = ctx;
   const where = { matchColName: sheet.matchColName, matchKey: sheet.key, rowNumber: sheet.rowNumber };
-  await poster.markSheetRow(providers.sheets, f.sheetId, tab, { ...where, status: SHEET_STATUS.approved }, log);
+  // A post stepped down from a video has no row of its own (the posted log appends one when it is live).
+  const markRow = (fields) => (sheet.key ? poster.markSheetRow(providers.sheets, f.sheetId, tab, { ...where, ...fields }, log) : null);
+  await markRow({ status: SHEET_STATUS.approved });
 
   const script = art(steps, 'script');
   const img = art(steps, 'images');
@@ -294,7 +412,7 @@ export async function approve(approval) {
     steps = patchStep(steps, 'publish', { status: 'failed', error: err.message });
     await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
     await instanceRepo.setStatus(row.id, 'failed', `Post for Me: ${err.message}`);
-    await poster.markSheetRow(providers.sheets, f.sheetId, tab, { ...where, status: SHEET_STATUS.ready }, log);
+    await markRow({ status: SHEET_STATUS.ready });
     return null;
   }
 
@@ -316,7 +434,7 @@ export async function approve(approval) {
   await instanceRepo.saveSteps(row.id, steps, sumInstanceCost(steps));
   await stepLog.end(row.id, 'publish');
   await instanceRepo.markScheduled(row.id, { postRefs: refs, scheduledFor: postAt ? new Date(postAt) : null, postNow: !postAt });
-  await poster.markSheetRow(providers.sheets, f.sheetId, tab, { ...where, extra: { [PFM_COL]: refs.join(', ') } }, log);
+  await markRow({ extra: { [PFM_COL]: refs.join(', ') } });
   await setApprovalStatus(approval.id, 'published');
   log.info({ refs, postAt: postAt || 'now', accounts: accounts.length, shorts: shortRef ? ytAccounts.length : 0 }, 'image post handed to Post for Me');
   return refs[0];
@@ -337,6 +455,10 @@ export async function rework(approval, note) {
   if (!ctx) return instanceRepo.setStatus(row.id, 'failed', 'funnel not found');
   const img = art(ctx.steps, 'images');
   try {
+    if (img.stepDown) {
+      await stepDown({ instanceId: row.id, note: note || '', log });
+      return null;
+    }
     await renderAndSend({ instanceId: row.id, f: ctx.f, providers: ctx.providers, fields: img.row || {}, sheet: { ...ctx.sheet, tab: ctx.tab }, note: note || '', log });
   } catch (err) {
     log.error({ err: err.message }, 'image rework failed');
@@ -364,4 +486,4 @@ export async function onPosted(row, { refs = [], channels = [] } = {}) {
   }, baseLog);
 }
 
-export default { KIND, LaneError, landingText, prepare, retry, approve, rework, onPosted };
+export default { KIND, LaneError, landingText, prepare, retry, stepDown, retryStepDown, approve, rework, onPosted };

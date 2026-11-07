@@ -13,8 +13,10 @@
  *                 research, instance, script, script review. Throws LaneSkip
  *                 when Lane 2 can't run today (the router falls through).
  *               - onStageFailed: a router AI video failed mid-render → mark an
- *                 out-of-credit provider for the day, then line up the image
- *                 post for that day instead and email why.
+ *                 out-of-credit provider for the day, then the image post for
+ *                 that day instead: animation failed = the same instance, from
+ *                 its own still (imageLane.stepDown); otherwise, or if that
+ *                 can't be done, the next sheet row. The Log says which and why.
  * Dependencies: creditService, stageRunnerService, instanceReviewService,
  *               imageLaneService, funnelsRepository, instanceRepository,
  *               instanceService, routerDaysRepository, providerFactory,
@@ -33,6 +35,7 @@ import * as heartbeat from '../core/heartbeat.js';
 import { buildProviders } from './providerFactory.js';
 import { researchPrompt, normalizeResearch, historyLines, instanceHistoryLine, isCreditError, rerunAction } from '../utils/routerSpec.js';
 import { retitleForDate } from '../utils/retrySpec.js';
+import { stepDownNote } from '../utils/stepDownSpec.js';
 import { formatIst, ZONE } from '../utils/time.js';
 import { DateTime } from 'luxon';
 import { childLogger } from '../core/logger.js';
@@ -116,16 +119,36 @@ export async function onStageFailed(instanceId, stepKey, err) {
   // A re-run (or a later decision) already replaced this video: nothing to do.
   if (!day || (day.instance_id && String(day.instance_id) !== String(instanceId))) return;
 
+  // Animation failed: the still is already made and paid for, so that goes first.
+  // Everything else, and a still that can't be used, takes the next sheet row.
+  let still = '';
+  if (stepKey === 'animate') {
+    try {
+      if (await imageLane.stepDown({ instanceId, reason: `animation failed: ${err.message}`, log })) {
+        await routerDays.update(day.id, { lane: 'image', reason: `Animation failed (${err.message}); image post from the video's own still: waiting for approval`, instanceId });
+        log.warn({ reason }, 'animation failed; stepped down to an image post from its own still');
+      }
+      return;
+    } catch (e) {
+      still = `; its still could not be used: ${e.message}`;
+      log.warn({ err: e.message }, 'image step-down from the still failed; trying the content sheet');
+    }
+  }
+
   try {
     const inst = await imageLane.prepare({ funnelRow, scheduledFor, log });
-    await routerDays.update(day.id, { lane: 'image', reason: `AI video failed (${reason}); image lane: waiting for approval`, instanceId: inst.id });
+    await routerDays.update(day.id, { lane: 'image', reason: `AI video failed (${reason}${still}); image lane: waiting for approval`, instanceId: inst.id });
+    await stepLog.mark(instanceId, 'step_down', stepDownNote(`${reason}${still}`, 'sheet'));
   } catch (e) {
-    await routerDays.update(day.id, { lane: 'none', reason: `AI video failed (${reason}); image lane failed: ${e.message}` });
+    await routerDays.update(day.id, { lane: 'none', reason: `AI video failed (${reason}${still}); image lane failed: ${e.message}` });
   }
   log.warn({ reason }, 'AI video failed mid-render; dropped to the image lane');
 }
 
 const dayTaken = (message) => Object.assign(new Error(message), { dayTaken: true });
+
+// The retries that leave the day holding an image post.
+const IMAGE_ACTIONS = ['image', 'stepdown'];
 
 /**
  * A retry for a new date: that date must be free, since nothing was approved to be
@@ -139,7 +162,7 @@ async function moveToDate(row, action, moved) {
     const live = await instanceRepo.liveOnDate(row.funnel_id, moved.postDate, row.tenant_id);
     if (live && String(live.id) !== String(row.id)) throw dayTaken(taken);
     const day = await routerDays.get(row.funnel_id, moved.postDate);
-    const fields = { lane: action === 'image' ? 'image' : 'ai_video', reason: 'retried from the Library for this date', instanceId: row.id };
+    const fields = { lane: IMAGE_ACTIONS.includes(action) ? 'image' : 'ai_video', reason: 'retried from the Library for this date', instanceId: row.id };
     if (day) {
       const other = day.instance_id && String(day.instance_id) !== String(row.id) ? await instanceRepo.get(day.instance_id) : null;
       if (other && !['failed', 'superseded'].includes(other.status)) throw dayTaken(taken);
@@ -175,13 +198,13 @@ async function takeDay(row, action) {
     if (act === 'supersede') await instanceRepo.supersede(other.id, 'replaced by a retry');
     if (act === 'release') await instanceRepo.releaseSlot(other.id);
   }
-  await routerDays.update(day.id, { lane: action === 'image' ? 'image' : 'ai_video', reason: 'retried from the Library', instanceId: row.id });
+  await routerDays.update(day.id, { lane: IMAGE_ACTIONS.includes(action) ? 'image' : 'ai_video', reason: 'retried from the Library', instanceId: row.id });
 }
 
 /**
  * ↻ Retry a failed instance on the same id (action from utils/retrySpec):
- * script, stages (keeps what is done), final (back to the final review) or
- * image. Claims it now, runs in the background; a failure reads Failed again.
+ * script, stages (keeps what is done), final (back to the final review), image
+ * or stepdown. Claims it now, runs in the background; a failure reads Failed again.
  * moved (utils/retrySpec parseRetryDate) runs it for a new date instead of its own.
  */
 export async function retry({ instanceId, action, moved = null }) {
@@ -202,6 +225,7 @@ export async function retry({ instanceId, action, moved = null }) {
     stages: () => stageRunner.runStages({ instanceId: row.id, resume: true }),
     final: () => review.requestReview({ tenantId: row.tenant_id, instanceId: row.id, checkpoint: 'final' }),
     image: () => imageLane.retry({ instanceId: row.id, log }),
+    stepdown: () => imageLane.retryStepDown({ instanceId: row.id, log }),
   }[action];
   heartbeat.during('retry', run).catch(async (err) => {
     log.error({ err: err.message, action }, 'retry failed');

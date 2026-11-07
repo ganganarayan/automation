@@ -23,10 +23,13 @@ export const start = (instanceId, key, extra) => write(instanceId, [stepEvent(ke
 export const end = (instanceId, key, extra) => write(instanceId, [stepEvent(key, 'end', extra)]);
 export const fail = (instanceId, key, extra) => write(instanceId, [stepEvent(key, 'fail', extra)]);
 
+/** A plain line on the Log: something that happened, with no time of its own. */
+export const mark = (instanceId, key, note) => write(instanceId, [stepEvent(key, 'mark', { note })]);
+
 /** A step that ran before the instance existed, written once it does. */
 export const span = (instanceId, key, startedAt, endedAt = null) => write(instanceId, [
   stepEvent(key, 'start', { at: startedAt }),
   stepEvent(key, 'end', { at: endedAt }),
 ]);
 
-export default { start, end, fail, span };
+export default { start, end, fail, mark, span };

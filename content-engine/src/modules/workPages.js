@@ -28,6 +28,7 @@ import { laneOf, channelText, commentStatus } from '../utils/laneSpec.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS, HOME_PATH } from '../utils/adminNav.js';
 import { nowIst, formatIst, todayKeyIst, ZONE } from '../utils/time.js';
 import { costBreakdown } from '../utils/instanceSpec.js';
+import { stepDownOf } from '../utils/stepDownSpec.js';
 import { keyOk, currentSession } from '../services/accessService.js';
 import { DateTime } from 'luxon';
 
@@ -270,7 +271,7 @@ function logPage({ session, rows, month, monthStart, deleted = [], deletedAll = 
       const st = libraryStatus(r.status);
       return `<tr class="${st.hidden ? 'mut' : ''}">
         <td class="hint">${esc(formatIst(r.created_at))}</td>
-        <td><a href="/api/v1/admin/instances/${esc(r.id)}">${esc(r.title || 'Untitled')}</a><div class="hint">${esc(r.funnel_name || '-')}</div></td>
+        <td><a href="/api/v1/admin/instances/${esc(r.id)}">${esc(r.title || 'Untitled')}</a><div class="hint">${esc(r.funnel_name || '-')}</div>${stepDownOf(steps) ? `<div class="hint">🟡 ${esc(stepDownOf(steps).note)}</div>` : ''}</td>
         <td>${esc(statusText(r.status))}</td>
         <td>${esc(usd(r.cost_usd))}</td>
         <td class="chans">${chans.map((c) => deliveryLine(c, comments.filter((j) => postRefsOf(r).includes(j.postforme_post_id)))).join('') || '<span class="hint">-</span>'}</td>

@@ -614,7 +614,7 @@ export function researchPrompt({ funnelName = '', landingUrl = '', landingText =
     'It must be NEW: a topic, angle and format that differ from every past post listed (no repeats or near-duplicates). Vary the format (a story, a myth vs fact, a tip, a question, a list, a before/after).',
     'Stay true to what the landing page offers and who it is for. Never invent prices, guarantees or facts that are not on it.',
     'A third-person narrator speaks over animated images; nobody talks on screen.',
-    'Return ONLY a JSON object: {"topic": "...", "angle": "...", "format": "...", "title": "a short title", "caption": "the post caption (hook first, call to action last, no links)"}',
+    'Return ONLY a JSON object: {"topic": "...", "angle": "...", "format": "...", "title": "a short title", "caption": "the post caption (hook first, call to action last, no links)", "headline": "the hook in at most 8 words, to read on an image at a glance", "subhead": "one short line under the headline, at most 14 words"}',
   ].join('\n');
   const user = [
     landingLine(landingUrl),
@@ -625,13 +625,14 @@ export function researchPrompt({ funnelName = '', landingUrl = '', landingText =
   return { system, user };
 }
 
-/** The LLM's research reply → { topic, angle, format, title, caption } (topic required). */
+/** The LLM's research reply → { topic, angle, format, title, caption, headline, subhead } (topic required). */
 export function normalizeResearch(data) {
   const o = data && typeof data === 'object' ? data : {};
   const s = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
   const out = {
     topic: s(o.topic, 300), angle: s(o.angle, 300), format: s(o.format, 120), title: s(o.title, 120),
     caption: String(o.caption ?? '').trim().slice(0, 2000),
+    headline: s(o.headline, 90), subhead: s(o.subhead, 140),
   };
   if (!out.topic) throw new Error('the research step returned no topic');
   return out;

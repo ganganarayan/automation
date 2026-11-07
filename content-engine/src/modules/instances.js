@@ -51,6 +51,7 @@ import * as approvalService from '../services/approvalService.js';
 import * as approvalsRepo from '../repositories/approvalRepository.js';
 import { retryAction, isStuck, parseRetryDate, retryDateDefaults, RETRY_PICK_SCRIPT } from '../utils/retrySpec.js';
 import { buildTimeline, stepTotals, currentStep, formatSpan, LIVE_STEPS_SCRIPT } from '../utils/stepTimeSpec.js';
+import { stepDownOf } from '../utils/stepDownSpec.js';
 import { pendingByInstance, approvalButtons, reviewFields, applyReviewEdit } from '../utils/approvalButtons.js';
 
 const MANUAL_JOB = 'manual_stage';
@@ -826,6 +827,7 @@ function detailPage(row, steps) {
       <tfoot><tr><td colspan="3" class="tot">Total AI cost</td><td class="tot">${esc(usd(total))}</td><td></td></tr></tfoot>
     </table>
 
+    ${stepDownOf(steps) ? `<p class="ro">🟡 ${esc(stepDownOf(steps).note)}</p>` : ''}
     ${imagePromptBlock(steps)}
     ${timeline.length ? `<h3>Time per step</h3><div class="stepl steppage">${stepListHtml(timeline)}</div>` : ''}
 

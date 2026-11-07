@@ -47,6 +47,7 @@ import { costText, costClaude, costTranscript, costImages } from '../utils/prici
 import { copySystemPrompt, copyUserPrompt, COPY_SCHEMA, normalizeCopy, keepHiddenCopy, platformConfigsFor, platformKey, nextImagePrompt, stepDownFallback, STEP_DOWN_PLATFORMS } from '../utils/aiCopySpec.js';
 import * as imageShort from './imageShortService.js';
 import { shortTitle } from '../utils/shortSpec.js';
+import { stepDownOf } from '../utils/stepDownSpec.js';
 import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt, thumbTagFor, IMAGE_PROMPT_MAX } from '../utils/thumbSpec.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
@@ -1737,7 +1738,8 @@ export async function retryFailed({ instanceId, auto = false }) {
   if (!req) throw new Error('could not read the original post from Post for Me, use ✏ Edit and post it again');
   const steppers = (c) => STEP_DOWN_PLATFORMS.includes(platformKey(c.platform));
   // An image post reaches YouTube as a Short, on a post of its own.
-  const isShort = (c) => row.source_type === 'sheet' && platformKey(c.platform) === 'youtube';
+  const imagePost = row.source_type === 'sheet' || !!stepDownOf(steps);
+  const isShort = (c) => imagePost && platformKey(c.platform) === 'youtube';
   const others = failed.filter((c) => !steppers(c) && !isShort(c));
   const shorts = failed.filter(isShort);
   const original = oldRefs[0] ? await firstCommentsRepo.getByPost(oldRefs[0]).catch(() => null) : null;

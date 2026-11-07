@@ -9,7 +9,8 @@
  * Actions: channels (re-post to the ❌ channels), script (write the script
  * again), stages (carry on from the failed stage), final (the reel exists but
  * posting failed: back to the final review), image (the sheet row again, back
- * to approval), open (the instance's own page has the way forward: post again,
+ * to approval), stepdown (a Lane 2 video's image post, its image back to
+ * approval), open (the instance's own page has the way forward: post again,
  * or a manual run's per-stage button), '' (no retry).
  *
  * Stuck counts as failed: a restart or a lost GitHub run leaves an instance
@@ -44,6 +45,8 @@ export function retryAction(row, steps, now = Date.now()) {
   if (r.status !== 'failed' && !isStuck(r, now) && !noScript) return '';
   const lane = laneOf(r);
   if (lane === 'image') return 'image';
+  // A video that stepped down to an image post retries as that post, not as the video.
+  if (step('images').artifacts?.stepDown) return 'stepdown';
   // 'generated' is what the router and the scheduler save their AI videos as.
   if (lane !== 'pipeline' && lane !== 'generated') return 'open';
   if (step('script').status === 'failed' || !step('script').artifacts?.text) return 'script';

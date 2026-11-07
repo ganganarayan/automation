@@ -17,7 +17,8 @@
  * Research, refill and a first clean or transcribe run before the instance exists, so
  * they appear once finished, not live.
  *
- * A step log event is { k: step key, s: 'start' | 'end' | 'fail', at: ISO, email?, by? }.
+ * A step log event is { k: step key, s: 'start' | 'end' | 'fail' | 'mark', at: ISO, email?, by?, note? }.
+ * A 'mark' is one plain line on the Log (note), with no time of its own.
  * email ('sent' | 'failed' | 'none') is on a review's start; by ('approved' | 'rework' |
  * 'router') on its end. Rows from before the log use the steps column's times; whatever
  * was never recorded reads "-".
@@ -37,6 +38,7 @@ const WORK = {
   voiceover: 'Recording voiceover',
   transcript: 'Transcribing voiceover',
   stitch: 'FFmpeg stitching',
+  draw_image: 'Drawing the headline on the image',
   publish: 'Sending to Post for Me',
 };
 
@@ -115,8 +117,8 @@ export function parseStepLog(value) {
 }
 
 /** One step log event. */
-export function stepEvent(key, state, { at = null, email = null, by = null } = {}) {
-  return { k: key, s: state, at: at || new Date().toISOString(), ...(email ? { email } : {}), ...(by ? { by } : {}) };
+export function stepEvent(key, state, { at = null, email = null, by = null, note = null } = {}) {
+  return { k: key, s: state, at: at || new Date().toISOString(), ...(email ? { email } : {}), ...(by ? { by } : {}), ...(note ? { note } : {}) };
 }
 
 /** Duration text: 45s, 1m 20s, 2h 05m, 3d 4h. Unknown reads "-". */
@@ -151,6 +153,10 @@ export function buildTimeline(row, steps, log, now = Date.now()) {
 
   const events = parseStepLog(log === undefined ? r.step_log : log).filter((e) => e && e.k && e.s).sort((a, b) => ms(a.at) - ms(b.at));
   for (const ev of events) {
+    if (ev.s === 'mark') {
+      mark(ev.k, ev.note || ev.k, ev.at);
+      continue;
+    }
     const wait = !!REVIEWS[ev.k];
     const span = open.get(ev.k);
     if (ev.s === 'start') {
