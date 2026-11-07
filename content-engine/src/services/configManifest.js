@@ -121,7 +121,7 @@ export const CONFIG_MANIFEST = {
             type: 'select',
             default: 'on',
             options: IMAGE_VIDEO_OPTIONS,
-            help: `When a funnel has no video, its image post is drawn from the sheet's image prompt, drawn in three sizes (9:16 for Instagram, Facebook and YouTube, 4:5 for LinkedIn and Threads, 16:9 for X) and sent to every channel as a ${IMAGE_VIDEO_SECONDS}-second video of the picture with the music below. With the voice on, the caption is read aloud in the funnel's chosen ElevenLabs voice (its lane setup) with subtitles burned in, and the video runs as long as the voice needs, up to ${IMAGE_VIDEO_MAX_SECONDS} s. No voice set up = music only. A video that cannot be made falls back to the picture.`,
+            help: `When a funnel has no video, its image post is made from the sheet's image prompt, drawn in three sizes (9:16 for Instagram, Facebook and YouTube, 4:5 for LinkedIn and Threads, 16:9 for X) and sent to every channel as a ${IMAGE_VIDEO_SECONDS}-second video of the picture with the music below. With the voice on, the caption is read aloud in the funnel's chosen ElevenLabs voice (its lane setup) with subtitles burned in, and the video runs as long as the voice needs, up to ${IMAGE_VIDEO_MAX_SECONDS} s. No voice set up = music only. A video that cannot be made falls back to the picture.`,
           },
           {
             key: 'short_music',
