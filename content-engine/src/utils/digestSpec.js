@@ -19,6 +19,15 @@ import { channelIcon } from './laneSpec.js';
 
 export const EVENING_HOUR = 20;
 const DAY_START_HOUR = 8;
+/** Warn when a funnel's sheet has this many Ready rows (days of posts) or fewer. */
+export const LOW_SHEET_DAYS = 3;
+
+/** The funnels whose sheet runs out within LOW_SHEET_DAYS. Uncounted sheets are left out. */
+export function lowSheets(stock = []) {
+  return stock
+    .filter((s) => s && s.imagePosts && Number.isInteger(s.imagePosts.count) && s.imagePosts.count <= LOW_SHEET_DAYS)
+    .map((s) => ({ id: s.id, funnel: s.name || 'A funnel', left: s.imagePosts.count }));
+}
 const MORNING_END_HOUR = 16; // the router's 16:00 approvals belong to the evening email
 
 /** The IST day (yyyy-MM-dd) this moment's email belongs to. */
@@ -86,12 +95,13 @@ function section(title, rows, base, fmt) {
  * @param {object} o
  * @param {object[]} o.rows - instance rows plus { channels, approvalUrl }
  * @param {{funnel: string, reason: string}[]} [o.noPost] - funnels with nothing lined up
+ * @param {{funnel: string, left: number}[]} [o.lowSheet] - sheets about to run out
  * @param {string} [o.base] - the app's public URL
  * @param {'evening'|'morning'} [o.action]
  * @param {import('luxon').DateTime} o.now
  * @returns {{ subject: string, html: string, counts: object }|null} null when there is nothing to say
  */
-export function buildDigest({ rows = [], noPost = [], base = '', action = 'evening', now, fmt }) {
+export function buildDigest({ rows = [], noPost = [], lowSheet = [], base = '', action = 'evening', now, fmt }) {
   const by = { approve: [], attention: [], other: [] };
   for (const r of rows) {
     const st = rowStatus(r);
@@ -101,7 +111,7 @@ export function buildDigest({ rows = [], noPost = [], base = '', action = 'eveni
   }
   // The morning extra is only about what is waiting.
   const shown = action === 'morning' ? { approve: by.approve, attention: [], other: [] } : by;
-  const n = { approve: shown.approve.length, problems: shown.attention.length + (action === 'morning' ? 0 : noPost.length) };
+  const n = { approve: shown.approve.length, problems: shown.attention.length + (action === 'morning' ? 0 : noPost.length + lowSheet.length) };
   if (!n.approve && !n.problems && !shown.other.length) return null;
 
   const bits = [n.approve ? `${n.approve} to approve` : '', n.problems ? `${n.problems} need${n.problems === 1 ? 's' : ''} attention` : ''].filter(Boolean);
@@ -110,9 +120,12 @@ export function buildDigest({ rows = [], noPost = [], base = '', action = 'eveni
   const subject = `${dot} ${label} ${fmt(now, { withTime: false })}${bits.length ? `: ${bits.join(', ')}` : ''}`;
   const none = action === 'morning' || !noPost.length ? '' : `<h3 style="margin:20px 0 6px">🔴 No post lined up</h3>
     <ul>${noPost.map((d) => `<li><b>${esc(d.funnel)}</b>: ${esc(clip(d.reason, 300))}</li>`).join('')}</ul>`;
+  const low = action === 'morning' || !lowSheet.length ? '' : `<h3 style="margin:20px 0 6px">🟡 Sheet running out</h3>
+    <ul>${lowSheet.map((d) => `<li><b>${esc(d.funnel)}</b>: ${d.left ? `${d.left} Ready row${d.left === 1 ? '' : 's'} left, about ${d.left} day${d.left === 1 ? '' : 's'} of image posts` : 'no Ready rows left, so no image post can go out'}. Add rows to its sheet.</li>`).join('')}</ul>`;
   const html = `<div style="font-family:Arial,sans-serif;max-width:900px">
     ${section('🟡 Waiting for your approval', shown.approve, base, fmt)}
     ${none}
+    ${low}
     ${section('🔴 Needs attention', shown.attention, base, fmt)}
     ${section('🟢 Everything else', shown.other, base, fmt)}
     <p style="color:#666;margin-top:20px">Approved after its time, a post goes out at once. Failed channels: reconnect them in Post for Me and the app posts to just those again.</p>
@@ -120,4 +133,4 @@ export function buildDigest({ rows = [], noPost = [], base = '', action = 'eveni
   return { subject, html, counts: n };
 }
 
-export default { EVENING_HOUR, digestDay, digestAction, buildDigest };
+export default { EVENING_HOUR, LOW_SHEET_DAYS, lowSheets, digestDay, digestAction, buildDigest };

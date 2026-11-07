@@ -19,7 +19,7 @@ import * as funnels from '../repositories/funnelsRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { reviewPath } from './approvalService.js';
 import { buildProviders } from './providerFactory.js';
-import { digestAction, digestDay, buildDigest } from '../utils/digestSpec.js';
+import { digestAction, digestDay, buildDigest, lowSheets } from '../utils/digestSpec.js';
 import { pendingByInstance, APPROVAL_WAIT_STATUSES } from '../utils/approvalButtons.js';
 import { nowIst, formatIst } from '../utils/time.js';
 import { settings } from '../settings/index.js';
@@ -80,6 +80,9 @@ export async function runDue({ tenantId = 'default', now = nowIst() } = {}) {
 
   const nextDay = now.minus({ hours: 8 }).plus({ days: 1 }).toFormat('yyyy-MM-dd');
   const noPost = await noPostDays(tenantId, nextDay);
+  const low = action === 'evening'
+    ? lowSheets(await import('./funnelStockService.js').then((m) => m.sheetStockForTenant(tenantId)).catch((err) => { log.warn({ err: err.message }, 'could not count sheets'); return []; }))
+    : [];
   const providers = await buildProviders(tenantId);
   const fallback = providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
 
@@ -96,7 +99,7 @@ export async function runDue({ tenantId = 'default', now = nowIst() } = {}) {
   };
   const groups = new Map();
   const groupOf = (to) => {
-    if (!groups.has(to)) groups.set(to, { rows: [], noPost: [] });
+    if (!groups.has(to)) groups.set(to, { rows: [], noPost: [], lowSheet: [] });
     return groups.get(to);
   };
   for (const r of rows) groupOf((await infoOf(r.funnel_id)).to).rows.push(r);
@@ -104,6 +107,8 @@ export async function runDue({ tenantId = 'default', now = nowIst() } = {}) {
     const info = await infoOf(d.funnel_id);
     groupOf(info.to).noPost.push({ funnel: info.name || 'A funnel', reason: d.reason });
   }
+
+  for (const s of low) groupOf((await infoOf(s.id)).to).lowSheet.push(s);
 
   for (const [to, group] of groups) {
     const mail = buildDigest({ ...group, base, action, now, fmt: formatIst });

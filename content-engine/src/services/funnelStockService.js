@@ -71,4 +71,14 @@ export async function stockForTenant(tenantId = 'default') {
   }));
 }
 
-export default { stockForTenant };
+/** [{ id, name, imagePosts }]: just the sheets, for the daily email's running-out warning. */
+export async function sheetStockForTenant(tenantId = 'default') {
+  const list = await funnels.listByTenant(tenantId);
+  return Promise.all(list.map(async (f) => ({
+    id: f.id,
+    name: f.name || '',
+    imagePosts: await imagePostStock(f).catch(() => noCount('could not read')),
+  })));
+}
+
+export default { stockForTenant, sheetStockForTenant };

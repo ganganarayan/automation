@@ -45,6 +45,14 @@ export const MUSIC_TRACKS = [
 export const DEFAULT_MUSIC = MUSIC_TRACKS[0].value;
 export const OWN_MUSIC = 'own';
 
+/**
+ * A track's ffmpeg expression as a JavaScript one of (t, mod), so Settings can
+ * play it in the browser exactly as the video will have it.
+ */
+export function musicJsExpr(expr = '') {
+  return String(expr).replace(/\b(sin|exp|min)\(/g, 'Math.$1(').replace(/\bPI\b/g, 'Math.PI');
+}
+
 /** Settings' dropdown: the built-in tracks, then your own file. */
 export const MUSIC_OPTIONS = [
   ...MUSIC_TRACKS.map(({ value, label }) => ({ value, label })),
@@ -95,10 +103,11 @@ export const IMAGE_VIDEO_OPTIONS = [
   { value: 'off', label: 'Picture (YouTube still gets a Short)' },
 ];
 
-/** The image-post mode from Settings; blank, unknown or the retired 'music' (no voice) = 'on'. */
-export function imageVideoMode(value) {
-  const v = String(value || '').trim();
-  return IMAGE_VIDEO_OPTIONS.some((o) => o.value === v) ? v : 'on';
+/** The image-post mode: always 'on' (a voiced video). */
+export function imageVideoMode() {
+  // Every image post goes out as a video with the voice, YouTube Shorts
+  // included: there is no picture-only choice any more (an old saved 'off' is ignored).
+  return 'on';
 }
 
 /**
@@ -314,5 +323,5 @@ export default {
   SHORT_SECONDS, MUSIC_TRACKS, MUSIC_OPTIONS, DEFAULT_MUSIC, OWN_MUSIC, musicLink, pickMusic, shortTitle, imageShortArgs,
   IMAGE_VIDEO_SECONDS, IMAGE_VIDEO_MAX_SECONDS, VOICE_MAX_CHARS, VOICE_LEAD_SECONDS, VOICE_TAIL_SECONDS, IMAGE_VIDEO_OPTIONS, imageVideoMode, voiceText, imageVideoSeconds, imageVideoConfigs,
   IMAGE_VIDEO_SIZES, VIDEO_PLATFORM_SIZE, PRIMARY_SIZE, sizeFor, sizesNeeded, sizedPrompt, alignmentCues, evenCues,
-  VIDEO_RUNNER_OPTIONS, FAILSAFE_OPTIONS, videoRunner, otherRunner, failSafeOn, aspectCropFilter,
+  VIDEO_RUNNER_OPTIONS, FAILSAFE_OPTIONS, videoRunner, otherRunner, failSafeOn, aspectCropFilter, musicJsExpr,
 };

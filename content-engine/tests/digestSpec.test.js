@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DateTime } from 'luxon';
-import { digestAction, digestDay, buildDigest } from '../src/utils/digestSpec.js';
+import { digestAction, digestDay, buildDigest, lowSheets } from '../src/utils/digestSpec.js';
 import { reviewLabel } from '../src/utils/stepTimeSpec.js';
 
 const at = (s) => DateTime.fromISO(s, { zone: 'Asia/Kolkata' });
@@ -55,5 +55,28 @@ describe('buildDigest', () => {
   });
   it('the Library says where the link went', () => {
     expect(reviewLabel('review_image', 'digest')).toBe('Image ready, link in the daily email');
+  });
+});
+
+describe('sheet running out', () => {
+  const now = at('2026-11-08T20:30');
+  it('picks the sheets with 3 or fewer Ready rows, never an uncounted one', () => {
+    const low = lowSheets([
+      { id: 'a', name: 'HNI', imagePosts: { count: 2 } },
+      { id: 'b', name: 'Kids', imagePosts: { count: 4 } },
+      { id: 'c', name: 'Nosheet', imagePosts: { count: null } },
+      { id: 'd', name: 'Empty', imagePosts: { count: 0 } },
+    ]);
+    expect(low.map((s) => s.id)).toEqual(['a', 'd']);
+  });
+  it('warns in the evening email, and counts it as needing attention', () => {
+    const { subject, html } = buildDigest({ lowSheet: [{ funnel: 'HNI', left: 2 }, { funnel: 'Empty', left: 0 }], now, fmt });
+    expect(subject).toContain('2 need attention');
+    expect(html).toContain('Sheet running out');
+    expect(html).toContain('2 Ready rows left, about 2 days');
+    expect(html).toContain('no Ready rows left');
+  });
+  it('is left out of the morning extra', () => {
+    expect(buildDigest({ lowSheet: [{ funnel: 'HNI', left: 1 }], now, fmt, action: 'morning' })).toBeNull();
   });
 });

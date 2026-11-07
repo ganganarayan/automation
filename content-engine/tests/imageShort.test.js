@@ -93,7 +93,7 @@ describe('image post as a video', () => {
     expect(imageVideoMode('')).toBe('on');
     expect(imageVideoMode('junk')).toBe('on');
     expect(imageVideoMode('music')).toBe('on');
-    expect(imageVideoMode('off')).toBe('off');
+    expect(imageVideoMode('off')).toBe('on');
   });
 
   it('reads the caption without links, hashtags, mentions or emoji', () => {
