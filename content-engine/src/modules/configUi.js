@@ -1279,6 +1279,7 @@ function musicListEditor(key) {
 <button type="button" class="btn" id="mlist-add">+ Add music</button>
 <p class="hint" style="margin-top:8px">Or paste many at once below, one per line: link | credit</p>
 <script>(function(){
+function init(){
   const box=document.querySelector('[name='+JSON.stringify(${k})+']'),list=document.getElementById('mlist');
   if(!box||!list)return;
   function parse(){return box.value.split(/\\r?\\n/).map(function(l){const i=l.indexOf('|');
@@ -1297,6 +1298,9 @@ function musicListEditor(key) {
   document.getElementById('mlist-add').onclick=function(){row({}).querySelector('.murl').focus();};
   box.addEventListener('input',draw);
   draw();
+}
+// The box comes after this script on the page: wait until it is there.
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();</script>`;
 }
 
