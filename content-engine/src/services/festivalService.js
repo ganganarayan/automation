@@ -32,7 +32,8 @@ import { childLogger } from '../core/logger.js';
 import sharp from 'sharp';
 import { overlayBox } from '../utils/festivalSpec.js';
 import { musicEntries } from '../utils/shortSpec.js';
-import { expandMusic } from './musicFolderService.js';
+import { folderMusic } from './musicFolderService.js';
+import { isMusicFolder } from '../utils/shortSpec.js';
 import { listElevenLabsVoices } from '../providers/ttsProvider.js';
 
 const log = childLogger({ module: 'festival' });
@@ -105,11 +106,21 @@ export async function voiceList(tenantId = 'default') {
   return key ? listElevenLabsVoices(key) : [];
 }
 
-/** Your music (Settings, with its Drive folders opened) to pick from: [{ url, credit }]. */
+/** Your music (Settings, with its Drive folders opened) to pick from: [{ url, credit, name }]. */
 export async function musicList(tenantId = 'default') {
   const r = (await buildProviders(tenantId)).resolved || {};
-  const expanded = await expandMusic(r.shortMusic || {}).catch(() => r.shortMusic || {});
-  return musicEntries(String((expanded && expanded.url) || ''));
+  // Drive folders opened file by file, so each track keeps its file name.
+  const out = [];
+  for (const line of String((r.shortMusic || {}).url || '').split(/\r?\n/)) {
+    const link = line.split('|')[0].trim();
+    if (isMusicFolder(link)) {
+      const files = await folderMusic(link).catch(() => []);
+      out.push(...files.map((m) => ({ url: m.url, credit: m.credit || '', name: m.name || '' })));
+    } else {
+      out.push(...musicEntries(line).map((m) => ({ ...m, name: '' })));
+    }
+  }
+  return [...new Map(out.map((m) => [m.url, m])).values()];
 }
 
 /** Each funnel with whether it can take a festival post: [{ id, name, active, problem }]. */

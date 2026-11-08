@@ -5,7 +5,7 @@ vi.mock('../src/services/festivalService.js', () => ({
   MAX_COPY: 2000,
   start: vi.fn(async () => ({ batchId: 'b', started: ['Gita'], skipped: [] })),
   voiceList: vi.fn(async () => [{ voice_id: 'v1abcdefgh', name: 'Ann', category: 'cloned', preview_url: 'https://x/p.mp3' }]),
-  musicList: vi.fn(async () => [{ url: 'https://drive.google.com/uc?export=download&id=abc', credit: 'Diya by Asha, CC BY' }]),
+  musicList: vi.fn(async () => [{ url: 'https://drive.google.com/uc?export=download&id=abc', credit: 'Diya by Asha, CC BY', name: 'diya.mp3' }, { url: 'https://drive.google.com/uc?export=download&id=def', credit: 't', name: 'Om Chant.mp3' }]),
   funnelReadiness: vi.fn(async () => [
     { id: 1, name: 'HNI Parents', active: true, problem: '' },
     { id: 2, name: 'No Voice', active: true, problem: 'no voice chosen for this funnel', voiceOnly: true },
@@ -52,7 +52,8 @@ describe('festival page', () => {
     expect(html).toContain('Approve all 1 waiting');
     expect(html).toContain('Light &amp; joy');
     expect(html).toContain('🔇 None: voice only');
-    expect(html).toContain('🎵 Diya by Asha, CC BY');
+    expect(html).toContain('🎵 diya (Diya by Asha, CC BY)');
+    expect(html).toContain('🎵 Om Chant<');
   });
   it('ships a browser script that parses', async () => {
     const { html } = await renderPage();
