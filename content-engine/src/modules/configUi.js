@@ -33,6 +33,7 @@ import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js
 import { navHtml, NAV_CSS } from '../utils/adminNav.js';
 import { MUSIC_PAGE_SITES } from '../utils/shortSpec.js';
 import { folderMusic } from '../services/musicFolderService.js';
+import { publicDlUrl } from '../providers/publicDriveProvider.js';
 import { FLOW_MANIFEST, hasFlow } from '../services/flowManifest.js';
 import { WIZARD_STEPS, completeness, stepFields } from '../services/videoWizardManifest.js';
 import * as imageGateService from '../services/imageGateService.js';
@@ -146,6 +147,25 @@ export function register(ctx) {
       res.json({ ok: true, files });
     } catch (err) {
       res.json({ ok: false, error: String(err.message).slice(0, 200) });
+    }
+  });
+
+  // ▶ Play for a Drive file: browsers will not play Drive's download link
+  // directly, so the app passes the song through. Drive file ids only.
+  router.get('/admin/settings/music-file', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).end();
+      const id = String(req.query.id || '');
+      if (!/^[\w-]{10,100}$/.test(id)) return res.status(400).end();
+      const up = await fetch(publicDlUrl(id), { headers: { 'User-Agent': 'Mozilla/5.0 (content-engine)' } });
+      const type = up.headers.get('content-type') || '';
+      if (!up.ok || /text\/html|json/i.test(type)) return res.status(404).end();
+      const buf = Buffer.from(await up.arrayBuffer());
+      if (buf.length > 40 * 1024 * 1024) return res.status(413).end();
+      res.set({ 'Content-Type': /^audio\//i.test(type) ? type : 'audio/mpeg', 'Cache-Control': 'private, max-age=600' });
+      res.send(buf);
+    } catch (err) {
+      res.status(502).end();
     }
   });
 
@@ -1239,7 +1259,7 @@ function musicPreviewButton() {
   function stop(){try{if(src)src.stop();}catch(e){}src=null;if(aud){aud.pause();aud=null;}btn.textContent='▶ Play';}
   let pi=0;
   function fileLink(s){const m=/google\\.com/i.test(s)&&s.match(/(?:\\/d\\/|[?&]id=)([\\w-]{10,})/);
-    return m?'https://drive.usercontent.google.com/download?id='+m[1]+'&export=download&confirm=t':s;}
+    return m?'/api/v1/admin/settings/music-file?id='+encodeURIComponent(m[1]):s;}
   function ownLinks(){const el=document.querySelector('[name="set[short_music_url]"]');
     return (el&&el.value||'').split(/\\r?\\n/).map(function(l){return l.split('|')[0];}).join(' ').split(/[\\s,]+/).filter(function(s){return /^https?:/i.test(s);});}
   // Your links, with each Drive folder swapped for its audio files (read by the app).
