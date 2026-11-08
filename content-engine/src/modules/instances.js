@@ -480,6 +480,16 @@ export function register(ctx) {
     }
   });
 
+  // 🔑 Reconnect a Threads account with the delete permission (Post for Me's connect page).
+  router.get('/admin/instances/:id/reconnect-threads', async (req, res) => {
+    try {
+      if (!(await guardHtml(req, res))) return;
+      res.redirect(await takeDownService.threadsReconnectUrl({ instanceId: req.params.id, accountId: String(req.query.account || '') }));
+    } catch (err) {
+      res.status(400).type('text/plain').send(`Could not make the Threads connect link: ${err.message}`);
+    }
+  });
+
   // 🗑 Take down: remove a live post from the channels you tick, on each platform.
   router.post('/admin/instances/:id/take-down', async (req, res) => {
     try {
@@ -621,11 +631,16 @@ function takeDownBox(row, chans) {
   const gone = (chans || []).filter((c) => c.state === 'ok' && c.removedAt);
   const notes = (chans || []).filter((c) => c.state === 'ok' && !c.removedAt && c.removeError);
   if (!live.length && !gone.length) return '';
-  const ticks = live.map((c) => `<label class="nowrow"><input type="checkbox" class="tdc" value="${esc(String(c.id))}" checked> ${esc(channelText(c))}</label>`).join('<br>');
+  const isThreads = (c) => String(c.platform || '').toLowerCase().includes('threads');
+  const reconnect = (c) => isThreads(c)
+    ? ` <a class="act" href="/api/v1/admin/instances/${esc(String(row.id))}/reconnect-threads?account=${encodeURIComponent(String(c.id))}" target="_blank" rel="noopener" title="Threads only lets the app delete once you allow it: approve on Threads, then come back and press Delete">🔑 Reconnect Threads for delete</a>`
+    : '';
+  const ticks = live.map((c) => `<label class="nowrow"><input type="checkbox" class="tdc" value="${esc(String(c.id))}" checked> ${esc(channelText(c))}</label>${reconnect(c)}`).join('<br>');
   return `<div class="schedbar bad" id="takedown"><b>🗑 Take down</b>: tick the channels to remove this post from, then press Delete. It is deleted on each platform, not just here, and cannot be undone.
     ${live.length ? `<div class="chans">${ticks}</div>
     <div><button class="act" onclick="tdAll(true)">Tick all</button> <button class="act" onclick="tdAll(false)">Untick all</button>
       <button class="act primary" id="tdbtn" onclick="takeDown()">🗑 Delete from ticked channels</button> <span class="hint" id="tdmsg"></span></div>` : '<div class="hint">🟢 Taken down from every channel.</div>'}
+    ${live.some(isThreads) ? '<div class="hint">Threads: press 🔑 Reconnect Threads for delete once and approve on Threads (it adds the delete permission), then come back here and press Delete.</div>' : ''}
     ${notes.length ? `<div class="hint">${notes.map((c) => `🟡 ${esc([c.platform, c.name].filter(Boolean).join(' '))}: last try failed (${esc(c.removeError)})`).join('<br>')}</div>` : ''}
     ${gone.length ? `<div class="hint">${gone.map((c) => `${esc(channelText(c))} on ${esc(formatIst(c.removedAt))} IST`).join('<br>')}</div>` : ''}
   </div>

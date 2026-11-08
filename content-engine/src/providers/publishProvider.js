@@ -6,6 +6,7 @@
  *               - createPost({ accounts, caption, mediaUrl, scheduledAt, perAccountCaption }): result
  *               - listAccounts(): connected accounts
  *               - uploadMedia(buffer, contentType): public media_url (Post for Me storage)
+ *               - authUrl({ platform, permissionOverrides, externalId }): connect link
  * Dependencies: httpClient, errors.
  */
 import { request } from '../core/httpClient.js';
@@ -122,6 +123,19 @@ export function createPostForMeProvider(cfg, log) {
     async createWebhook({ url, eventTypes }) {
       const res = await request(`${BASE}/webhooks`, { method: 'POST', headers: requireKey(), body: { url, event_types: eventTypes }, label: 'postforme.createWebhook', log, retries: 1 });
       if (!res.ok) throw new ExternalAPIError(`Post for Me webhook create failed (${res.status})`, { details: res.text?.slice(0, 300) });
+      return res.data;
+    },
+
+    /**
+     * The URL that (re)connects an account on its platform: { url }. Passing the
+     * account's own external_id refreshes that connection in place.
+     */
+    async authUrl({ platform, permissionOverrides, externalId }) {
+      const body = { platform };
+      if (permissionOverrides && permissionOverrides.length) body.platform_data = { [platform]: { permission_overrides: permissionOverrides } };
+      if (externalId) body.external_id = externalId;
+      const res = await request(`${BASE}/social-accounts/auth-url`, { method: 'POST', headers: requireKey(), body, label: 'postforme.authUrl', log, retries: 1 });
+      if (!res.ok || !res.data?.url) throw new ExternalAPIError(`Post for Me connect link failed (${res.status})`, { details: res.text?.slice(0, 300) });
       return res.data;
     },
 

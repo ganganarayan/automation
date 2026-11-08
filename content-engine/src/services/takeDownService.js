@@ -108,4 +108,25 @@ export async function takeDown({ instanceId, accountIds = [] }) {
   return { instanceId: row.id, removed: list.filter((x) => x.removed).length, failed: list.filter((x) => !x.removed).length, channels: list };
 }
 
-export default { takeDown, liveChannels };
+/** Threads' default scopes plus the one a take-down needs. */
+export const THREADS_DELETE_SCOPES = ['threads_basic', 'threads_content_publish', 'threads_delete'];
+
+/**
+ * 🔑 Reconnect a Threads account so its token may delete: a Post for Me connect
+ * link that asks for threads_delete too. The account's own external_id keeps
+ * it the same connection (fresh token, same account id).
+ */
+export async function threadsReconnectUrl({ instanceId, accountId }) {
+  const row = await instanceRepo.get(instanceId);
+  if (!row) throw new Error('instance not found');
+  const providers = await buildProviders(row.tenant_id);
+  if (!providers.resolved.postformeKey) throw new Error('Post for Me key is not set');
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log);
+  const account = accountId ? await publish.getAccount(accountId).catch(() => null) : null;
+  if (account && !String(account.platform || '').toLowerCase().includes('threads')) throw new Error('that account is not a Threads account');
+  const out = await publish.authUrl({ platform: 'threads', permissionOverrides: THREADS_DELETE_SCOPES, externalId: (account && account.external_id) || '' });
+  log.info({ instance: row.id, account: accountId }, 'threads reconnect link made');
+  return out.url;
+}
+
+export default { takeDown, liveChannels, threadsReconnectUrl, THREADS_DELETE_SCOPES };
