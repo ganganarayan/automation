@@ -44,6 +44,12 @@ export const WIZARD_STEPS = [
       { key: 'publish_time', label: 'Publish time (IST)', type: 'time', default: '08:02' },
       { key: 'generate_days', label: 'Days to post (blank = every day)', type: 'weekdays' },
       { key: 'generate_time', label: 'Prepare time (IST)', type: 'time', default: '22:00', help: 'The older per-funnel trigger. The router also checks every afternoon at the router check time on the settings page.' },
+      {
+        // Every video this funnel makes (image posts, festival posts) puts its music at this level under the voice.
+        key: 'music_volume', label: 'Background music volume (under the voice, 25% at most)', type: 'select', default: '20',
+        help: 'Every video this funnel makes (image posts, festival posts) plays its music at this level under the voice.',
+        options: ['25', '20', '15', '10', '5', '0'].map((v) => ({ value: v, label: v === '0' ? '0% (no music)' : `${v}%` })),
+      },
     ],
   },
   {
@@ -149,11 +155,6 @@ export const WIZARD_STEPS = [
         ],
       },
       { key: 'voice_id', label: 'Voice', type: 'voice_select', placeholder: 'the cloned voice to use' },
-      {
-        // Every video this funnel makes (image posts, festival posts) puts its music at this level under the voice.
-        key: 'music_volume', label: 'Background music volume (under the voice, 25% at most)', type: 'select', default: '20',
-        options: ['25', '20', '15', '10', '5', '0'].map((v) => ({ value: v, label: v === '0' ? '0% (no music)' : `${v}%` })),
-      },
       { type: 'heading', label: 'Final reel' },
       {
         key: 'aspect', label: 'Aspect ratio', type: 'select', default: '9:16',
