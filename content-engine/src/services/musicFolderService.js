@@ -21,11 +21,27 @@ import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'musicFolder' });
 
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * A credit file's text. Drive sometimes answers a burst of downloads with a web
+ * page instead of the file, so each file is tried on both of Drive's download
+ * addresses, twice, before it counts as having no credit.
+ */
 async function readText(fileId) {
-  const res = await fetch(publicDlUrl(fileId), { headers: { 'User-Agent': 'Mozilla/5.0 (content-engine)' } });
-  const type = res.headers.get('content-type') || '';
-  if (!res.ok || type.includes('text/html')) return '';
-  return (await res.text()).slice(0, 2000);
+  const urls = [publicDlUrl(fileId), `https://drive.usercontent.google.com/download?id=${encodeURIComponent(fileId)}&export=download&confirm=t`];
+  for (let round = 0; round < 2; round++) {
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (content-engine)' }, signal: AbortSignal.timeout(15000) });
+        const type = res.headers.get('content-type') || '';
+        if (res.ok && !type.includes('text/html')) return (await res.text()).slice(0, 4000);
+      } catch { /* the next address, or the next round */ }
+    }
+    await pause(800);
+  }
+  log.warn({ fileId }, 'credit file could not be read (Drive gave a web page); the track has no credit');
+  return '';
 }
 
 /** The audio files of one folder with their credits: [{ name, url, credit }]. */
@@ -39,12 +55,17 @@ export async function folderMusic(link) {
   if (!id) return [];
   const files = await createPublicDriveProvider(log).listFiles(id);
   const pairs = musicFolderPairs(files);
-  return Promise.all(pairs.map(async (p) => ({
-    name: p.name,
-    url: publicDlUrl(p.id),
-    // The whole .txt, its own line breaks kept (blank lines and stray spaces tidied).
-    credit: p.textId ? creditText(await readText(p.textId).catch(() => '')) : '',
-  })));
+  // One file at a time: Drive refuses bursts of downloads.
+  const out = [];
+  for (const p of pairs) {
+    out.push({
+      name: p.name,
+      url: publicDlUrl(p.id),
+      // The whole .txt, its own line breaks kept (blank lines and stray spaces tidied).
+      credit: p.textId ? creditText(await readText(p.textId).catch(() => '')) : '',
+    });
+  }
+  return out;
 }
 
 /** { track, url } with each folder line swapped for its files' "link | credit" lines. */

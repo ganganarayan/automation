@@ -195,8 +195,8 @@ function musicHtml(music = []) {
   // The file name first (what you called it in Drive), then its credit, cut short.
   const name = (m, i) => {
     const file = String(m.name || '').replace(/\.[a-z0-9]{2,4}$/i, '') || `Track ${i + 1}`;
-    // Just the file name: the credit goes in the caption, not in this list.
-    return file;
+    // Just the file name (the credit goes in the caption); flagged when its credit could not be read.
+    return String(m.credit || '').trim() ? file : `${file} (no credit found)`;
   };
   return `<select id="music" onchange="musicPicked()" style="max-width:100%;background:#0b0b12;color:#e8e8ef;border:1px solid #2a2a44;border-radius:8px;padding:.45rem">
     <option value="random">🎲 Random from your music${music.length ? ` (${music.length} tracks)` : ' (none set: voice only)'}</option>

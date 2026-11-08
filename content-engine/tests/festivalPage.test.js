@@ -54,6 +54,7 @@ describe('festival page', () => {
     expect(html).toContain('🔇 None: voice only');
     expect(html).toContain('🎵 diya<');
     expect(html).toContain('🎵 Om Chant<');
+    expect(html).not.toContain('diya (no credit');
   });
   it('ships a browser script that parses', async () => {
     const { html } = await renderPage();
