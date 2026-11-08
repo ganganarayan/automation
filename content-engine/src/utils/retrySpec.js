@@ -45,6 +45,7 @@ export function retryAction(row, steps, now = Date.now()) {
   if (r.status !== 'failed' && !isStuck(r, now) && !noScript) return '';
   const lane = laneOf(r);
   if (lane === 'image') return 'image';
+  if (lane === 'festival') return 'festival'; // made again on its own, no router day involved
   // A video that stepped down to an image post retries as that post, not as the video.
   if (step('images').artifacts?.stepDown) return 'stepdown';
   // 'generated' is what the router and the scheduler save their AI videos as.

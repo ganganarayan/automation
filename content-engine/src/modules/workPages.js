@@ -317,6 +317,7 @@ const RAW_LABEL = {
 // No router row for that day: infer the lane from the instance itself.
 function laneLabelOf(r) {
   if (r.source_type === 'sheet') return LANE_LABEL.image; // router lane 3
+  if (r.source_type === 'festival') return 'Festival post';
   return laneOf(r) === 'ready' ? LANE_LABEL.ready_video : LANE_LABEL.ai_video;
 }
 

@@ -30,6 +30,7 @@ import * as review from '../services/instanceReviewService.js';
 import * as readyPost from '../services/readyPostService.js';
 import * as stageRunner from '../services/stageRunnerService.js';
 import * as aiLane from '../services/aiLaneService.js';
+import * as festivalService from '../services/festivalService.js';
 import * as jobRunner from '../core/jobRunner.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
@@ -450,6 +451,7 @@ export function register(ctx) {
       if (!action) return res.status(409).json({ ok: false, error: 'nothing failed on this instance' });
       if (action === 'open') return res.status(409).json({ ok: false, error: 'open it and post it again' });
       if (action === 'channels') return res.json({ ok: true, ...(await readyPost.retryFailed({ instanceId: row.id })) });
+      if (action === 'festival') return res.json({ ok: true, ...(await festivalService.retry({ tenantId: row.tenant_id, id: row.id })) });
       // The retry's day is taken: the page asks for a date and calls back with it.
       const picker = { pickDate: true, ...retryDateDefaults(row) };
       const asked = req.body?.postAt;

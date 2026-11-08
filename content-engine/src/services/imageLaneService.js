@@ -55,6 +55,7 @@ import { totalClipSeconds } from '../utils/stageSpec.js';
 import { stepDownOf, stepDownPicture, stepDownText, stepDownCaption, stepDownPrompt, stepDownNote } from '../utils/stepDownSpec.js';
 import { headlineImage } from './imageComposer.js';
 import { formatIst } from '../utils/time.js';
+import { festivalCaptions } from '../utils/festivalSpec.js';
 import {
   IMAGE_REVIEW, REFILL_BELOW, REFILL_COUNT, PFM_COL, LINKS_COL, SOURCE_COL, SHEET_STATUS,
   CELL_NEWLINE, postedLinks, imageAccounts,
@@ -127,16 +128,17 @@ async function refill({ f, providers, tab, rows, log }) {
  * GitHub answers later through imageVideoJobService's hooks; Railway answers
  * now. Leaves the instance at image_review (or failed, with the reason).
  */
-async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '', log }) {
+async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '', festival = null, log }) {
   const inst = await instanceRepo.get(instanceId);
   if (!inst) throw new Error(`instance ${instanceId} not found`);
-  const { full, short } = composeCaptions(fields, { ctaLink: f.ctaLink, audiencePrefix: f.audiencePrefix });
-  const prompt = composePrompt(fields, note);
+  // A festival post is your own picture and your own words: nothing is drawn or rewritten.
+  const { full, short } = festival ? festivalCaptions(festival.copy) : composeCaptions(fields, { ctaLink: f.ctaLink, audiencePrefix: f.audiencePrefix });
+  const prompt = festival ? '' : composePrompt(fields, note);
   // Everything a runner needs is saved first, so a fail-safe can start over from the instance.
   let steps = instanceService.parseSteps(inst);
   for (const k of ['animate', 'voiceover', 'transcript', 'stitch']) steps = patchStep(steps, k, { status: 'skipped' });
   steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: short || full, copy: { title: fields.headline || '', description: full }, captionFull: full, captionShort: short } });
-  steps = patchStep(steps, 'images', { status: 'running', startedAt: new Date().toISOString(), artifacts: { prompt, note: note || '', row: fields, sheet, tried: [] } });
+  steps = patchStep(steps, 'images', { status: 'running', startedAt: new Date().toISOString(), artifacts: { prompt, note: note || '', row: fields, sheet, tried: [], ...(festival ? { festival } : {}) } });
   await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
   await stepLog.start(instanceId, 'images');
   const video = imageVideoMode(providers.resolved.imageVideo) === 'on';
@@ -199,12 +201,14 @@ async function startOnGithub({ instanceId, f, providers }) {
   const script = art(steps, 'script');
   const cfg = await funnels.getConfig(f.id).catch(() => ({}));
   const sizes = Object.keys(IMAGE_VIDEO_SIZES);
+  const given = img.festival && img.festival.imageUrl;
   const job = {
     sizes,
-    prompts: Object.fromEntries(sizes.map((s) => [s, sizedPrompt(img.prompt || '', s)])),
+    prompts: given ? {} : Object.fromEntries(sizes.map((s) => [s, sizedPrompt(img.prompt || '', s)])),
+    ...(given ? { imageUrls: Object.fromEntries(sizes.map((s) => [s, img.festival.imageUrl])) } : {}),
     text: script.captionFull || script.captionShort || '',
     voiceId: cfg.voice_id || '',
-    name: `${poster.slug(f.name)}-${poster.slug((img.sheet || {}).key || '')}-r${inst.round || 1}`,
+    name: `${poster.slug(f.name)}-${poster.slug((img.sheet || {}).key || (given ? 'festival' : ''))}-r${inst.round || 1}`,
   };
   await imageVideoJob.start({ instance: inst, providers, job, baseUrl: settings.app.publicBaseUrl });
 }
@@ -250,6 +254,13 @@ export async function githubFailed(instanceId, error) {
 
 /** Draw the three pictures on Railway (OpenAI, else Gemini) and upload them to Drive. */
 async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
+  const given = img.festival && img.festival.imageUrl;
+  if (given) {
+    // Your own picture: every size uses it whole (the video fits it on a blurred copy of itself).
+    const id = img.festival.driveId || null;
+    const upload = { id, downloadUrl: given, thumbnailUrl: id ? `https://drive.google.com/thumbnail?id=${id}&sz=w1000` : given };
+    return { upload, sized: Object.fromEntries(Object.keys(IMAGE_VIDEO_SIZES).map((s) => [s, given])), made: 0 };
+  }
   const sized = {};
   let made = 0;
   const name = (size) => `${poster.slug(f.name)}-${poster.slug((img.sheet || {}).key || '')}-r${round || 1}${size === 'feed' ? '' : `-${size}`}.png`;
@@ -340,6 +351,11 @@ async function finishReview(instanceId, f, log) {
   await stepLog.end(instanceId, 'images');
   await stepLog.start(instanceId, 'review_image', { email: 'digest' });
   log.info({ instance: instanceId, row: (img.sheet || {}).key, video: !!videoUrl, runner: (img.render || {}).runner }, 'image post waiting for approval');
+  // A festival post set to go out without a check is approved the moment its video is made.
+  if (img.festival && img.festival.autoPost) {
+    const r = await approvalService.approveById(approvalId).catch((err) => ({ ok: false, error: err.message }));
+    log.info({ instance: instanceId, ok: r.ok }, 'festival post approved automatically');
+  }
 }
 
 
@@ -350,6 +366,8 @@ export async function retry({ instanceId, log = baseLog }) {
   if (!funnelRow) throw new LaneError('funnel not found');
   const f = await funnels.resolve(funnelRow);
   const providers = await buildProviders(f.tenantId);
+  const festival = art(instanceService.parseSteps(row), 'images').festival;
+  if (festival) return renderAndSend({ instanceId: row.id, f, providers, fields: { headline: row.title || '' }, sheet: {}, festival, log });
   const tab = await poster.tabFor(providers.sheets, f);
   const rows = await providers.sheets.readTab(f.sheetId, tab, { fresh: true });
   const pick = readyRows(rows).find((r) => r.key === row.source_ref);
@@ -409,6 +427,44 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
     throw err;
   }
   return inst;
+}
+
+/**
+ * A festival post for one funnel: your uploaded picture and your copy, made into
+ * the same voiced videos as an image post (the copy is read aloud in the funnel's
+ * voice), outside the router. festival: { batchId, imageUrl, driveId, copy, autoPost }.
+ * postAt: a Date, or null to post as soon as it is approved. Returns the instance.
+ */
+export async function prepareFestival({ funnelRow, title, festival, postAt = null, log = baseLog }) {
+  const f = await funnels.resolve(funnelRow);
+  if (!(f.accounts || []).length) throw new LaneError('no Post for Me accounts ticked on this funnel');
+  const providers = await buildProviders(f.tenantId);
+  const voice = await voiceSetup({ funnelId: f.id, providers, log });
+  if (voice.error) throw new LaneError(voice.error);
+  const inst = await instanceService.createForFunnel({
+    tenantId: f.tenantId,
+    funnel: funnelRow,
+    title: title || 'Festival post',
+    scheduledFor: postAt || new Date(),
+    status: 'running',
+    sourceType: 'festival',
+    sourceRef: festival.batchId,
+  });
+  try {
+    await renderAndSend({ instanceId: inst.id, f, providers, fields: { headline: title || '' }, sheet: {}, festival, log });
+  } catch (err) {
+    await instanceRepo.setStatus(inst.id, 'failed', `Festival post: ${err.message}`).catch(() => {});
+    throw err;
+  }
+  return inst;
+}
+
+/** Why a funnel can't take a festival post ('' when it can): accounts and the voice, checked before anything is made. */
+export async function festivalProblem(funnelRow, providers, log = baseLog) {
+  const f = await funnels.resolve(funnelRow);
+  if (!(f.accounts || []).length) return 'no Post for Me accounts ticked on this funnel';
+  const voice = await voiceSetup({ funnelId: f.id, providers, log });
+  return voice.error || '';
 }
 
 /** A still's bytes: from Drive, else its public link (stills are shared when uploaded). */
@@ -530,7 +586,8 @@ async function sheetFor(row) {
   const providers = await buildProviders(f.tenantId);
   const steps = instanceService.parseSteps(row);
   const sheet = art(steps, 'images').sheet || {};
-  const tab = sheet.tab || (stepDownOf(steps) ? '' : await poster.tabFor(providers.sheets, f));
+  const ownRow = !stepDownOf(steps) && !art(steps, 'images').festival;
+  const tab = sheet.tab || (ownRow ? await poster.tabFor(providers.sheets, f) : '');
   return { f, providers, steps, sheet, tab };
 }
 
@@ -644,10 +701,12 @@ export async function approve(approval) {
   // The link goes in each channel's first comment once the post is live; the
   // webhook is what wakes a sleeping app when it goes live.
   const refs = [ref, shortRef].filter(Boolean);
-  for (const made of refs) await firstComment.queue({ tenantId: f.tenantId, postformePostId: made, link: f.ctaLink, scheduledAt: postAt });
+  // A festival greeting carries no sales link in its first comment.
+  const festive = !!img.festival;
+  if (!festive) for (const made of refs) await firstComment.queue({ tenantId: f.tenantId, postformePostId: made, link: f.ctaLink, scheduledAt: postAt });
   await firstComment.ensureWebhook(f.tenantId, publish).catch(() => false);
   const fields = img.row || {};
-  if (ref) await poster.armPostExtras({ f, p: { dmKeyword: fields.dmKeyword, dmText: fields.dmText, dmLink: fields.dmLink, matchKey: sheet.key }, ref, accounts, log });
+  if (ref && !festive) await poster.armPostExtras({ f, p: { dmKeyword: fields.dmKeyword, dmText: fields.dmText, dmLink: fields.dmLink, matchKey: sheet.key }, ref, accounts, log });
 
   const channel = (id) => ({ id, platform: (accountMap[id] || {}).platform || '', name: (accountMap[id] || {}).account_name || id, state: 'waiting' });
   const channels = [
@@ -717,6 +776,11 @@ export async function rework(approval, note) {
       await stepDown({ instanceId: row.id, note: note || '', log });
       return null;
     }
+    if (img.festival) {
+      // Your picture stays; Send back makes the voice and the videos again.
+      await renderAndSend({ instanceId: row.id, f: ctx.f, providers: ctx.providers, fields: img.row || {}, sheet: {}, festival: { ...img.festival, autoPost: false }, log });
+      return null;
+    }
     await renderAndSend({ instanceId: row.id, f: ctx.f, providers: ctx.providers, fields: img.row || {}, sheet: { ...ctx.sheet, tab: ctx.tab }, note: note || '', log });
   } catch (err) {
     log.error({ err: err.message }, 'image rework failed');
@@ -744,4 +808,4 @@ export async function onPosted(row, { refs = [], channels = [] } = {}) {
   }, baseLog);
 }
 
-export default { KIND, LaneError, landingText, prepare, retry, stepDown, retryStepDown, approve, rework, onPosted };
+export default { KIND, LaneError, landingText, prepare, prepareFestival, festivalProblem, retry, stepDown, retryStepDown, approve, rework, onPosted };

@@ -1738,7 +1738,7 @@ export async function retryFailed({ instanceId, auto = false }) {
   if (!req) throw new Error('could not read the original post from Post for Me, use ✏ Edit and post it again');
   const steppers = (c) => STEP_DOWN_PLATFORMS.includes(platformKey(c.platform));
   // An image post reaches YouTube as a Short, on a post of its own.
-  const imagePost = row.source_type === 'sheet' || !!stepDownOf(steps);
+  const imagePost = row.source_type === 'sheet' || row.source_type === 'festival' || !!stepDownOf(steps);
   // An image post sent as a video already includes YouTube on the one post.
   const isShort = (c) => imagePost && !req.imageVideo && platformKey(c.platform) === 'youtube';
   const others = failed.filter((c) => !steppers(c) && !isShort(c));

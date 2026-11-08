@@ -9,6 +9,12 @@ const ev = (k, s, sec, extra = {}) => ({ k, s, at: at(sec), ...extra });
 const ai = (extra = {}) => ({ id: 'i', status: 'running', source_type: 'generated', updated_at: at(0), ...extra });
 const script = { key: 'script', status: 'done', artifacts: { text: 'hello' } };
 
+describe('festival posts', () => {
+  it('follow the image-post steps', () => {
+    expect(timeLane({ source_type: 'festival' })).toBe('image');
+  });
+});
+
 describe('formatSpan', () => {
   it('reads like 1m 20s', () => {
     expect(formatSpan(45000)).toBe('45s');

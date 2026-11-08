@@ -417,6 +417,8 @@ export async function liveOnDate(funnelId, dateKey, tenantId = 'default') {
     `SELECT * FROM instances
        WHERE tenant_id = $1 AND funnel_id = $2
          AND status NOT IN ('failed', 'superseded')
+         -- A festival post goes out on top of the day's normal post, never instead of it.
+         AND COALESCE(source_type, '') <> 'festival'
          AND COALESCE(scheduled_for, posted_at) IS NOT NULL
          AND (COALESCE(scheduled_for, posted_at) AT TIME ZONE 'Asia/Kolkata')::date = $3::date
        ORDER BY (status IN ('scheduled', 'posted', 'partial')) DESC, created_at
@@ -486,7 +488,20 @@ export async function recentForFunnel(funnelId, tenantId = 'default', limit = 40
   return rows;
 }
 
+/** Festival posts (one instance per funnel, grouped by source_ref = the batch id), newest first. */
+export async function festivalRows(tenantId = 'default', limit = 200) {
+  const { rows } = await query(
+    `SELECT id, funnel_id, funnel_name, title, status, note, steps, source_ref, scheduled_for, posted_at, post_refs, created_at
+       FROM instances
+      WHERE tenant_id = $1 AND source_type = 'festival'
+      ORDER BY created_at DESC LIMIT $2`,
+    [tenantId, limit],
+  );
+  return rows;
+}
+
 export default {
+  festivalRows,
   create, get, list, logRows, saveSteps, setStatus, transition, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, moveFunnel, unschedule, scheduledDue, retryDue, setPostStatus, markPosting, markPostFailed, remove,
   existsForFunnelOnDate, videoOnDate, postedDriveIds, draftsByDriveIds, liveOnDate, openSheetRefs, recentForFunnel,
   routerHeldDriveIds, releaseSlot, supersede, missingLinks, saveLinks,

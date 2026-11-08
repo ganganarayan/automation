@@ -140,6 +140,15 @@ async function drawPicture(job, size) {
   return `pic-${size}.png`;
 }
 
+/** Your own picture (a festival post), used whole: the video fits it on a blurred copy of itself. */
+async function fetchPicture(url, size) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`the uploaded picture could not be downloaded (${res.status})`);
+  if (/text\/html/i.test(res.headers.get('content-type') || '')) throw new Error('the picture link gave a web page, not an image (is it shared Anyone with the link?)');
+  await writeFile(`given-${size}`, Buffer.from(await res.arrayBuffer()));
+  return `given-${size}`;
+}
+
 /** The caption in the funnel's voice, with character timings for the subtitles. */
 async function makeVoice(job) {
   const spoken = voiceText(job.text);
@@ -161,12 +170,17 @@ async function makeVoice(job) {
 /** An image post's whole video: pictures, voice, subtitles, one video per size, all to Drive. */
 async function imageVideo(job) {
   for (const k of [job.openaiKey, job.elevenlabsKey]) if (k) console.log(`::add-mask::${k}`);
-  if (!job.openaiKey) throw new Error('no OpenAI key to draw the pictures');
+  const given = job.imageUrls || {};
+  if (!job.openaiKey && !job.sizes.every((s) => given[s])) throw new Error('no OpenAI key to draw the pictures');
   if (!job.elevenlabsKey || !job.voiceId) throw new Error('no ElevenLabs key or voice');
   console.log(`Image-post video: sizes ${job.sizes.join(', ')}`);
   await progress({ phase: 'pictures', pct: 0 });
   const pics = {};
-  for (const size of job.sizes) pics[size] = await drawPicture(job, size);
+  let drawn = 0;
+  for (const size of job.sizes) {
+    if (given[size]) pics[size] = await fetchPicture(given[size], size);
+    else { pics[size] = await drawPicture(job, size); drawn += 1; }
+  }
   await progress({ phase: 'voice', pct: 30 });
   const voice = await makeVoice(job);
   const seconds = imageVideoSeconds(voice.seconds);
@@ -216,7 +230,7 @@ async function imageVideo(job) {
     images[size] = await uploadToDrive({ file: pics[size], name: `${job.name} ${size}.png`, folderId, token: fresh.accessToken, mime: 'image/png' });
     videos[size] = await uploadToDrive({ file: `video-${size}.mp4`, name: `${job.name} ${size}.mp4`, folderId, token: fresh.accessToken });
   }
-  await hook('done', { images, videos, seconds, chars: voice.chars, made: job.sizes.length, subtitled: !!subPath, subtitleError, musicCredit: music.credit || '' });
+  await hook('done', { images, videos, seconds, chars: voice.chars, made: drawn, subtitled: !!subPath, subtitleError, musicCredit: music.credit || '' });
   console.log(`Done: ${job.sizes.length} sizes, ${seconds} s`);
 }
 

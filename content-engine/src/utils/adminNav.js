@@ -26,6 +26,8 @@ export const WORK_ITEMS = [
   { id: 'library', label: 'Library', icon: '🎬', href: '/api/v1/admin/instances' },
   { id: 'calendar', label: 'Calendar', icon: '📅', href: '/api/v1/admin/calendar' },
   { id: 'capture', label: 'Comments', icon: '🎯', href: '/api/v1/admin/capture' },
+  // One picture + copy to every funnel, outside the daily lanes.
+  { id: 'festival', label: 'Festival post', icon: '🪔', href: '/api/v1/admin/festival' },
   { id: 'log', label: 'Log and cost', icon: '🧾', href: '/api/v1/admin/log' },
 ];
 

@@ -3,7 +3,7 @@ import { WORK_ITEMS, setupItems, navHtml, navSlot, fillNav, workItemFor, roleLab
 
 describe('admin menu', () => {
   it('lists the work pages in order, Today first', () => {
-    expect(WORK_ITEMS.map((i) => i.label)).toEqual(['Today', 'Library', 'Calendar', 'Comments', 'Log and cost']);
+    expect(WORK_ITEMS.map((i) => i.label)).toEqual(['Today', 'Library', 'Calendar', 'Comments', 'Festival post', 'Log and cost']);
     expect(WORK_ITEMS[0].href).toBe(HOME_PATH);
   });
 

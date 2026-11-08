@@ -78,7 +78,8 @@ export async function start({ instance, providers, job, baseUrl }) {
   const tenantId = instance.tenant_id || 'default';
   const c = providers.resolved.clean || {};
   if (!c.githubToken) throw new Error('no GitHub token (Keys and credit, Video clean)');
-  if (!(providers.resolved.openai || {}).apiKey) throw new Error('GitHub draws the pictures with OpenAI, and there is no OpenAI key');
+  const given = job.imageUrls && Object.keys(job.imageUrls).length;
+  if (!given && !(providers.resolved.openai || {}).apiKey) throw new Error('GitHub draws the pictures with OpenAI, and there is no OpenAI key');
   if (!(await driveConnect.status(tenantId)).connected) throw new Error('Google Drive is not connected (Setup, Settings, Google)');
   if (!/^https:\/\//.test(baseUrl || '')) throw new Error("the app's public https address is not set, so GitHub can't call back");
   await instanceService.updateStep(instance.id, 'images', { artifacts: { ...imagesArt(instance), job: { ...job, runner: 'github', startedAt: new Date().toISOString() } } });
@@ -131,6 +132,8 @@ export async function hookJob({ ticket }) {
       return [s, { w: spec.w, h: spec.h, genSize: gen.size, aspect: gen.aspect || spec.label }];
     })),
     prompts: job.prompts || {},
+    // A festival post brings its own picture: the runner fetches it instead of drawing.
+    imageUrls: job.imageUrls || {},
     imageModel: (r.openai || {}).imageModel || 'gpt-image-1',
     openaiKey: (r.openai || {}).apiKey || '',
     text: job.text || '',

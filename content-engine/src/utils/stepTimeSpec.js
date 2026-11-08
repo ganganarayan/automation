@@ -75,6 +75,7 @@ const stepOf = (steps, key) => (Array.isArray(steps) ? steps : []).find((s) => s
 /** Which step list a row follows. */
 export function timeLane(row) {
   const lane = laneOf(row || {});
+  if (lane === 'festival') return 'image'; // the same steps as an image post
   return lane === 'ready' || lane === 'image' ? lane : 'ai';
 }
 
