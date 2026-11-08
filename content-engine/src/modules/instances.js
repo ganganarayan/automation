@@ -31,6 +31,8 @@ import * as readyPost from '../services/readyPostService.js';
 import * as stageRunner from '../services/stageRunnerService.js';
 import * as aiLane from '../services/aiLaneService.js';
 import * as festivalService from '../services/festivalService.js';
+import * as disapproveService from '../services/disapproveService.js';
+import { canDisapprove } from '../utils/disapproveSpec.js';
 import * as jobRunner from '../core/jobRunner.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
@@ -542,6 +544,17 @@ export function register(ctx) {
     }
   });
 
+  // ✕ Disapprove: the files go, the entry stays in Log and cost's record as Disapproved (with its cost).
+  router.post('/admin/instances/:id/disapprove', async (req, res) => {
+    try {
+      if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to disapprove' });
+      const s = await currentSession(req).catch(() => null);
+      res.json(await disapproveService.disapprove({ tenantId: req.tenantId || 'default', instanceId: req.params.id, by: (s && s.email) || '' }));
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   router.post('/admin/instances/:id/approve', async (req, res) => {
     try {
       if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to approve' });
@@ -689,7 +702,7 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
       const ab = approvalButtons(r, pending.get(String(r.id)) || null, { canApprove: approver, videoId: vid });
       const approve = ab ? `<div class="apbtns">${ab.videoId
         ? `<button class="act big" onclick="openVideo('${esc(ab.videoId)}')">▶ Review</button>`
-        : `<a class="act big" href="${esc(ab.reviewHref)}">Review</a>`}<button class="act big approve" onclick="approveRow(this,'${esc(r.id)}','${esc(ab.approveLabel)}')">${esc(ab.approveLabel)}</button></div>` : '';
+        : `<a class="act big" href="${esc(ab.reviewHref)}">Review</a>`}<button class="act big approve" onclick="approveRow(this,'${esc(r.id)}','${esc(ab.approveLabel)}')">${esc(ab.approveLabel)}</button><button class="act big danger" onclick="disapproveRow(this,'${esc(r.id)}')">✕ Disapprove</button></div>` : (approver && canDisapprove(r) && r.status === 'failed' ? `<div class="apbtns"><button class="act danger" onclick="disapproveRow(this,'${esc(r.id)}')">✕ Disapprove</button></div>` : '');
       const ra = retryAction(r, steps);
       const retry = ra === 'open'
         ? `<div class="apbtns"><a class="act big" href="/api/v1/admin/instances/${esc(r.id)}">↻ Retry</a></div>`
@@ -735,6 +748,12 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
     async function retryRow(b, id, postAt){
       b.disabled=true; const t=b.textContent; b.textContent='Retrying…';
       try{ const r=await fetch('/api/v1/admin/instances/'+id+'/retry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(postAt?{postAt}:{})}); const j=await r.json(); if(j.ok){ b.textContent='🟢 Started'; setTimeout(()=>location.reload(), 900); } else { b.disabled=false; b.textContent=t; if(j.pickDate) retryPick(b,id,j); else alert(j.error||'failed'); } }
+      catch(e){ b.disabled=false; b.textContent=t; alert(e.message); }
+    }
+    async function disapproveRow(b, id){
+      if(!confirm('Disapprove this? Its pictures and videos are deleted from Drive to free the space. The entry stays in Log and cost as Disapproved, with its cost. This cannot be undone.')) return;
+      b.disabled=true; const t=b.textContent; b.textContent='Disapproving…';
+      try{ const r=await fetch('/api/v1/admin/instances/'+id+'/disapprove',{method:'POST'}); const j=await r.json(); if(j.ok){ b.textContent='🔴 Disapproved'+(j.filesLeft?' ('+j.filesLeft+' file(s) left in Drive)':''); setTimeout(()=>location.reload(), 1200); } else { b.disabled=false; b.textContent=t; alert(j.error||'failed'); } }
       catch(e){ b.disabled=false; b.textContent=t; alert(e.message); }
     }
     async function approveRow(b, id, label){
@@ -880,6 +899,7 @@ function reviewPage(row, steps, approval, buttons, script) {
     <div class="rvbar">
       ${form ? '<button class="act big" id="savebtn" onclick="save()">Save</button>' : ''}
       <button class="act big approve" id="apbtn" onclick="approve()">${esc(buttons.approveLabel)}</button>
+      <button class="act big danger" id="dabtn" onclick="disapprove()">✕ Disapprove</button>
       <span id="rvmsg" class="hint"></span>
     </div>
     <p class="hint">Save stores your edit only. ${esc(buttons.approveLabel)} moves it on, the same as the email's link.</p>
@@ -895,6 +915,12 @@ function reviewPage(row, steps, approval, buttons, script) {
       try{ const j=await post('/review/save', body()); if(j.ok){ dirty=false; msg('🟢 Saved'); } else msg('🔴 '+(j.error||'failed')); }
       catch(e){ msg('🔴 '+e.message); }
       b.disabled=false;
+    }
+    async function disapprove(){
+      if(!confirm('Disapprove this? Its pictures and videos are deleted from Drive. The entry stays in Log and cost as Disapproved, with its cost.')) return;
+      const b=document.getElementById('dabtn'); b.disabled=true; msg('Disapproving…');
+      try{ const j=await post('/disapprove'); if(j.ok){ msg('🔴 Disapproved. Opening Library…'); setTimeout(()=>{ location.href='/api/v1/admin/instances'; }, 900); } else { b.disabled=false; msg('🔴 '+(j.error||'failed')); } }
+      catch(e){ b.disabled=false; msg('🔴 '+e.message); }
     }
     async function approve(){
       if(dirty && !confirm('You have unsaved edits. Approve without them?')) return;

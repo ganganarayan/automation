@@ -55,6 +55,8 @@ export const NEEDS_YOU_STATUSES = Object.keys(STATUS_TO_LABEL).filter((s) => STA
 export function libraryStatus(status) {
   const s = String(status || '');
   if (s === 'superseded') return { key: 'superseded', label: 'Replaced', dot: '⚫', note: '', hidden: true };
+  // You turned it down: its files are gone, the record (with its cost) stays in Log and cost.
+  if (s === 'disapproved') return { key: 'disapproved', label: 'Disapproved', dot: '🔴', note: '', hidden: true };
   const key = STATUS_TO_LABEL[s] || 'preparing';
   const base = LIBRARY_LABELS.find((l) => l.key === key);
   // Partly posted: some channels went out, some did not, attention, not OK.

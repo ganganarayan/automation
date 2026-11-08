@@ -593,6 +593,16 @@ async function sheetFor(row) {
   return { f, providers, steps, sheet, tab };
 }
 
+/** Disapproved: its sheet row reads Disapproved, so the router never uses it again. */
+export async function markDisapproved(row) {
+  if (!row || row.source_type !== 'sheet') return;
+  const ctx = await sheetFor(row);
+  if (!ctx || !ctx.sheet.key) return;
+  await poster.markSheetRow(ctx.providers.sheets, ctx.f.sheetId, ctx.tab, {
+    matchColName: ctx.sheet.matchColName, matchKey: ctx.sheet.key, rowNumber: ctx.sheet.rowNumber, status: 'Disapproved',
+  }, baseLog);
+}
+
 /** Approve → sheet Approved → Post for Me (scheduled, or now if late) → instance scheduled. */
 export async function approve(approval) {
   const p = approval.payload || {};
@@ -816,4 +826,4 @@ export async function onPosted(row, { refs = [], channels = [] } = {}) {
   }, baseLog);
 }
 
-export default { KIND, LaneError, landingText, prepare, prepareFestival, festivalProblem, retry, stepDown, retryStepDown, approve, rework, onPosted };
+export default { KIND, LaneError, landingText, markDisapproved, prepare, prepareFestival, festivalProblem, retry, stepDown, retryStepDown, approve, rework, onPosted };

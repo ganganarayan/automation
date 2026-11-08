@@ -158,6 +158,7 @@ function rowHtml(r) {
     r.videoUrl ? `<a class="act" href="${esc(r.videoUrl)}" target="_blank" rel="noopener">▶ Video</a>` : '',
     r.status === 'image_review' && r.approvalId ? `<button class="act primary" onclick="act('${esc(r.id)}','approve')">✅ Approve</button>` : '',
     r.status === 'failed' ? `<button class="act" onclick="act('${esc(r.id)}','retry')">↻ Retry</button>` : '',
+    ['image_review', 'failed', 'running'].includes(r.status) ? `<button class="act" style="background:#5a1f2a" onclick="disapprove('${esc(r.id)}')">✕ Disapprove</button>` : '',
     `<a class="act" href="/api/v1/admin/instances/${esc(r.id)}">Open</a>`,
   ].filter(Boolean).join('');
   return `<tr><td>${esc(r.funnelName)}</td><td>${s.dot} ${esc(s.text)}${r.musicCredit ? `<div class="hint">🎵 ${esc(r.musicCredit)}</div>` : ''}</td><td class="acts">${acts}</td></tr>`;
@@ -424,6 +425,11 @@ async function go(){
 }
 async function act(id, what){
   const r=await post('${BASE}/'+encodeURIComponent(id)+'/'+what);
+  if(!r.ok) alert(r.error||'failed'); refresh();
+}
+async function disapprove(id){
+  if(!confirm('Disapprove this one? Its video is deleted from Drive. It stays in Log and cost as Disapproved, with its cost.')) return;
+  const r=await fetch('/api/v1/admin/instances/'+encodeURIComponent(id)+'/disapprove',{method:'POST'}).then(x=>x.json()).catch(()=>({ok:false,error:'no answer'}));
   if(!r.ok) alert(r.error||'failed'); refresh();
 }
 async function approveAll(batchId){
