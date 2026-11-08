@@ -145,15 +145,15 @@ export function pickMusic({ track = '', url = '' } = {}, rand = Math.random) {
   const own = all.map((e) => e.url);
   const credits = Object.fromEntries(all.filter((e) => e.credit).map((e) => [e.url, e.credit]));
   const withCredits = (o) => (Object.keys(credits).length ? { ...o, credits } : o);
-  if (track === OWN_MUSIC && own.length === 1) return withCredits({ url: own[0] });
-  if (track === OWN_MUSIC && own.length) {
+  // Your music only: the old built-in tracks are gone, so the choice (track) no longer matters.
+  if (own.length === 1) return withCredits({ url: own[0] });
+  if (own.length) {
     // One of your links at random per video; the rest are tried in turn if it fails.
     const start = Math.floor(rand() * own.length) % own.length;
     const urls = [...own.slice(start), ...own.slice(0, start)];
     return withCredits({ url: urls[0], urls });
   }
-  const found = MUSIC_TRACKS.find((t) => t.value === track) || MUSIC_TRACKS[0];
-  return { expr: found.expr };
+  return {};
 }
 
 /** The Short's title: the instance title without its date, else the text without its link. YouTube allows 100 characters. */
@@ -371,9 +371,12 @@ export function imageVideoSeconds(voiceSec = 0) {
  */
 export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT_SECONDS, voicePath = '', width = 1080, height = 1920, subPath = '' }) {
   if (subPath && /[\\/:'\\,;[\]]/.test(subPath)) throw new Error('subtitle path must be a plain relative file name');
+  // No music that loads = silence under the voice: the video still has its voice.
   const audioIn = music.file
     ? ['-stream_loop', '-1', '-i', music.file]
-    : ['-f', 'lavfi', '-i', `aevalsrc=exprs='${music.expr}':s=44100:c=stereo`];
+    : music.expr
+      ? ['-f', 'lavfi', '-i', `aevalsrc=exprs='${music.expr}':s=44100:c=stereo`]
+      : ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo'];
   const voiceIn = voicePath ? ['-i', voicePath] : [];
   const musicChain = `aresample=44100,aformat=channel_layouts=stereo,${voicePath ? 'volume=0.25,' : ''}afade=t=in:d=1,afade=t=out:st=${seconds - 2}:d=2`;
   const audio = voicePath

@@ -31,7 +31,7 @@
  */
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
 import { navHtml, NAV_CSS } from '../utils/adminNav.js';
-import { MUSIC_TRACKS, musicJsExpr, MUSIC_PAGE_SITES } from '../utils/shortSpec.js';
+import { MUSIC_PAGE_SITES } from '../utils/shortSpec.js';
 import { folderMusic } from '../services/musicFolderService.js';
 import { FLOW_MANIFEST, hasFlow } from '../services/flowManifest.js';
 import { WIZARD_STEPS, completeness, stepFields } from '../services/videoWizardManifest.js';
@@ -1229,15 +1229,12 @@ function appSection(app, tenantId, configMap, key, extra = '') {
  * browser from the same formula ffmpeg uses (no server work, no egress);
  * "my own music" plays the link typed below it.
  */
-function musicPreviewButton(key) {
-  const tracks = Object.fromEntries(MUSIC_TRACKS.map((t) => [t.value, musicJsExpr(t.expr)]));
-  const k = JSON.stringify(String(key));
+function musicPreviewButton() {
   return ` <button type="button" class="btn" id="mprev" style="margin-left:6px" aria-label="Play the music">▶ Play</button>
 <span class="hint" id="mprev-st"></span>
 <script>(function(){
-  const TRACKS=${JSON.stringify(tracks).replace(/</g, '\\u003c')};
   const PAGE=${String(MUSIC_PAGE_SITES).replace(/</g, '\\u003c')};
-  let ctx=null,src=null,aud=null;
+  let src=null,aud=null;
   const btn=document.getElementById('mprev'),st=document.getElementById('mprev-st');
   function stop(){try{if(src)src.stop();}catch(e){}src=null;if(aud){aud.pause();aud=null;}btn.textContent='▶ Play';}
   let pi=0;
@@ -1264,16 +1261,8 @@ function musicPreviewButton(key) {
     aud=new Audio(fileLink(it.url));aud.onended=stop;aud.play().then(function(){btn.textContent='■ Stop';st.textContent=' 🟢'+tag+'playing.'+(all.length>1?' Stop, then Play again for the next one.':'');}).catch(function(e){st.textContent=' 🟡'+tag+'could not play: '+e.message;aud=null;});}
   btn.addEventListener('click',function(){
     if(src||aud){stop();return;}
-    const sel=document.querySelector('[name="set['+${k}+']"]');const v=sel?sel.value:'';
     st.textContent='';
-    if(v==='own'){playOwn();return;}
-    const body=TRACKS[v]||Object.values(TRACKS)[0];
-    const fn=new Function('t','mod','return '+body);const mod=function(a,b){return a-b*Math.floor(a/b);};
-    ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();
-    const rate=ctx.sampleRate,secs=10,buf=ctx.createBuffer(2,rate*secs,rate),L=buf.getChannelData(0),R=buf.getChannelData(1);
-    for(let i=0;i<L.length;i++){const t=i/rate;let x=fn(t,mod);x=Math.max(-1,Math.min(1,x));
-      const fade=Math.min(1,t/1,(secs-t)/2);L[i]=R[i]=x*fade;}
-    src=ctx.createBufferSource();src.buffer=buf;src.connect(ctx.destination);src.onended=stop;src.start();btn.textContent='■ Stop';
+    playOwn();
   });
 })();</script>`;
 }
@@ -1363,7 +1352,7 @@ function fieldRow(field, configMap) {
       })
       .join('');
     return `<div class="field"><label>${esc(field.label)}</label>
-      <select name="set[${esc(field.key)}]" class="pick">${opts}</select>${field.musicPreview ? musicPreviewButton(field.key) : ''}
+      <select name="set[${esc(field.key)}]" class="pick">${opts}</select>
       ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
   }
   if (field.type === 'model_select') {
@@ -1533,7 +1522,7 @@ function secretJsonSummary(raw) {
   if (field.type === 'json' || field.type === 'textarea') {
     // A field with a built-in default shows it pre-filled until it's changed.
     const rows = field.rows ? ` rows="${Number(field.rows)}"` : field.default ? ' rows="12"' : '';
-    return `<div class="field"><label>${esc(field.label)}</label>${field.musicList ? musicListEditor(field.key) : ''}
+    return `<div class="field"><label>${esc(field.label)}</label>${field.musicPreview ? `<div>${musicPreviewButton()}</div>` : ''}${field.musicList ? musicListEditor(field.key) : ''}
       <textarea name="set[${esc(field.key)}]"${rows} placeholder="${field.placeholder ? esc(field.placeholder) : ''}">${esc(has ? current : (field.default || ''))}</textarea>
       ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
   }

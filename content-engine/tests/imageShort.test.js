@@ -9,14 +9,15 @@ describe('music for the Short', () => {
     expect(MUSIC_OPTIONS.map((o) => o.value)).toEqual([...MUSIC_TRACKS.map((t) => t.value), 'own']);
   });
 
-  it('falls back to the default on a blank or unknown choice, or own with no link', () => {
-    const def = MUSIC_TRACKS.find((t) => t.value === DEFAULT_MUSIC).expr;
-    for (const m of [{}, { track: 'gone' }, { track: 'own' }, { track: 'own', url: 'not a link' }]) expect(pickMusic(m)).toEqual({ expr: def });
+  it('has no built-in track: with no usable link there is no music (voice only)', () => {
+    for (const m of [{}, { track: 'calm_pad' }, { track: 'own' }, { track: 'own', url: 'not a link' }]) expect(pickMusic(m)).toEqual({});
+    const args = imageShortArgs({ imagePath: 'p.png', outPath: 'o.mp4', music: {}, seconds: 10, voicePath: 'v.mp3' });
+    expect(args.join(' ')).toContain('anullsrc');
   });
 
-  it('uses your own file only when it is picked', () => {
+  it('uses your own file whatever the old choice was', () => {
     expect(pickMusic({ track: 'own', url: 'https://x/a.mp3' })).toEqual({ url: 'https://x/a.mp3' });
-    expect(pickMusic({ track: 'tanpura', url: 'https://x/a.mp3' }).expr).toBeTruthy();
+    expect(pickMusic({ track: 'tanpura', url: 'https://x/a.mp3' })).toEqual({ url: 'https://x/a.mp3' });
   });
 
   it('turns a Drive share link into its download link', () => {
@@ -211,14 +212,14 @@ describe('where image-post videos are made', () => {
 });
 
 describe('own music link', () => {
-  it('treats a YouTube or Spotify page as no link, so the default track plays', async () => {
+  it('treats a YouTube or Spotify page as no link, so it is skipped', async () => {
     const { musicLink, pickMusic, isMusicPage, notAudio, MUSIC_TRACKS } = await import('../src/utils/shortSpec.js');
     expect(isMusicPage('https://youtu.be/Pz0ERqxZXKQ?si=x')).toBe(true);
     expect(isMusicPage('https://www.youtube.com/watch?v=abc')).toBe(true);
     expect(isMusicPage('https://open.spotify.com/track/1')).toBe(true);
     expect(isMusicPage('https://drive.google.com/file/d/abcdefghijk/view')).toBe(false);
     expect(musicLink('https://youtu.be/Pz0ERqxZXKQ')).toBe('');
-    expect(pickMusic({ track: 'own', url: 'https://youtu.be/Pz0ERqxZXKQ' })).toEqual({ expr: MUSIC_TRACKS[0].expr });
+    expect(pickMusic({ track: 'own', url: 'https://youtu.be/Pz0ERqxZXKQ' })).toEqual({});
     expect(pickMusic({ track: 'own', url: 'https://x.com/a.mp3' })).toEqual({ url: 'https://x.com/a.mp3' });
     expect(notAudio('text/html; charset=utf-8')).toBe(true);
     expect(notAudio('audio/mpeg')).toBe(false);
