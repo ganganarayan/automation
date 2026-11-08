@@ -224,3 +224,13 @@ describe('own music link', () => {
     expect(notAudio('audio/mpeg')).toBe(false);
   });
 });
+
+describe('several music links', () => {
+  it('keeps the usable links, one per line, and picks one at random with the rest as backups', async () => {
+    const { musicLinks, pickMusic } = await import('../src/utils/shortSpec.js');
+    expect(musicLinks('https://youtu.be/x\nhttps://a.com/1.mp3\n\nhttps://a.com/1.mp3, https://a.com/2.mp3')).toEqual(['https://a.com/1.mp3', 'https://a.com/2.mp3']);
+    const three = 'https://a/1.mp3\nhttps://a/2.mp3\nhttps://a/3.mp3';
+    expect(pickMusic({ track: 'own', url: three }, () => 0.5)).toEqual({ url: 'https://a/2.mp3', urls: ['https://a/2.mp3', 'https://a/3.mp3', 'https://a/1.mp3'] });
+    expect(pickMusic({ track: 'own', url: three }, () => 0.99).url).toBe('https://a/3.mp3');
+  });
+});

@@ -21,17 +21,20 @@ import { buildSrt } from '../utils/stageSpec.js';
 async function musicFor(choice, dir, log) {
   const picked = pickMusic(choice);
   if (!picked.url) return picked;
-  try {
-    const res = await fetch(picked.url);
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    if (notAudio(res.headers.get('content-type'))) throw new Error('the link gave a web page, not a music file');
-    const file = join(dir, 'music');
-    await writeFile(file, Buffer.from(await res.arrayBuffer()));
-    return { file };
-  } catch (err) {
-    if (log) log.warn({ err: err.message }, 'own Short music unreadable, using the default track');
-    return pickMusic({});
+  for (const url of picked.urls || [picked.url]) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      if (notAudio(res.headers.get('content-type'))) throw new Error('the link gave a web page, not a music file');
+      const file = join(dir, 'music');
+      await writeFile(file, Buffer.from(await res.arrayBuffer()));
+      return { file };
+    } catch (err) {
+      if (log) log.warn({ err: err.message, url }, 'own Short music unreadable, trying the next');
+    }
   }
+  if (log) log.warn('no own music link worked, using the default track');
+  return pickMusic({});
 }
 
 /** Render the Short for this image; returns its public URL. Costs no AI. */

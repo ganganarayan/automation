@@ -82,10 +82,21 @@ export function musicLink(url) {
   return drive ? `https://drive.usercontent.google.com/download?id=${drive[1]}&export=download&confirm=t` : s;
 }
 
+/** Your music links, one per line (commas and spaces work too): the usable ones, no repeats. */
+export function musicLinks(text = '') {
+  return [...new Set(String(text || '').split(/[\s,]+/).map(musicLink).filter(Boolean))];
+}
+
 /** What to play: { url } for your own file, else { expr }. A bad choice falls back to the default. */
-export function pickMusic({ track = '', url = '' } = {}) {
-  const own = musicLink(url);
-  if (track === OWN_MUSIC && own) return { url: own };
+export function pickMusic({ track = '', url = '' } = {}, rand = Math.random) {
+  const own = musicLinks(url);
+  if (track === OWN_MUSIC && own.length === 1) return { url: own[0] };
+  if (track === OWN_MUSIC && own.length) {
+    // One of your links at random per video; the rest are tried in turn if it fails.
+    const start = Math.floor(rand() * own.length) % own.length;
+    const urls = [...own.slice(start), ...own.slice(0, start)];
+    return { url: urls[0], urls };
+  }
   const found = MUSIC_TRACKS.find((t) => t.value === track) || MUSIC_TRACKS[0];
   return { expr: found.expr };
 }
@@ -336,5 +347,5 @@ export default {
   SHORT_SECONDS, MUSIC_TRACKS, MUSIC_OPTIONS, DEFAULT_MUSIC, OWN_MUSIC, musicLink, pickMusic, shortTitle, imageShortArgs,
   IMAGE_VIDEO_SECONDS, IMAGE_VIDEO_MAX_SECONDS, VOICE_MAX_CHARS, VOICE_LEAD_SECONDS, VOICE_TAIL_SECONDS, IMAGE_VIDEO_OPTIONS, imageVideoMode, voiceText, imageVideoSeconds, imageVideoConfigs,
   IMAGE_VIDEO_SIZES, VIDEO_PLATFORM_SIZE, PRIMARY_SIZE, sizeFor, sizesNeeded, sizedPrompt, alignmentCues, evenCues,
-  VIDEO_RUNNER_OPTIONS, FAILSAFE_OPTIONS, videoRunner, otherRunner, failSafeOn, aspectCropFilter, musicJsExpr, isMusicPage, notAudio,
+  VIDEO_RUNNER_OPTIONS, FAILSAFE_OPTIONS, videoRunner, otherRunner, failSafeOn, aspectCropFilter, musicJsExpr, isMusicPage, notAudio, musicLinks,
 };

@@ -175,16 +175,21 @@ async function imageVideo(job) {
   let music = job.music || {};
   if (music.url) {
     // A link that fails, or gives a web page, falls back to the default track: the post still goes.
-    try {
-      const res = await fetch(music.url);
-      if (!res.ok) throw new Error(`status ${res.status}`);
-      if (notAudio(res.headers.get('content-type'))) throw new Error('the link gave a web page, not a music file');
-      await writeFile('music', Buffer.from(await res.arrayBuffer()));
-      music = { file: 'music' };
-    } catch (err) {
-      console.log(`Own music unreadable (${err.message}), using the default track`);
-      music = pickMusic({});
+    let got = null;
+    for (const url of music.urls || [music.url]) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        if (notAudio(res.headers.get('content-type'))) throw new Error('the link gave a web page, not a music file');
+        await writeFile('music', Buffer.from(await res.arrayBuffer()));
+        got = { file: 'music' };
+        break;
+      } catch (err) {
+        console.log(`Own music link unreadable (${err.message}), trying the next`);
+      }
     }
+    if (!got) console.log('No own music link worked, using the default track');
+    music = got || pickMusic({});
   }
   await progress({ phase: 'encoding', pct: 40 });
   let subtitleError = '';

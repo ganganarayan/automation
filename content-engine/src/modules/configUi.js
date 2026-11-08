@@ -1228,16 +1228,19 @@ function musicPreviewButton(key) {
   let ctx=null,src=null,aud=null;
   const btn=document.getElementById('mprev'),st=document.getElementById('mprev-st');
   function stop(){try{if(src)src.stop();}catch(e){}src=null;if(aud){aud.pause();aud=null;}btn.textContent='▶ Play';}
-  function ownLink(){const el=document.querySelector('[name="set[short_music_url]"]');let s=(el&&el.value||'').trim();
-    const m=/google\\.com/i.test(s)&&s.match(/(?:\\/d\\/|[?&]id=)([\\w-]{10,})/);
+  let pi=0;
+  function fileLink(s){const m=/google\\.com/i.test(s)&&s.match(/(?:\\/d\\/|[?&]id=)([\\w-]{10,})/);
     return m?'https://drive.usercontent.google.com/download?id='+m[1]+'&export=download&confirm=t':s;}
+  function ownLinks(){const el=document.querySelector('[name="set[short_music_url]"]');
+    return (el&&el.value||'').split(/[\\s,]+/).filter(function(s){return /^https?:/i.test(s);});}
   btn.addEventListener('click',function(){
     if(src||aud){stop();return;}
     const sel=document.querySelector('[name="set['+${k}+']"]');const v=sel?sel.value:'';
     st.textContent='';
-    if(v==='own'){const u=ownLink();if(!/^https?:/i.test(u)){st.textContent=' 🟡 Paste your music link below first.';return;}
-      if(PAGE.test(u)){st.textContent=' 🟡 That is a web page, not a music file, so videos use the built-in Calm pad instead. Upload an mp3 to Google Drive and paste its share link.';return;}
-      aud=new Audio(u);aud.onended=stop;aud.play().then(function(){btn.textContent='■ Stop';}).catch(function(e){st.textContent=' 🟡 Could not play that link: '+e.message;aud=null;});return;}
+    if(v==='own'){const all=ownLinks();if(!all.length){st.textContent=' 🟡 Paste your music links below first.';return;}
+      const i=pi%all.length;pi++;const raw=all[i],tag=all.length>1?' Link '+(i+1)+' of '+all.length+': ':' ';
+      if(PAGE.test(raw)){st.textContent=' 🟡'+tag+'a web page, not a music file, so it is skipped. Upload an mp3 to Google Drive and paste its share link.';return;}
+      aud=new Audio(fileLink(raw));aud.onended=stop;aud.play().then(function(){btn.textContent='■ Stop';st.textContent=all.length>1?' 🟢'+tag+'playing. Stop, then Play again for the next one.':'';}).catch(function(e){st.textContent=' 🟡'+tag+'could not play: '+e.message;aud=null;});return;}
     const body=TRACKS[v]||Object.values(TRACKS)[0];
     const fn=new Function('t','mod','return '+body);const mod=function(a,b){return a-b*Math.floor(a/b);};
     ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();
@@ -1470,7 +1473,7 @@ function secretJsonSummary(raw) {
   }
   if (field.type === 'json' || field.type === 'textarea') {
     // A field with a built-in default shows it pre-filled until it's changed.
-    const rows = field.default ? ' rows="12"' : '';
+    const rows = field.rows ? ` rows="${Number(field.rows)}"` : field.default ? ' rows="12"' : '';
     return `<div class="field"><label>${esc(field.label)}</label>
       <textarea name="set[${esc(field.key)}]"${rows} placeholder="${field.placeholder ? esc(field.placeholder) : ''}">${esc(has ? current : (field.default || ''))}</textarea>
       ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
