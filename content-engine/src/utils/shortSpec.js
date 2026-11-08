@@ -430,7 +430,19 @@ export function subtitleFilters({ width, height, subPath = '', marginV = null, s
   return titlePath ? `${top},subtitles=${titlePath}:${style(tall ? 15 : 21, 2, bottom)}` : top;
 }
 
-export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT_SECONDS, voicePath = '', width = 1080, height = 1920, subPath = '', marginV = null, subTop = false, titlePath = '' }) {
+/** Background music under the voice: each funnel sets it (funnel_config music_volume), 25% at most. */
+export const MUSIC_VOLUME_MAX = 25;
+export const MUSIC_VOLUME_DEFAULT = 20;
+
+/** A funnel's music volume as a % (0..25): blank or unreadable = the default, over the cap = the cap. */
+export function musicVolumePct(value) {
+  const s = String(value ?? '').trim();
+  const n = Number(s);
+  if (!s || !Number.isFinite(n)) return MUSIC_VOLUME_DEFAULT;
+  return Math.max(0, Math.min(MUSIC_VOLUME_MAX, Math.round(n)));
+}
+
+export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT_SECONDS, voicePath = '', width = 1080, height = 1920, subPath = '', marginV = null, subTop = false, titlePath = '', musicVolume = MUSIC_VOLUME_DEFAULT }) {
   if (titlePath && /[\\/:'\\,;[\]]/.test(titlePath)) throw new Error('title path must be a plain relative file name');
   if (subPath && /[\\/:'\\,;[\]]/.test(subPath)) throw new Error('subtitle path must be a plain relative file name');
   // No music that loads = silence under the voice: the video still has its voice.
@@ -440,8 +452,8 @@ export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT
       ? ['-f', 'lavfi', '-i', `aevalsrc=exprs='${music.expr}':s=44100:c=stereo`]
       : ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo'];
   const voiceIn = voicePath ? ['-i', voicePath] : [];
-  // Music sits at 20% under the voice (the owner's ceiling); with no voice it plays at full level.
-  const musicChain = `aresample=44100,aformat=channel_layouts=stereo,${voicePath ? 'volume=0.2,' : ''}afade=t=in:d=1,afade=t=out:st=${seconds - 2}:d=2`;
+  // Music under the voice at the funnel's level (25% at most); with no voice it plays at full level.
+  const musicChain = `aresample=44100,aformat=channel_layouts=stereo,${voicePath ? `volume=${(musicVolumePct(musicVolume) / 100).toFixed(2)},` : ''}afade=t=in:d=1,afade=t=out:st=${seconds - 2}:d=2`;
   const audio = voicePath
     ? [
       `[1:a]${musicChain}[m]`,

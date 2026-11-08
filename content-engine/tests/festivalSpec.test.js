@@ -126,3 +126,21 @@ describe('festival music choice', async () => {
     expect(m.credits).toEqual({ 'https://a.example/2.mp3': 'Two' });
   });
 });
+
+describe('music volume per funnel', async () => {
+  const { musicVolumePct, imageShortArgs } = await import('../src/utils/shortSpec.js');
+  const filter = (v) => imageShortArgs({ imagePath: 'a.png', outPath: 'o.mp4', voicePath: 'v.mp3', music: { file: 'm.mp3' }, musicVolume: v }).join(' ');
+  it('defaults to 20% and never goes over 25%', () => {
+    expect(musicVolumePct('')).toBe(20);
+    expect(musicVolumePct(undefined)).toBe(20);
+    expect(musicVolumePct('80')).toBe(25);
+    expect(musicVolumePct('-5')).toBe(0);
+    expect(musicVolumePct('10')).toBe(10);
+  });
+  it('reaches ffmpeg as the funnel set it', () => {
+    expect(filter('10')).toContain('volume=0.10,');
+    expect(filter('0')).toContain('volume=0.00,');
+    expect(filter(undefined)).toContain('volume=0.20,');
+    expect(filter('60')).toContain('volume=0.25,');
+  });
+});

@@ -99,7 +99,7 @@ export async function makeVoice({ tts, text = '', log }) {
  * a finished file somewhere public and returns its URL.
  * Returns { videos: size -> URL, seconds, subtitled, subtitleError }.
  */
-export async function renderVideos({ images = {}, sizes = [PRIMARY_SIZE], voice, music = {}, upload, subMargins = {}, subTop = false, title = '', log }) {
+export async function renderVideos({ images = {}, sizes = [PRIMARY_SIZE], voice, music = {}, upload, subMargins = {}, subTop = false, title = '', musicVolume = undefined, log }) {
   if (!images[PRIMARY_SIZE]) throw new Error('no image to make the video from');
   if (!voice || !voice.buffer) throw new Error('no voice to put on the video');
   const dir = await mkdtemp(join(tmpdir(), 'imgvid-'));
@@ -130,7 +130,7 @@ export async function renderVideos({ images = {}, sizes = [PRIMARY_SIZE], voice,
       if (!local[src]) local[src] = await localPng(src, join(dir, `in-${Object.keys(local).length}.png`));
       const outPath = join(dir, `video-${size}.mp4`);
       const args = (withSubs) => imageShortArgs({
-        imagePath: local[src], outPath, music: track, seconds, voicePath, width: spec.w, height: spec.h, subPath: withSubs ? subPath : '', marginV: (subMargins || {})[size] || null, subTop, titlePath: withSubs ? titlePath : '',
+        imagePath: local[src], outPath, music: track, seconds, voicePath, width: spec.w, height: spec.h, subPath: withSubs ? subPath : '', marginV: (subMargins || {})[size] || null, subTop, titlePath: withSubs ? titlePath : '', musicVolume,
       });
       try {
         await ffmpeg.imageToShort({ args: args(!!subPath), cwd: dir });
@@ -154,11 +154,11 @@ export async function renderVideos({ images = {}, sizes = [PRIMARY_SIZE], voice,
  * Voice + videos in one go (an approval prepared before videos were made
  * ahead of it). Returns { videos, url, seconds, chars, voiced, subtitled, subtitleError }.
  */
-export async function makeVideo({ imageUrl = '', images = {}, sizes = [PRIMARY_SIZE], publish, music = {}, text = '', tts = null, log }) {
+export async function makeVideo({ imageUrl = '', images = {}, sizes = [PRIMARY_SIZE], publish, music = {}, text = '', tts = null, musicVolume = undefined, log }) {
   const pics = { ...images };
   if (!pics[PRIMARY_SIZE] && imageUrl) pics[PRIMARY_SIZE] = imageUrl;
   const voice = await makeVoice({ tts, text, log });
-  const made = await renderVideos({ images: pics, sizes, voice, music, upload: (path) => publish.uploadFile(path, 'video/mp4'), log });
+  const made = await renderVideos({ images: pics, sizes, voice, music, upload: (path) => publish.uploadFile(path, 'video/mp4'), musicVolume, log });
   return { ...made, url: made.videos[PRIMARY_SIZE], chars: voice.chars, voiced: true };
 }
 

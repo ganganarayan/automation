@@ -43,7 +43,7 @@ import { extractRow, composePrompt, composeCaptions, buildPlatformConfigs } from
 import { patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import * as imageShort from './imageShortService.js';
 import {
-  shortTitle, photoSubMargins, musicChoice, imageVideoMode, imageVideoConfigs, IMAGE_VIDEO_SIZES, sizedPrompt, sizesNeeded, videoRunner, otherRunner, failSafeOn, withMusicCredit,
+  shortTitle, photoSubMargins, musicChoice, musicVolumePct, imageVideoMode, imageVideoConfigs, IMAGE_VIDEO_SIZES, sizedPrompt, sizesNeeded, videoRunner, otherRunner, failSafeOn, withMusicCredit,
 } from '../utils/shortSpec.js';
 import * as imageVideoJob from './imageVideoJobService.js';
 import { settings } from '../settings/index.js';
@@ -208,6 +208,7 @@ async function startOnGithub({ instanceId, f, providers }) {
     ...(given ? { imageUrls: Object.fromEntries(sizes.map((s) => [s, img.festival.imageUrl])), subMargins: photoSubMargins(img.festival), subTop: true, title: img.festival.title || '', musicSetting: musicChoice(providers.resolved.shortMusic, img.festival.music, img.festival.musicCredit) } : {}),
     text: script.captionFull || script.captionShort || '',
     voiceId: (img.festival && img.festival.voiceId) || cfg.voice_id || '',
+    musicVolume: musicVolumePct(cfg.music_volume),
     name: `${poster.slug(f.name)}-${poster.slug((img.sheet || {}).key || (given ? 'festival' : ''))}-r${inst.round || 1}`,
   };
   await imageVideoJob.start({ instance: inst, providers, job, baseUrl: settings.app.publicBaseUrl });
@@ -306,8 +307,9 @@ async function makeOnRailway(ctx) {
     chars = voice.chars;
     const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
     const images = Object.fromEntries(Object.keys(IMAGE_VIDEO_SIZES).map((s) => [s, sized[s] || sized.feed]));
+    const volCfg = await funnels.getConfig(f.id).catch(() => ({}));
     const made2 = await imageShort.renderVideos({
-      images, sizes: Object.keys(IMAGE_VIDEO_SIZES), voice, music: providers.resolved.shortMusic, upload: (path) => publish.uploadFile(path, 'video/mp4'), ...(img.festival ? { music: musicChoice(providers.resolved.shortMusic, img.festival.music, img.festival.musicCredit) } : {}), subMargins: photoSubMargins(img.festival), subTop: !!img.festival, title: (img.festival || {}).title || '', log,
+      images, sizes: Object.keys(IMAGE_VIDEO_SIZES), voice, music: providers.resolved.shortMusic, upload: (path) => publish.uploadFile(path, 'video/mp4'), ...(img.festival ? { music: musicChoice(providers.resolved.shortMusic, img.festival.music, img.festival.musicCredit) } : {}), subMargins: photoSubMargins(img.festival), subTop: !!img.festival, title: (img.festival || {}).title || '', musicVolume: musicVolumePct(volCfg.music_volume), log,
     });
     render = { runner: 'railway', videos: made2.videos, seconds: made2.seconds, subtitled: made2.subtitled, ...(made2.subtitleError ? { subtitleError: made2.subtitleError } : {}), ...(made2.musicCredit ? { musicCredit: made2.musicCredit } : {}) };
   }
@@ -754,7 +756,8 @@ async function videoFor({ row, f, providers, publish, images, sizes, text, log }
   const voice = await voiceSetup({ funnelId: row.funnel_id, providers, log });
   if (voice.error) return { error: voice.error };
   try {
-    const made = await imageShort.makeVideo({ images, sizes, publish, music: providers.resolved.shortMusic, text, tts: voice.tts, requireVoice: true, log });
+    const volCfg = await funnels.getConfig(row.funnel_id).catch(() => ({}));
+    const made = await imageShort.makeVideo({ images, sizes, publish, music: providers.resolved.shortMusic, text, tts: voice.tts, requireVoice: true, musicVolume: musicVolumePct(volCfg.music_volume), log });
     log.info({ seconds: made.seconds, subtitled: made.subtitled, sizes: Object.keys(made.videos) }, 'image post rendered as voiced videos');
     return made;
   } catch (err) {

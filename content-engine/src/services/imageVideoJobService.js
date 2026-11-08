@@ -138,6 +138,8 @@ export async function hookJob({ ticket }) {
     subMargins: job.subMargins || {},
     // Festival: spoken lines at the top, this title at the bottom.
     subTop: !!job.subTop,
+    // The funnel's music level under the voice (%).
+    musicVolume: job.musicVolume,
     title: job.title || '',
     imageModel: (r.openai || {}).imageModel || 'gpt-image-1',
     openaiKey: (r.openai || {}).apiKey || '',

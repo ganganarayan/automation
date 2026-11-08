@@ -215,7 +215,7 @@ async function imageVideo(job) {
   let subtitleError = '';
   for (const size of job.sizes) {
     const spec = job.specs[size];
-    const args = (withSubs) => imageShortArgs({ imagePath: pics[size], outPath: `video-${size}.mp4`, music, seconds, voicePath: 'voice.mp3', width: spec.w, height: spec.h, subPath: withSubs ? subPath : '', marginV: (job.subMargins || {})[size] || null, subTop: !!job.subTop, titlePath: withSubs ? titlePath : '' });
+    const args = (withSubs) => imageShortArgs({ imagePath: pics[size], outPath: `video-${size}.mp4`, music, seconds, voicePath: 'voice.mp3', width: spec.w, height: spec.h, subPath: withSubs ? subPath : '', marginV: (job.subMargins || {})[size] || null, subTop: !!job.subTop, titlePath: withSubs ? titlePath : '', musicVolume: job.musicVolume });
     try {
       await run('ffmpeg', args(!!subPath));
     } catch (err) {

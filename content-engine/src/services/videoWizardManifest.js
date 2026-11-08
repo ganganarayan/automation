@@ -149,6 +149,11 @@ export const WIZARD_STEPS = [
         ],
       },
       { key: 'voice_id', label: 'Voice', type: 'voice_select', placeholder: 'the cloned voice to use' },
+      {
+        // Every video this funnel makes (image posts, festival posts) puts its music at this level under the voice.
+        key: 'music_volume', label: 'Background music volume (under the voice, 25% at most)', type: 'select', default: '20',
+        options: ['25', '20', '15', '10', '5', '0'].map((v) => ({ value: v, label: v === '0' ? '0% (no music)' : `${v}%` })),
+      },
       { type: 'heading', label: 'Final reel' },
       {
         key: 'aspect', label: 'Aspect ratio', type: 'select', default: '9:16',
