@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../src/services/festivalService.js', () => ({
   MAX_BYTES: 15 * 1024 * 1024,
   MAX_COPY: 2000,
+  musicList: vi.fn(async () => [{ url: 'https://drive.google.com/uc?export=download&id=abc', credit: 'Diya by Asha, CC BY' }]),
   funnelReadiness: vi.fn(async () => [
     { id: 1, name: 'HNI Parents', active: true, problem: '' },
     { id: 2, name: 'No Voice', active: true, problem: 'no voice chosen for this funnel' },
@@ -43,6 +44,8 @@ describe('festival page', () => {
     expect(html).toContain('🔴 No Voice');
     expect(html).toContain('Approve all 1 waiting');
     expect(html).toContain('Light &amp; joy');
+    expect(html).toContain('🔇 None: voice only');
+    expect(html).toContain('🎵 Diya by Asha, CC BY');
   });
   it('ships a browser script that parses', async () => {
     const { html } = await renderPage();

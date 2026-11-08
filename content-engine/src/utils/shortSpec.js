@@ -122,6 +122,18 @@ export function musicEntries(text = '') {
   return [...out].map(([url, credit]) => ({ url, credit }));
 }
 
+/**
+ * A festival post's music, as a shortMusic setting: 'random' (or blank) = your
+ * music as set, 'none' = the voice only, else that one link with its credit.
+ */
+export function musicChoice(shortMusic = {}, choice = '', credit = '') {
+  const c = String(choice || '').trim();
+  if (!c || c === 'random') return shortMusic || {};
+  if (c === 'none') return { ...(shortMusic || {}), url: '' };
+  const cr = String(credit || '').replace(/[|\r\n]+/g, ' ').trim();
+  return { ...(shortMusic || {}), url: cr ? `${c} | ${cr}` : c };
+}
+
 /** Your usable music links. */
 export function musicLinks(text = '') {
   return musicEntries(text).map((e) => e.url);

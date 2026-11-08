@@ -49,12 +49,13 @@ export function register(ctx) {
   router.get('/admin/festival', async (req, res, next) => {
     try {
       if (!(await guardHtml(req, res))) return;
-      const [session, funnels, batches] = await Promise.all([
+      const [session, funnels, batches, music] = await Promise.all([
         currentSession(req),
         festival.funnelReadiness(tenant(req)).catch(() => []),
         festival.batches(tenant(req)).catch(() => []),
+        festival.musicList(tenant(req)).catch(() => []),
       ]);
-      res.set('Cache-Control', 'no-store').type('html').send(page({ session, funnels, batches }));
+      res.set('Cache-Control', 'no-store').type('html').send(page({ session, funnels, batches, music }));
     } catch (err) {
       next(err);
     }
@@ -186,7 +187,17 @@ function funnelsHtml(funnels = []) {
   }).join('');
 }
 
-function page({ session, funnels, batches }) {
+function musicHtml(music = []) {
+  const name = (m, i) => m.credit || decodeURIComponent(String(m.url).split(/[/?=]/).filter(Boolean).pop() || `Track ${i + 1}`);
+  return `<select id="music" onchange="musicPicked()" style="max-width:100%;background:#0b0b12;color:#e8e8ef;border:1px solid #2a2a44;border-radius:8px;padding:.45rem">
+    <option value="random">🎲 Random from your music${music.length ? ` (${music.length} tracks)` : ' (none set: voice only)'}</option>
+    <option value="none">🔇 None: voice only</option>
+    ${music.map((m, i) => `<option value="${esc(m.url)}" data-credit="${esc(m.credit || '')}">🎵 ${esc(name(m, i))}</option>`).join('')}
+  </select>
+  <button class="act" type="button" id="mplay" onclick="playMusic()" style="display:none">▶ Play</button>`;
+}
+
+function page({ session, funnels, batches, music = [] }) {
   const minAt = nowIst().plus({ minutes: 15 }).toFormat("yyyy-MM-dd'T'HH:mm");
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Festival post, automation</title>
@@ -253,6 +264,8 @@ ${NAV_CSS}
     <label class="blk">3. Copy: the caption on every channel, read aloud, its lines shown at the top of the video</label>
     <textarea id="copy" maxlength="${festival.MAX_COPY}" placeholder="Wishing you and your family a bright and joyful Diwali..." oninput="count();draw()" onkeyup="draw()" onclick="draw()"></textarea>
     <div class="hint" id="cnt">0 characters. X gets the first 280, cut at a word.</div>
+    <label class="blk">Background music (under the voice; its credit goes last in the caption)</label>
+    ${musicHtml(music)}
     <label class="blk">4. Funnels</label>
     <div class="row"><button class="act" type="button" onclick="tick(true)">Tick all</button><button class="act" type="button" onclick="tick(false)">Untick all</button></div>
     ${funnelsHtml(funnels)}
@@ -381,7 +394,7 @@ async function go(){
       localStorage.setItem(KEY, JSON.stringify(meSaved));
     }
     msg('🟡 Starting the videos...');
-    const r=await post('${BASE}',{title:$('title').value.trim(),copy,imageUrl:pic.url,driveId:pic.driveId,photo:pic.photoTop?{aspect:pic.aspect,photoTop:pic.photoTop}:null,funnelIds,postAt:at,autoPost:$('auto').checked});
+    const r=await post('${BASE}',{title:$('title').value.trim(),copy,imageUrl:pic.url,driveId:pic.driveId,photo:pic.photoTop?{aspect:pic.aspect,photoTop:pic.photoTop}:null,music:$('music').value,musicCredit:($('music').selectedOptions[0]||{}).dataset?.credit||'',funnelIds,postAt:at,autoPost:$('auto').checked});
     if(!r.ok) throw new Error(r.error||'could not start');
     let t='🟢 Making the video for: '+(r.started.join(', ')||'none')+'. Each takes a few minutes; this list updates by itself.';
     if(r.skipped.length) t+='\\n🔴 Skipped: '+r.skipped.map(s=>s.name+' ('+s.reason+')').join('; ');
@@ -398,6 +411,10 @@ async function approveAll(batchId){
   const r=await post('${BASE}/approve-all',{batchId});
   if(!r.ok) alert(r.error||'failed'); else msg('🟢 Approved '+r.approved+'.'); refresh();
 }
+let audio=null;
+function musicPicked(){ if(audio){ audio.pause(); audio=null; } const v=$('music').value; $('mplay').style.display=/^https:/.test(v)?'inline-flex':'none'; $('mplay').textContent='▶ Play'; }
+function playMusic(){ if(audio){ audio.pause(); audio=null; $('mplay').textContent='▶ Play'; return; }
+  audio=new Audio($('music').value); audio.play().then(()=>{ $('mplay').textContent='■ Stop'; }).catch(()=>{ audio=null; msg('🟡 This track would not play in the browser (the video may still use it, or the next one is tried).'); }); }
 let timer=null, waitFor=0;
 async function refresh(){
   clearTimeout(timer);

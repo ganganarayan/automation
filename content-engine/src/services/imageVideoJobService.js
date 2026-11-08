@@ -145,7 +145,8 @@ export async function hookJob({ ticket }) {
     voiceId: job.voiceId || '',
     voiceModel: 'eleven_multilingual_v2',
     elevenlabsKey: ((r.tts || {}).elevenlabsApiKey) || '',
-    music: pickMusic(await expandMusic(r.shortMusic || {})),
+    // A festival post may pick its own track, or none (job.musicSetting).
+    music: pickMusic(await expandMusic(job.musicSetting || r.shortMusic || {})),
     accessToken: token,
     folderId,
     name: job.name || `image post ${String(p.d).slice(0, 8)}`,

@@ -109,3 +109,20 @@ describe('festival text placement in the video', async () => {
     expect(() => imageShortArgs({ imagePath: 'a.png', outPath: 'o.mp4', subPath: 'subs.srt', titlePath: "x'y.srt", voicePath: 'v.mp3' })).toThrow();
   });
 });
+
+describe('festival music choice', async () => {
+  const { musicChoice, pickMusic } = await import('../src/utils/shortSpec.js');
+  const set = { url: 'https://a.example/1.mp3 | One\nhttps://a.example/2.mp3 | Two' };
+  it('random keeps your music as set', () => {
+    expect(musicChoice(set, 'random')).toEqual(set);
+    expect(musicChoice(set, '')).toEqual(set);
+  });
+  it('none is the voice only', () => {
+    expect(pickMusic(musicChoice(set, 'none'))).toEqual({});
+  });
+  it('one track plays with its own credit', () => {
+    const m = pickMusic(musicChoice(set, 'https://a.example/2.mp3', 'Two'));
+    expect(m.url).toBe('https://a.example/2.mp3');
+    expect(m.credits).toEqual({ 'https://a.example/2.mp3': 'Two' });
+  });
+});
