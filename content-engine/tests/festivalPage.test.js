@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../src/services/festivalService.js', () => ({
   MAX_BYTES: 15 * 1024 * 1024,
   MAX_COPY: 2000,
+  start: vi.fn(async () => ({ batchId: 'b', started: ['Gita'], skipped: [] })),
   voiceList: vi.fn(async () => [{ voice_id: 'v1abcdefgh', name: 'Ann', category: 'cloned', preview_url: 'https://x/p.mp3' }]),
   musicList: vi.fn(async () => [{ url: 'https://drive.google.com/uc?export=download&id=abc', credit: 'Diya by Asha, CC BY' }]),
   funnelReadiness: vi.fn(async () => [
@@ -57,5 +58,20 @@ describe('festival page', () => {
     const { html } = await renderPage();
     const script = html.slice(html.indexOf('<script>') + 8, html.lastIndexOf('</script>'));
     expect(() => new Function(script)).not.toThrow();
+  });
+});
+
+describe('starting a festival post', () => {
+  it('passes the music and voice choices through to the service', async () => {
+    const svc = await import('../src/services/festivalService.js');
+    const { routes } = await renderPage();
+    let out = null;
+    const res = { status: () => res, json: (j) => { out = j; } };
+    await routes['POST /admin/festival']({ tenantId: 'default', body: {
+      title: 'Happy Diwali', copy: 'Hi', imageUrl: 'https://x/a.png', funnelIds: ['1'], autoPost: false,
+      music: 'none', musicCredit: '', voiceId: 'v1abcdefgh',
+    } }, res);
+    expect(out.ok).toBe(true);
+    expect(svc.start).toHaveBeenCalledWith(expect.objectContaining({ music: 'none', voiceId: 'v1abcdefgh', autoPost: false }));
   });
 });

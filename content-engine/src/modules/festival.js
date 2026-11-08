@@ -111,6 +111,7 @@ export function register(ctx) {
       const out = await festival.start({
         tenantId: tenant(req), title: b.title, copy: b.copy, imageUrl: b.imageUrl, driveId: b.driveId,
         funnelIds: b.funnelIds, postAt, autoPost: b.autoPost !== false, photo: b.photo || null,
+        music: b.music, musicCredit: b.musicCredit, voiceId: b.voiceId,
       });
       res.json({ ok: true, ...out });
     } catch (err) {
