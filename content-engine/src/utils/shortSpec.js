@@ -69,6 +69,26 @@ export function isMusicPage(url) {
   return MUSIC_PAGE_SITES.test(String(url || '').trim());
 }
 
+/** A Drive folder link: its files are read by musicFolderService before a pick. */
+export function isMusicFolder(url) {
+  return /^https?:\/\/drive\.google\.com\/.*\/folders\/[\w-]{10,}/i.test(String(url || '').trim());
+}
+
+const AUDIO_EXT = /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac)$/i;
+
+/**
+ * The audio files of a listed folder, each with the id of the .txt that has
+ * the same name (its credit), A to Z: [{ id, name, textId }].
+ */
+export function musicFolderPairs(files = []) {
+  const base = (n) => String(n || '').replace(/\.[^.]+$/, '').trim().toLowerCase();
+  const texts = new Map(files.filter((f) => /\.txt$/i.test(f.name || '')).map((f) => [base(f.name), f.id]));
+  return files
+    .filter((f) => AUDIO_EXT.test(f.name || '') || /^audio\//i.test(f.mimeType || ''))
+    .map((f) => ({ id: f.id, name: f.name, textId: texts.get(base(f.name)) || '' }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 /** A web page came back instead of a music file. */
 export function notAudio(contentType = '') {
   return /text\/html|application\/json/i.test(String(contentType));
@@ -77,7 +97,7 @@ export function notAudio(contentType = '') {
 /** A public link to the music: a Drive share link becomes its download link. A music site's page gives '' so the default track plays. */
 export function musicLink(url) {
   const s = String(url || '').trim();
-  if (!/^https?:\/\//i.test(s) || isMusicPage(s)) return '';
+  if (!/^https?:\/\//i.test(s) || isMusicPage(s) || isMusicFolder(s)) return '';
   const drive = /google\.com/i.test(s) && s.match(DRIVE_ID);
   return drive ? `https://drive.usercontent.google.com/download?id=${drive[1]}&export=download&confirm=t` : s;
 }
@@ -382,5 +402,5 @@ export default {
   SHORT_SECONDS, MUSIC_TRACKS, MUSIC_OPTIONS, DEFAULT_MUSIC, OWN_MUSIC, musicLink, pickMusic, shortTitle, imageShortArgs,
   IMAGE_VIDEO_SECONDS, IMAGE_VIDEO_MAX_SECONDS, VOICE_MAX_CHARS, VOICE_LEAD_SECONDS, VOICE_TAIL_SECONDS, IMAGE_VIDEO_OPTIONS, imageVideoMode, voiceText, imageVideoSeconds, imageVideoConfigs,
   IMAGE_VIDEO_SIZES, VIDEO_PLATFORM_SIZE, PRIMARY_SIZE, sizeFor, sizesNeeded, sizedPrompt, alignmentCues, evenCues,
-  VIDEO_RUNNER_OPTIONS, FAILSAFE_OPTIONS, videoRunner, otherRunner, failSafeOn, aspectCropFilter, musicJsExpr, isMusicPage, notAudio, musicLinks, musicEntries, withMusicCredit,
+  VIDEO_RUNNER_OPTIONS, FAILSAFE_OPTIONS, videoRunner, otherRunner, failSafeOn, aspectCropFilter, musicJsExpr, isMusicPage, notAudio, musicLinks, musicEntries, withMusicCredit, isMusicFolder, musicFolderPairs,
 };

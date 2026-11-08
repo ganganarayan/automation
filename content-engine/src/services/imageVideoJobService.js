@@ -32,6 +32,7 @@ import { IMAGE_VIDEO_SIZES, pickMusic } from '../utils/shortSpec.js';
 import { imageSpec } from '../utils/imageGateSpec.js';
 import { HookError } from './readyPostService.js';
 import { buildProviders } from './providerFactory.js';
+import { expandMusic } from './musicFolderService.js';
 import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'imageVideoJob' });
@@ -136,7 +137,7 @@ export async function hookJob({ ticket }) {
     voiceId: job.voiceId || '',
     voiceModel: 'eleven_multilingual_v2',
     elevenlabsKey: ((r.tts || {}).elevenlabsApiKey) || '',
-    music: pickMusic(r.shortMusic || {}),
+    music: pickMusic(await expandMusic(r.shortMusic || {})),
     accessToken: token,
     folderId,
     name: job.name || `image post ${String(p.d).slice(0, 8)}`,

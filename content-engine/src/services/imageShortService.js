@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { createFfmpegProvider } from '../providers/ffmpegProvider.js';
+import { expandMusic } from './musicFolderService.js';
 import {
   imageShortArgs, pickMusic, notAudio, voiceText, imageVideoSeconds, alignmentCues, evenCues, IMAGE_VIDEO_SIZES, PRIMARY_SIZE,
 } from '../utils/shortSpec.js';
@@ -19,7 +20,7 @@ import { buildSrt } from '../utils/stageSpec.js';
 
 /** Your own music, on disk so ffmpeg can loop it. A link that fails falls back to the default track. */
 async function musicFor(choice, dir, log) {
-  const picked = pickMusic(choice);
+  const picked = pickMusic(await expandMusic(choice));
   if (!picked.url) return picked;
   for (const url of picked.urls || [picked.url]) {
     try {

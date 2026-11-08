@@ -253,3 +253,23 @@ describe('music credits', () => {
     expect(withMusicCredit('x'.repeat(275), 'Song A', 280)).toBe('x'.repeat(275));
   });
 });
+
+describe('music folder', () => {
+  it('pairs each audio file with the .txt of the same name, and a folder link is never played as a file', async () => {
+    const { musicFolderPairs, isMusicFolder, musicLinks } = await import('../src/utils/shortSpec.js');
+    const files = [
+      { id: 'b1', name: 'Rain.mp3', mimeType: 'audio/mpeg' },
+      { id: 'b2', name: 'rain.txt', mimeType: 'text/plain' },
+      { id: 'a1', name: 'Calm Sea.m4a', mimeType: '' },
+      { id: 'x1', name: 'cover.jpg', mimeType: 'image/jpeg' },
+    ];
+    expect(musicFolderPairs(files)).toEqual([
+      { id: 'a1', name: 'Calm Sea.m4a', textId: '' },
+      { id: 'b1', name: 'Rain.mp3', textId: 'b2' },
+    ]);
+    const folder = 'https://drive.google.com/drive/folders/1AbCdEfGhIjKlMn?usp=sharing';
+    expect(isMusicFolder(folder)).toBe(true);
+    expect(isMusicFolder('https://drive.google.com/file/d/abcdefghijk/view')).toBe(false);
+    expect(musicLinks(`${folder}\nhttps://a/1.mp3`)).toEqual(['https://a/1.mp3']);
+  });
+});

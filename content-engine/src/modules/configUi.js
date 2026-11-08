@@ -32,6 +32,7 @@
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
 import { navHtml, NAV_CSS } from '../utils/adminNav.js';
 import { MUSIC_TRACKS, musicJsExpr, MUSIC_PAGE_SITES } from '../utils/shortSpec.js';
+import { folderMusic } from '../services/musicFolderService.js';
 import { FLOW_MANIFEST, hasFlow } from '../services/flowManifest.js';
 import { WIZARD_STEPS, completeness, stepFields } from '../services/videoWizardManifest.js';
 import * as imageGateService from '../services/imageGateService.js';
@@ -134,6 +135,17 @@ export function register(ctx) {
       res.json({ ok: true, funnels: await stockForTenant((req.query.tenant || 'default').toString()) });
     } catch (err) {
       next(err);
+    }
+  });
+
+  // The audio files of a music folder with their .txt credits, for ▶ Play.
+  router.get('/admin/settings/music-folder', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
+      const files = await folderMusic(String(req.query.link || ''));
+      res.json({ ok: true, files });
+    } catch (err) {
+      res.json({ ok: false, error: String(err.message).slice(0, 200) });
     }
   });
 
@@ -1233,14 +1245,28 @@ function musicPreviewButton(key) {
     return m?'https://drive.usercontent.google.com/download?id='+m[1]+'&export=download&confirm=t':s;}
   function ownLinks(){const el=document.querySelector('[name="set[short_music_url]"]');
     return (el&&el.value||'').split(/\\r?\\n/).map(function(l){return l.split('|')[0];}).join(' ').split(/[\\s,]+/).filter(function(s){return /^https?:/i.test(s);});}
+  // Your links, with each Drive folder swapped for its audio files (read by the app).
+  async function ownItems(){const out=[];
+    for(const raw of ownLinks()){
+      if(raw.indexOf('/folders/')<0){out.push({url:raw,label:''});continue;}
+      st.textContent=' Reading the folder...';
+      try{const r=await fetch('/api/v1/admin/settings/music-folder?link='+encodeURIComponent(raw));const j=await r.json();
+        if(!j.ok)throw new Error(j.error||'could not read');
+        if(!j.files.length)out.push({url:'',label:'folder: no audio files in it'});
+        j.files.forEach(function(f){out.push({url:f.url,label:f.name+(f.credit?' (credit: '+f.credit+')':' (no .txt credit)')});});
+      }catch(e){out.push({url:'',label:'folder could not be read, check it is shared Anyone with the link: '+e.message});}}
+    return out;}
+  async function playOwn(){
+    const all=await ownItems();if(!all.length){st.textContent=' 🟡 Paste your music links below first.';return;}
+    const i=pi%all.length;pi++;const it=all[i],tag=(all.length>1?' '+(i+1)+' of '+all.length+': ':' ')+(it.label?it.label+', ':'');
+    if(!it.url){st.textContent=' 🟡'+tag;return;}
+    if(PAGE.test(it.url)){st.textContent=' 🟡'+tag+'a web page, not a music file, so it is skipped. Upload an mp3 to Google Drive and paste its share link.';return;}
+    aud=new Audio(fileLink(it.url));aud.onended=stop;aud.play().then(function(){btn.textContent='■ Stop';st.textContent=' 🟢'+tag+'playing.'+(all.length>1?' Stop, then Play again for the next one.':'');}).catch(function(e){st.textContent=' 🟡'+tag+'could not play: '+e.message;aud=null;});}
   btn.addEventListener('click',function(){
     if(src||aud){stop();return;}
     const sel=document.querySelector('[name="set['+${k}+']"]');const v=sel?sel.value:'';
     st.textContent='';
-    if(v==='own'){const all=ownLinks();if(!all.length){st.textContent=' 🟡 Paste your music links below first.';return;}
-      const i=pi%all.length;pi++;const raw=all[i],tag=all.length>1?' Link '+(i+1)+' of '+all.length+': ':' ';
-      if(PAGE.test(raw)){st.textContent=' 🟡'+tag+'a web page, not a music file, so it is skipped. Upload an mp3 to Google Drive and paste its share link.';return;}
-      aud=new Audio(fileLink(raw));aud.onended=stop;aud.play().then(function(){btn.textContent='■ Stop';st.textContent=all.length>1?' 🟢'+tag+'playing. Stop, then Play again for the next one.':'';}).catch(function(e){st.textContent=' 🟡'+tag+'could not play: '+e.message;aud=null;});return;}
+    if(v==='own'){playOwn();return;}
     const body=TRACKS[v]||Object.values(TRACKS)[0];
     const fn=new Function('t','mod','return '+body);const mod=function(a,b){return a-b*Math.floor(a/b);};
     ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();
@@ -1273,7 +1299,7 @@ function musicListEditor(key) {
     if(u||c)lines.push(c?u+' | '+c:u);});box.value=lines.join('\\n');}
   function row(r){const d=document.createElement('div');d.className='mrow';
     d.style.cssText='display:grid;grid-template-columns:3fr 2fr auto;gap:6px;margin-bottom:6px';
-    const u=document.createElement('input');u.type='text';u.className='murl';u.placeholder='Music file link (Google Drive share link or .mp3)';u.value=r.url||'';
+    const u=document.createElement('input');u.type='text';u.className='murl';u.placeholder='Music file link, or a Drive folder link (credits from its .txt files)';u.value=r.url||'';
     const c=document.createElement('input');c.type='text';c.className='mcred';c.placeholder='Credit, as the licence asks (e.g. Song by Artist, CC BY 4.0)';c.value=r.credit||'';
     const x=document.createElement('button');x.type='button';x.className='btn';x.textContent='✕';x.title='Remove';
     x.onclick=function(){d.remove();save();};u.oninput=save;c.oninput=save;
