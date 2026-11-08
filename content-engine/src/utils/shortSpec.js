@@ -440,7 +440,8 @@ export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT
       ? ['-f', 'lavfi', '-i', `aevalsrc=exprs='${music.expr}':s=44100:c=stereo`]
       : ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo'];
   const voiceIn = voicePath ? ['-i', voicePath] : [];
-  const musicChain = `aresample=44100,aformat=channel_layouts=stereo,${voicePath ? 'volume=0.25,' : ''}afade=t=in:d=1,afade=t=out:st=${seconds - 2}:d=2`;
+  // Music sits at 20% under the voice (the owner's ceiling); with no voice it plays at full level.
+  const musicChain = `aresample=44100,aformat=channel_layouts=stereo,${voicePath ? 'volume=0.2,' : ''}afade=t=in:d=1,afade=t=out:st=${seconds - 2}:d=2`;
   const audio = voicePath
     ? [
       `[1:a]${musicChain}[m]`,

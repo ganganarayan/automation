@@ -127,7 +127,7 @@ describe('image post as a video', () => {
     const a = imageShortArgs({ imagePath: 'i.png', outPath: 'o.mp4', music: { expr: 'sin(t)' }, seconds: 14, voicePath: 'v.mp3' });
     const f = a[a.indexOf('-filter_complex') + 1];
     expect(a.slice(a.indexOf('v.mp3') - 1, a.indexOf('v.mp3') + 1)).toEqual(['-i', 'v.mp3']);
-    expect(f).toContain('volume=0.25');
+    expect(f).toContain('volume=0.2,');
     expect(f).toContain('adelay=500|500');
     expect(f).toContain('amix=inputs=2:duration=first');
     expect(f).toContain('afade=t=out:st=12:d=2');
