@@ -25,6 +25,12 @@ import { stateOf, CUTOUT_SIZES } from '../utils/festivalSpec.js';
 
 const BASE = '/api/v1/admin/festival';
 
+// The words the voice reads (shortSpec voiceText), for the preview's subtitle lines.
+// String.raw keeps the regex backslashes on their way into the page's script.
+const SPOKEN_JS = String.raw`function spoken(t){ return String(t||'').replace(/https?:\/\/\S+|www\.\S+/gi,' ').replace(/(^|\s)[#@][\p{L}\p{N}_]+/gu,' ').replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{20E3}]/gu,'').replace(/[*_~\x60>|]+/g,' ')
+  .split('\n').map(l=>l.replace(/\s+/g,' ').trim()).filter(Boolean).join('. ').replace(/([.!?:;,])\.\s/g,'$1 ').replace(/\s+/g,' ').trim(); }`;
+
+
 export function register(ctx) {
   const { router, log } = ctx;
   const guardHtml = async (req, res) => {
@@ -201,7 +207,11 @@ ${NAV_CSS}
  .hint{color:#6f6f88;font-size:.8rem}
  .fn{display:block;padding:.3rem 0;font-size:.9rem}.fn.off{opacity:.6}
  .row{display:flex;gap:1.2rem;flex-wrap:wrap;align-items:center}
- #preview{max-width:320px;max-height:320px;border-radius:8px;margin-top:.5rem;display:none;background:#000}
+ .fgrid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:1.4rem;align-items:start}
+ .side{position:sticky;top:1rem}
+ @media(max-width:900px){.fgrid{grid-template-columns:1fr}.side{position:static}}
+ #preview{display:block;max-width:100%;max-height:72vh;margin:.5rem auto 0;border-radius:8px;background:#000}
+ .pvempty{color:#6f6f88;font-size:.82rem;border:1px dashed #2a2a44;border-radius:8px;padding:2rem 1rem;text-align:center;margin-top:.5rem}
  .me{display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.3rem}
  #methumb{width:64px;height:64px;object-fit:contain;border-radius:8px;background:repeating-conic-gradient(#2a2a44 0 25%,#1a1a2a 0 50%) 0 0/16px 16px;display:none}
  #msg{margin-top:.8rem;font-size:.88rem;white-space:pre-line}
@@ -218,7 +228,7 @@ ${NAV_CSS}
   <main><div class="wrap">
   <h1>🪔 Festival post</h1>
   <p class="sub">One picture and one copy to every ticked funnel, outside the daily lanes. Each funnel gets a video of your picture with the copy read aloud in its own voice, subtitles and music, sized for each channel (9:16, 4:5, 16:9), on all its channels including YouTube Shorts. The funnel's normal post for that day still goes out.</p>
-  <div class="card">
+  <div class="card"><div class="fgrid"><div>
     <label class="blk">1. Picture (PNG, JPG or WebP, up to 15 MB). Used whole: it sits on a blurred copy of itself where a size needs more room.</label>
     <input type="file" id="pic" accept="image/png,image/jpeg,image/webp" onchange="showPic()">
     <label class="blk">Your photo on it (optional): your background-removed PNG, standing on the bottom edge. It is remembered for next time.</label>
@@ -237,11 +247,10 @@ ${NAV_CSS}
       <label class="fn"><input type="radio" name="mesize" value="medium" checked onchange="draw()"> Medium</label>
       <label class="fn"><input type="radio" name="mesize" value="large" onchange="draw()"> Large</label>
     </div>
-    <canvas id="preview"></canvas>
     <label class="blk">2. Title (the YouTube title and the name in the Library)</label>
     <input type="text" id="title" maxlength="90" placeholder="Happy Diwali">
     <label class="blk">3. Copy: the caption on every channel, and what the voice reads aloud</label>
-    <textarea id="copy" maxlength="${festival.MAX_COPY}" placeholder="Wishing you and your family a bright and joyful Diwali..." oninput="count()"></textarea>
+    <textarea id="copy" maxlength="${festival.MAX_COPY}" placeholder="Wishing you and your family a bright and joyful Diwali..." oninput="count();draw()" onkeyup="draw()" onclick="draw()"></textarea>
     <div class="hint" id="cnt">0 characters. X gets the first 280, cut at a word.</div>
     <label class="blk">4. Funnels</label>
     <div class="row"><button class="act" type="button" onclick="tick(true)">Tick all</button><button class="act" type="button" onclick="tick(false)">Untick all</button></div>
@@ -256,6 +265,19 @@ ${NAV_CSS}
     <div style="margin-top:1rem"><button class="act primary big" id="go" onclick="go()">🪔 Make and post to all ticked funnels</button></div>
     <div id="msg"></div>
   </div>
+  <div class="side">
+    <label class="blk" style="margin-top:0">Preview, as the video shows it</label>
+    <div class="row">
+      <label class="fn"><input type="radio" name="frame" value="portrait" checked onchange="draw()"> 9:16</label>
+      <label class="fn"><input type="radio" name="frame" value="feed" onchange="draw()"> 4:5</label>
+      <label class="fn"><input type="radio" name="frame" value="landscape" onchange="draw()"> 16:9</label>
+      <button class="act" type="button" id="playbtn" onclick="playLines()">▶ Play lines</button>
+    </div>
+    <canvas id="preview" style="display:none"></canvas>
+    <div class="pvempty" id="pvempty">Choose the picture to see the preview. The subtitle line under your cursor shows on it as you type.</div>
+    <div class="hint" id="pvnote"></div>
+  </div>
+  </div></div>
   <h2>Festival posts</h2>
   <div id="batches">${batchesHtml(batches)}</div>
   </div></main>
@@ -276,12 +298,38 @@ function trimmed(img){ const c=document.createElement('canvas'); c.width=img.nat
   let t=c.height,b=-1,l=c.width,r=-1; for(let y=0;y<c.height;y++) for(let q=0;q<c.width;q++){ if(d[(y*c.width+q)*4+3]>8){ if(y<t)t=y; if(y>b)b=y; if(q<l)l=q; if(q>r)r=q; } }
   return b<0 ? {img, sx:0, sy:0, w:c.width, h:c.height} : {img, sx:l, sy:t, w:r-l+1, h:b-t+1}; }
 let meTrim=null;
-function draw(){
-  const c=$('preview'); if(!picImg){ c.style.display='none'; return; }
-  c.width=picImg.naturalWidth; c.height=picImg.naturalHeight; const x=c.getContext('2d'); x.drawImage(picImg,0,0);
+// The video frame, as shortSpec renders it: the picture fitted on a blurred copy of
+// itself, subtitles bold white with a black outline, bottom centre (libass, 288 rows).
+const FRAMES={portrait:{w:1080,h:1920,fs:11,mv:70},feed:{w:1080,h:1350,fs:11,mv:70},landscape:{w:1920,h:1080,fs:16,mv:30}};
+// The words the voice reads (shortSpec voiceText), grouped into lines like the subtitles (5 words, 30 characters).
+${SPOKEN_JS}
+function cues(t){ const out=[]; let cur=[]; const flush=()=>{ if(cur.length){ out.push(cur.join(' ')); cur=[]; } };
+  for(const w of spoken(t).split(' ').filter(Boolean)){ const len=cur.reduce((n,x)=>n+x.length+1,0)+w.length; if(cur.length&&(cur.length>=5||len>30)) flush(); cur.push(w); if(/[.!?;:,]$/.test(w)&&cur.length>=2) flush(); }
+  flush(); return out; }
+let playing=null, playAt=0;
+// The line under the cursor: the lines of the text up to it, the last one.
+function lineNow(){ const t=$('copy').value; const all=cues(t); if(!all.length) return {text:'',n:0,i:0};
+  if(playing!==null) return {text:all[playAt%all.length],n:all.length,i:playAt%all.length};
+  const before=cues(t.slice(0,$('copy').selectionStart||0)); const i=Math.min(Math.max(before.length-1,0),all.length-1); return {text:all[i],n:all.length,i}; }
+function playLines(){ if(playing!==null){ clearInterval(playing); playing=null; $('playbtn').textContent='▶ Play lines'; draw(); return; }
+  playAt=0; $('playbtn').textContent='■ Stop'; playing=setInterval(()=>{ playAt++; if(playAt>=cues($('copy').value).length){ playLines(); return; } draw(); },1400); draw(); }
+function artCanvas(){ const a=document.createElement('canvas'); a.width=picImg.naturalWidth; a.height=picImg.naturalHeight; const x=a.getContext('2d'); x.drawImage(picImg,0,0);
   if(meTrim){ const pos=document.querySelector('input[name=mepos]:checked').value, size=document.querySelector('input[name=mesize]:checked').value;
-    const b=box(c.width,c.height,meTrim.w,meTrim.h,pos,size); x.drawImage(meTrim.img,meTrim.sx,meTrim.sy,meTrim.w,meTrim.h,b.l,b.t,b.w,b.h); }
+    const b=box(a.width,a.height,meTrim.w,meTrim.h,pos,size); x.drawImage(meTrim.img,meTrim.sx,meTrim.sy,meTrim.w,meTrim.h,b.l,b.t,b.w,b.h); }
+  return a; }
+function draw(){
+  const c=$('preview'); if(!picImg){ c.style.display='none'; $('pvempty').style.display='block'; $('pvnote').textContent=''; return; }
+  $('pvempty').style.display='none';
+  const F=FRAMES[document.querySelector('input[name=frame]:checked').value]; const k=0.5; const W=Math.round(F.w*k), H=Math.round(F.h*k);
+  c.width=W; c.height=H; const x=c.getContext('2d'); const a=artCanvas();
+  const cover=Math.max(W/a.width,H/a.height), fit=Math.min(W/a.width,H/a.height);
+  x.save(); x.filter='blur('+Math.round(H*0.02)+'px)'; x.drawImage(a,(W-a.width*cover)/2,(H-a.height*cover)/2,a.width*cover,a.height*cover); x.restore();
+  x.drawImage(a,(W-a.width*fit)/2,(H-a.height*fit)/2,a.width*fit,a.height*fit);
+  const ln=lineNow();
+  if(ln.text){ const fs=H*F.fs/288; x.font='bold '+fs+'px Arial, sans-serif'; x.textAlign='center'; x.textBaseline='bottom'; x.lineJoin='round';
+    x.lineWidth=H*2/288*2; x.strokeStyle='#000'; const y=H-H*F.mv/288; x.strokeText(ln.text,W/2,y,W*0.94); x.fillStyle='#fff'; x.fillText(ln.text,W/2,y,W*0.94); }
   c.style.display='block';
+  $('pvnote').textContent=ln.n ? 'Subtitle line '+(ln.i+1)+' of '+ln.n+'. Each shows while the voice reads it.' : 'Type the copy to see the subtitles.';
 }
 async function showPic(){ const f=$('pic').files[0]; picImg=f ? await load(URL.createObjectURL(f)) : null; draw(); }
 async function setMe(src){ $('methumb').src=src; $('methumb').style.display='block'; $('meclear').style.display='inline-flex'; $('meopts').style.display='flex';

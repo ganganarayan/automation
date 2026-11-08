@@ -44,21 +44,21 @@ describe('festival lane wiring', () => {
 describe('overlayBox (your photo on the picture)', () => {
   const W = 1000;
   const H = 1250;
-  it('stands on the bottom edge, at the right by default, 45% of the height', () => {
+  it('stands on the bottom edge, at the right by default, 35% of the height', () => {
     const b = overlayBox({ W, H, w: 400, h: 800 });
-    expect(b.height).toBe(563);
-    expect(b.width).toBe(281);
-    expect(b.top).toBe(H - 563);
-    expect(b.left).toBe(W - 281 - 30);
+    expect(b.height).toBe(438);
+    expect(b.width).toBe(219);
+    expect(b.top).toBe(H - 438);
+    expect(b.left).toBe(W - 219 - 30);
   });
-  it('small is 30% of the height, large 60%', () => {
-    expect(overlayBox({ W, H, w: 400, h: 800, size: 'small' }).height).toBe(375);
-    expect(overlayBox({ W, H, w: 400, h: 800, size: 'large' }).height).toBe(750);
+  it('small is 25% of the height, large 50%', () => {
+    expect(overlayBox({ W, H, w: 400, h: 800, size: 'small' }).height).toBe(313);
+    expect(overlayBox({ W, H, w: 400, h: 800, size: 'large' }).height).toBe(625);
   });
   it('goes left or centre, small or large', () => {
     expect(overlayBox({ W, H, w: 400, h: 800, position: 'left', size: 'small' }).left).toBe(30);
     const c = overlayBox({ W, H, w: 400, h: 800, position: 'center', size: 'large' });
-    expect(c.height).toBe(750);
+    expect(c.height).toBe(625);
     expect(c.left).toBe(Math.round((W - c.width) / 2));
   });
   it('is never wider than 90% of the picture', () => {

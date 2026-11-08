@@ -42,8 +42,8 @@ export function stateOf(r = {}) {
 }
 
 /** How tall your photo stands, as a share of the picture's height. */
-// Medium is what Small used to be, so a smaller Small is still there for a busy picture.
-export const CUTOUT_SIZES = { small: 0.3, medium: 0.45, large: 0.6 };
+// Share of the picture's height, as the owner set them (25 / 35 / 50%).
+export const CUTOUT_SIZES = { small: 0.25, medium: 0.35, large: 0.5 };
 export const CUTOUT_POSITIONS = ['left', 'center', 'right'];
 
 /**
