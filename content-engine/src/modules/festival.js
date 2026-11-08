@@ -111,7 +111,7 @@ export function register(ctx) {
       const out = await festival.start({
         tenantId: tenant(req), title: b.title, copy: b.copy, imageUrl: b.imageUrl, driveId: b.driveId,
         funnelIds: b.funnelIds, postAt, autoPost: b.autoPost !== false, photo: b.photo || null,
-        music: b.music, musicCredit: b.musicCredit, voiceId: b.voiceId,
+        music: b.music, musicCredit: b.musicCredit, voiceId: b.voiceId, musicVolume: b.musicVolume,
       });
       res.json({ ok: true, ...out });
     } catch (err) {
@@ -287,6 +287,11 @@ ${NAV_CSS}
     ${voiceHtml(voices)}
     <label class="blk">Background music (under the voice; its credit goes last in the caption)</label>
     ${musicHtml(music)}
+    <div class="row" style="margin-top:.5rem"><span class="hint">Music volume under the voice:</span>
+      <select id="mvol" style="background:#0b0b12;color:#e8e8ef;border:1px solid #2a2a44;border-radius:8px;padding:.35rem">
+        <option value="">Each funnel's own setting</option>
+        ${['25', '20', '15', '10', '5', '0'].map((v) => `<option value="${v}">${v === '0' ? '0% (no music)' : `${v}%`}</option>`).join('')}
+      </select></div>
     <label class="blk">4. Funnels</label>
     <div class="row"><button class="act" type="button" onclick="tick(true)">Tick all</button><button class="act" type="button" onclick="tick(false)">Untick all</button></div>
     ${funnelsHtml(funnels)}
@@ -415,7 +420,7 @@ async function go(){
       localStorage.setItem(KEY, JSON.stringify(meSaved));
     }
     msg('🟡 Starting the videos...');
-    const r=await post('${BASE}',{title:$('title').value.trim(),copy,imageUrl:pic.url,driveId:pic.driveId,photo:pic.photoTop?{aspect:pic.aspect,photoTop:pic.photoTop}:null,music:$('music').value,musicCredit:($('music').selectedOptions[0]||{}).dataset?.credit||'',voiceId:$('voice').value,funnelIds,postAt:at,autoPost:$('auto').checked});
+    const r=await post('${BASE}',{title:$('title').value.trim(),copy,imageUrl:pic.url,driveId:pic.driveId,photo:pic.photoTop?{aspect:pic.aspect,photoTop:pic.photoTop}:null,music:$('music').value,musicCredit:($('music').selectedOptions[0]||{}).dataset?.credit||'',voiceId:$('voice').value,musicVolume:$('mvol').value,funnelIds,postAt:at,autoPost:$('auto').checked});
     if(!r.ok) throw new Error(r.error||'could not start');
     let t='🟢 Making the video for: '+(r.started.join(', ')||'none')+'. Each takes a few minutes; this list updates by itself.';
     if(r.skipped.length) t+='\\n🔴 Skipped: '+r.skipped.map(s=>s.name+' ('+s.reason+')').join('; ');

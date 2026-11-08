@@ -49,6 +49,7 @@ describe('festival page', () => {
     expect(html).toContain('🔴 No Accounts');
     expect(html).toContain("Each funnel's own voice");
     expect(html).toContain('Ann (cloned)');
+    expect(html).toContain("Each funnel's own setting");
     expect(html).toContain('Approve all 1 waiting');
     expect(html).toContain('Light &amp; joy');
     expect(html).toContain('🔇 None: voice only');
@@ -70,9 +71,9 @@ describe('starting a festival post', () => {
     const res = { status: () => res, json: (j) => { out = j; } };
     await routes['POST /admin/festival']({ tenantId: 'default', body: {
       title: 'Happy Diwali', copy: 'Hi', imageUrl: 'https://x/a.png', funnelIds: ['1'], autoPost: false,
-      music: 'none', musicCredit: '', voiceId: 'v1abcdefgh',
+      music: 'none', musicCredit: '', voiceId: 'v1abcdefgh', musicVolume: '10',
     } }, res);
     expect(out.ok).toBe(true);
-    expect(svc.start).toHaveBeenCalledWith(expect.objectContaining({ music: 'none', voiceId: 'v1abcdefgh', autoPost: false }));
+    expect(svc.start).toHaveBeenCalledWith(expect.objectContaining({ music: 'none', voiceId: 'v1abcdefgh', musicVolume: '10', autoPost: false }));
   });
 });

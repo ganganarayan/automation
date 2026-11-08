@@ -208,7 +208,8 @@ async function startOnGithub({ instanceId, f, providers }) {
     ...(given ? { imageUrls: Object.fromEntries(sizes.map((s) => [s, img.festival.imageUrl])), subMargins: photoSubMargins(img.festival), subTop: true, title: img.festival.title || '', musicSetting: musicChoice(providers.resolved.shortMusic, img.festival.music, img.festival.musicCredit) } : {}),
     text: script.captionFull || script.captionShort || '',
     voiceId: (img.festival && img.festival.voiceId) || cfg.voice_id || '',
-    musicVolume: musicVolumePct(cfg.music_volume),
+    // A festival post may set one level for itself; else the funnel's.
+    musicVolume: musicVolumePct(festivalVolume(img.festival) ?? cfg.music_volume),
     name: `${poster.slug(f.name)}-${poster.slug((img.sheet || {}).key || (given ? 'festival' : ''))}-r${inst.round || 1}`,
   };
   await imageVideoJob.start({ instance: inst, providers, job, baseUrl: settings.app.publicBaseUrl });
@@ -309,7 +310,7 @@ async function makeOnRailway(ctx) {
     const images = Object.fromEntries(Object.keys(IMAGE_VIDEO_SIZES).map((s) => [s, sized[s] || sized.feed]));
     const volCfg = await funnels.getConfig(f.id).catch(() => ({}));
     const made2 = await imageShort.renderVideos({
-      images, sizes: Object.keys(IMAGE_VIDEO_SIZES), voice, music: providers.resolved.shortMusic, upload: (path) => publish.uploadFile(path, 'video/mp4'), ...(img.festival ? { music: musicChoice(providers.resolved.shortMusic, img.festival.music, img.festival.musicCredit) } : {}), subMargins: photoSubMargins(img.festival), subTop: !!img.festival, title: (img.festival || {}).title || '', musicVolume: musicVolumePct(volCfg.music_volume), log,
+      images, sizes: Object.keys(IMAGE_VIDEO_SIZES), voice, music: providers.resolved.shortMusic, upload: (path) => publish.uploadFile(path, 'video/mp4'), ...(img.festival ? { music: musicChoice(providers.resolved.shortMusic, img.festival.music, img.festival.musicCredit) } : {}), subMargins: photoSubMargins(img.festival), subTop: !!img.festival, title: (img.festival || {}).title || '', musicVolume: musicVolumePct(festivalVolume(img.festival) ?? volCfg.music_volume), log,
     });
     render = { runner: 'railway', videos: made2.videos, seconds: made2.seconds, subtitled: made2.subtitled, ...(made2.subtitleError ? { subtitleError: made2.subtitleError } : {}), ...(made2.musicCredit ? { musicCredit: made2.musicCredit } : {}) };
   }
@@ -591,6 +592,12 @@ async function sheetFor(row) {
   const ownRow = !stepDownOf(steps) && !art(steps, 'images').festival;
   const tab = sheet.tab || (ownRow ? await poster.tabFor(providers.sheets, f) : '');
   return { f, providers, steps, sheet, tab };
+}
+
+/** A festival post's own music level (%), or null to use each funnel's. */
+function festivalVolume(festival) {
+  const v = festival && festival.musicVolume;
+  return v === undefined || v === null || v === '' ? null : v;
 }
 
 /** Disapproved: its sheet row reads Disapproved, so the router never uses it again. */

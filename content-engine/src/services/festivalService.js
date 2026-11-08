@@ -140,7 +140,7 @@ export async function funnelReadiness(tenantId = 'default') {
  * skipped with the reason; the videos are made in the background.
  * @returns {{ batchId, started: string[], skipped: {name, reason}[] }}
  */
-export async function start({ tenantId = 'default', title = '', copy = '', imageUrl = '', driveId = '', funnelIds = [], postAt = null, autoPost = true, photo = null, music = 'random', musicCredit = '', voiceId = '' }) {
+export async function start({ tenantId = 'default', title = '', copy = '', imageUrl = '', driveId = '', funnelIds = [], postAt = null, autoPost = true, photo = null, music = 'random', musicCredit = '', voiceId = '', musicVolume = '' }) {
   const text = String(copy || '').trim();
   if (!text) throw new Error('write the copy: it is the caption and it is read aloud');
   if (text.length > MAX_COPY) throw new Error(`the copy is over ${MAX_COPY} characters`);
@@ -151,7 +151,7 @@ export async function start({ tenantId = 'default', title = '', copy = '', image
   const batchId = randomUUID();
   const p = photo || {};
   const placed = Number(p.aspect) > 0 && Number(p.photoTop) > 0 && Number(p.photoTop) < 1;
-  const festival = { batchId, imageUrl, driveId: driveId || '', copy: text, title: String(title || '').trim().slice(0, 90), music: /^(none|random|https:\/\/\S+)$/.test(String(music || '')) ? String(music) : 'random', musicCredit: String(musicCredit || '').slice(0, 2000), voiceId: /^[A-Za-z0-9]{8,40}$/.test(String(voiceId || '')) ? String(voiceId) : '', autoPost: !!autoPost, ...(placed ? { aspect: Number(p.aspect), photoTop: Number(p.photoTop) } : {}) };
+  const festival = { batchId, imageUrl, driveId: driveId || '', copy: text, title: String(title || '').trim().slice(0, 90), music: /^(none|random|https:\/\/\S+)$/.test(String(music || '')) ? String(music) : 'random', musicCredit: String(musicCredit || '').slice(0, 2000), voiceId: /^[A-Za-z0-9]{8,40}$/.test(String(voiceId || '')) ? String(voiceId) : '', musicVolume: /^(0|5|10|15|20|25)$/.test(String(musicVolume ?? '')) ? String(musicVolume) : '', autoPost: !!autoPost, ...(placed ? { aspect: Number(p.aspect), photoTop: Number(p.photoTop) } : {}) };
   const started = [];
   const skipped = [];
   const ready = [];
