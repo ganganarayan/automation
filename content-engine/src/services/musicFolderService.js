@@ -29,6 +29,11 @@ async function readText(fileId) {
 }
 
 /** The audio files of one folder with their credits: [{ name, url, credit }]. */
+/** A credit file's text: every line kept, spaces tidied, empty lines dropped. */
+export function creditText(text = '') {
+  return String(text || '').replace(/\r/g, '').split('\n').map((l) => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean).join('\n');
+}
+
 export async function folderMusic(link) {
   const id = parseDriveFolderId(link);
   if (!id) return [];
@@ -37,7 +42,8 @@ export async function folderMusic(link) {
   return Promise.all(pairs.map(async (p) => ({
     name: p.name,
     url: publicDlUrl(p.id),
-    credit: p.textId ? (await readText(p.textId).catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 300) : '',
+    // The whole .txt, its own line breaks kept (blank lines and stray spaces tidied).
+    credit: p.textId ? creditText(await readText(p.textId).catch(() => '')) : '',
   })));
 }
 
@@ -49,7 +55,8 @@ export async function expandMusic(shortMusic = {}) {
     const link = line.split('|')[0].trim();
     if (!isMusicFolder(link)) return [line];
     try {
-      return (await folderMusic(link)).map((m) => (m.credit ? `${m.url} | ${m.credit}` : m.url));
+      // The setting is one track per line, so the credit's line breaks travel as \\n.
+      return (await folderMusic(link)).map((m) => (m.credit ? `${m.url} | ${m.credit.replace(/\n/g, '\\n')}` : m.url));
     } catch (err) {
       log.warn({ err: err.message }, 'music folder could not be read; its files are left out');
       return [];

@@ -52,7 +52,7 @@ describe('festival page', () => {
     expect(html).toContain('Approve all 1 waiting');
     expect(html).toContain('Light &amp; joy');
     expect(html).toContain('🔇 None: voice only');
-    expect(html).toContain('🎵 diya (Diya by Asha, CC BY)');
+    expect(html).toContain('🎵 diya<');
     expect(html).toContain('🎵 Om Chant<');
   });
   it('ships a browser script that parses', async () => {

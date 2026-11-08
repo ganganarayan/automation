@@ -144,3 +144,16 @@ describe('music volume per funnel', async () => {
     expect(filter('60')).toContain('volume=0.25,');
   });
 });
+
+describe('music credits: the whole .txt, its lines kept', async () => {
+  const { musicEntries, musicChoice, pickMusic } = await import('../src/utils/shortSpec.js');
+  const long = 'Song: Embrace\\nComposer: Sappheiros\\n' + 'x'.repeat(400);
+  it('keeps every line and every character', () => {
+    const [e] = musicEntries(`https://a.example/1.mp3 | ${long}`);
+    expect(e.credit.split('\n')).toEqual(['Song: Embrace', 'Composer: Sappheiros', 'x'.repeat(400)]);
+  });
+  it('a picked track keeps its lines too', () => {
+    const m = pickMusic(musicChoice({}, 'https://a.example/1.mp3', 'Song: Embrace\nComposer: Sappheiros'));
+    expect(m.credits['https://a.example/1.mp3']).toBe('Song: Embrace\nComposer: Sappheiros');
+  });
+});

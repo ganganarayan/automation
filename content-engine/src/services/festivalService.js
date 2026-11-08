@@ -151,7 +151,7 @@ export async function start({ tenantId = 'default', title = '', copy = '', image
   const batchId = randomUUID();
   const p = photo || {};
   const placed = Number(p.aspect) > 0 && Number(p.photoTop) > 0 && Number(p.photoTop) < 1;
-  const festival = { batchId, imageUrl, driveId: driveId || '', copy: text, title: String(title || '').trim().slice(0, 90), music: /^(none|random|https:\/\/\S+)$/.test(String(music || '')) ? String(music) : 'random', musicCredit: String(musicCredit || '').slice(0, 200), voiceId: /^[A-Za-z0-9]{8,40}$/.test(String(voiceId || '')) ? String(voiceId) : '', autoPost: !!autoPost, ...(placed ? { aspect: Number(p.aspect), photoTop: Number(p.photoTop) } : {}) };
+  const festival = { batchId, imageUrl, driveId: driveId || '', copy: text, title: String(title || '').trim().slice(0, 90), music: /^(none|random|https:\/\/\S+)$/.test(String(music || '')) ? String(music) : 'random', musicCredit: String(musicCredit || '').slice(0, 2000), voiceId: /^[A-Za-z0-9]{8,40}$/.test(String(voiceId || '')) ? String(voiceId) : '', autoPost: !!autoPost, ...(placed ? { aspect: Number(p.aspect), photoTop: Number(p.photoTop) } : {}) };
   const started = [];
   const skipped = [];
   const ready = [];

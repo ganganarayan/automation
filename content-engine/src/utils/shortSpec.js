@@ -116,7 +116,8 @@ export function musicEntries(text = '') {
       : line.split(/[\s,]+/).map((s) => [s, '']);
     for (const [raw, credit] of pairs) {
       const url = musicLink(raw);
-      if (url && !out.has(url)) out.set(url, String(credit || '').replace(/\s+/g, ' ').trim().slice(0, 300));
+      // A credit's own line breaks arrive as \\n (one track per line); its whole text is kept.
+      if (url && !out.has(url)) out.set(url, String(credit || '').split('\\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n'));
     }
   }
   return [...out].map(([url, credit]) => ({ url, credit }));
@@ -130,7 +131,7 @@ export function musicChoice(shortMusic = {}, choice = '', credit = '') {
   const c = String(choice || '').trim();
   if (!c || c === 'random') return shortMusic || {};
   if (c === 'none') return { ...(shortMusic || {}), url: '' };
-  const cr = String(credit || '').replace(/[|\r\n]+/g, ' ').trim();
+  const cr = String(credit || '').replace(/\|/g, ' ').replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean).join('\\n');
   return { ...(shortMusic || {}), url: cr ? `${c} | ${cr}` : c };
 }
 
