@@ -82,20 +82,55 @@ export function musicLink(url) {
   return drive ? `https://drive.usercontent.google.com/download?id=${drive[1]}&export=download&confirm=t` : s;
 }
 
-/** Your music links, one per line (commas and spaces work too): the usable ones, no repeats. */
+/**
+ * Your music, one per line as "link | credit" (the credit is optional). A line
+ * with no "|" may hold several links split by spaces or commas. Returns the
+ * usable ones, no repeats: [{ url, credit }].
+ */
+export function musicEntries(text = '') {
+  const out = new Map();
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const bar = line.indexOf('|');
+    const pairs = bar >= 0
+      ? [[line.slice(0, bar), line.slice(bar + 1)]]
+      : line.split(/[\s,]+/).map((s) => [s, '']);
+    for (const [raw, credit] of pairs) {
+      const url = musicLink(raw);
+      if (url && !out.has(url)) out.set(url, String(credit || '').replace(/\s+/g, ' ').trim().slice(0, 300));
+    }
+  }
+  return [...out].map(([url, credit]) => ({ url, credit }));
+}
+
+/** Your usable music links. */
 export function musicLinks(text = '') {
-  return [...new Set(String(text || '').split(/[\s,]+/).map(musicLink).filter(Boolean))];
+  return musicEntries(text).map((e) => e.url);
+}
+
+/**
+ * The caption with the music credit on its own last line. With max, the
+ * credit is added only when it still fits, so a short caption is never cut.
+ */
+export function withMusicCredit(caption = '', credit = '', max = 0) {
+  const c = String(credit || '').trim();
+  const text = String(caption || '');
+  if (!c || !text || text.includes(c)) return text;
+  const out = `${text.trimEnd()}\n\n🎵 ${c}`;
+  return max && out.length > max ? text : out;
 }
 
 /** What to play: { url } for your own file, else { expr }. A bad choice falls back to the default. */
 export function pickMusic({ track = '', url = '' } = {}, rand = Math.random) {
-  const own = musicLinks(url);
-  if (track === OWN_MUSIC && own.length === 1) return { url: own[0] };
+  const all = musicEntries(url);
+  const own = all.map((e) => e.url);
+  const credits = Object.fromEntries(all.filter((e) => e.credit).map((e) => [e.url, e.credit]));
+  const withCredits = (o) => (Object.keys(credits).length ? { ...o, credits } : o);
+  if (track === OWN_MUSIC && own.length === 1) return withCredits({ url: own[0] });
   if (track === OWN_MUSIC && own.length) {
     // One of your links at random per video; the rest are tried in turn if it fails.
     const start = Math.floor(rand() * own.length) % own.length;
     const urls = [...own.slice(start), ...own.slice(0, start)];
-    return { url: urls[0], urls };
+    return withCredits({ url: urls[0], urls });
   }
   const found = MUSIC_TRACKS.find((t) => t.value === track) || MUSIC_TRACKS[0];
   return { expr: found.expr };
@@ -347,5 +382,5 @@ export default {
   SHORT_SECONDS, MUSIC_TRACKS, MUSIC_OPTIONS, DEFAULT_MUSIC, OWN_MUSIC, musicLink, pickMusic, shortTitle, imageShortArgs,
   IMAGE_VIDEO_SECONDS, IMAGE_VIDEO_MAX_SECONDS, VOICE_MAX_CHARS, VOICE_LEAD_SECONDS, VOICE_TAIL_SECONDS, IMAGE_VIDEO_OPTIONS, imageVideoMode, voiceText, imageVideoSeconds, imageVideoConfigs,
   IMAGE_VIDEO_SIZES, VIDEO_PLATFORM_SIZE, PRIMARY_SIZE, sizeFor, sizesNeeded, sizedPrompt, alignmentCues, evenCues,
-  VIDEO_RUNNER_OPTIONS, FAILSAFE_OPTIONS, videoRunner, otherRunner, failSafeOn, aspectCropFilter, musicJsExpr, isMusicPage, notAudio, musicLinks,
+  VIDEO_RUNNER_OPTIONS, FAILSAFE_OPTIONS, videoRunner, otherRunner, failSafeOn, aspectCropFilter, musicJsExpr, isMusicPage, notAudio, musicLinks, musicEntries, withMusicCredit,
 };

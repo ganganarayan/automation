@@ -1232,7 +1232,7 @@ function musicPreviewButton(key) {
   function fileLink(s){const m=/google\\.com/i.test(s)&&s.match(/(?:\\/d\\/|[?&]id=)([\\w-]{10,})/);
     return m?'https://drive.usercontent.google.com/download?id='+m[1]+'&export=download&confirm=t':s;}
   function ownLinks(){const el=document.querySelector('[name="set[short_music_url]"]');
-    return (el&&el.value||'').split(/[\\s,]+/).filter(function(s){return /^https?:/i.test(s);});}
+    return (el&&el.value||'').split(/\\r?\\n/).map(function(l){return l.split('|')[0];}).join(' ').split(/[\\s,]+/).filter(function(s){return /^https?:/i.test(s);});}
   btn.addEventListener('click',function(){
     if(src||aud){stop();return;}
     const sel=document.querySelector('[name="set['+${k}+']"]');const v=sel?sel.value:'';
@@ -1249,6 +1249,39 @@ function musicPreviewButton(key) {
       const fade=Math.min(1,t/1,(secs-t)/2);L[i]=R[i]=x*fade;}
     src=ctx.createBufferSource();src.buffer=buf;src.connect(ctx.destination);src.onended=stop;src.start();btn.textContent='■ Stop';
   });
+})();</script>`;
+}
+
+/**
+ * Your music as rows: a link and its credit, + Add music for another. The
+ * rows and the one-per-line box below ("link | credit") are the same list:
+ * change either and the other follows. The box is what is saved.
+ */
+function musicListEditor(key) {
+  const k = JSON.stringify(`set[${String(key)}]`);
+  return `
+<div id="mlist" style="margin:6px 0"></div>
+<button type="button" class="btn" id="mlist-add">+ Add music</button>
+<p class="hint" style="margin-top:8px">Or paste many at once below, one per line: link | credit</p>
+<script>(function(){
+  const box=document.querySelector('[name='+JSON.stringify(${k})+']'),list=document.getElementById('mlist');
+  if(!box||!list)return;
+  function parse(){return box.value.split(/\\r?\\n/).map(function(l){const i=l.indexOf('|');
+    return i>=0?{url:l.slice(0,i).trim(),credit:l.slice(i+1).trim()}:{url:l.trim(),credit:''};}).filter(function(r){return r.url||r.credit;});}
+  function save(){const lines=[];list.querySelectorAll('.mrow').forEach(function(r){
+    const u=r.querySelector('.murl').value.replace(/[|\\r\\n]/g,' ').trim(),c=r.querySelector('.mcred').value.replace(/[\\r\\n]/g,' ').trim();
+    if(u||c)lines.push(c?u+' | '+c:u);});box.value=lines.join('\\n');}
+  function row(r){const d=document.createElement('div');d.className='mrow';
+    d.style.cssText='display:grid;grid-template-columns:3fr 2fr auto;gap:6px;margin-bottom:6px';
+    const u=document.createElement('input');u.type='text';u.className='murl';u.placeholder='Music file link (Google Drive share link or .mp3)';u.value=r.url||'';
+    const c=document.createElement('input');c.type='text';c.className='mcred';c.placeholder='Credit, as the licence asks (e.g. Song by Artist, CC BY 4.0)';c.value=r.credit||'';
+    const x=document.createElement('button');x.type='button';x.className='btn';x.textContent='✕';x.title='Remove';
+    x.onclick=function(){d.remove();save();};u.oninput=save;c.oninput=save;
+    d.append(u,c,x);list.append(d);return d;}
+  function draw(){list.innerHTML='';parse().forEach(row);}
+  document.getElementById('mlist-add').onclick=function(){row({}).querySelector('.murl').focus();};
+  box.addEventListener('input',draw);
+  draw();
 })();</script>`;
 }
 
@@ -1474,7 +1507,7 @@ function secretJsonSummary(raw) {
   if (field.type === 'json' || field.type === 'textarea') {
     // A field with a built-in default shows it pre-filled until it's changed.
     const rows = field.rows ? ` rows="${Number(field.rows)}"` : field.default ? ' rows="12"' : '';
-    return `<div class="field"><label>${esc(field.label)}</label>
+    return `<div class="field"><label>${esc(field.label)}</label>${field.musicList ? musicListEditor(field.key) : ''}
       <textarea name="set[${esc(field.key)}]"${rows} placeholder="${field.placeholder ? esc(field.placeholder) : ''}">${esc(has ? current : (field.default || ''))}</textarea>
       ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
   }

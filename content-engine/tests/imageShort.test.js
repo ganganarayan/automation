@@ -234,3 +234,22 @@ describe('several music links', () => {
     expect(pickMusic({ track: 'own', url: three }, () => 0.99).url).toBe('https://a/3.mp3');
   });
 });
+
+describe('music credits', () => {
+  it('reads link | credit lines, and old link-only lines still work', async () => {
+    const { musicEntries, pickMusic } = await import('../src/utils/shortSpec.js');
+    expect(musicEntries('https://a/1.mp3 | Song A by X, CC BY 4.0\nhttps://a/2.mp3, https://a/3.mp3\nhttps://youtu.be/x | skipped')).toEqual([
+      { url: 'https://a/1.mp3', credit: 'Song A by X, CC BY 4.0' },
+      { url: 'https://a/2.mp3', credit: '' },
+      { url: 'https://a/3.mp3', credit: '' },
+    ]);
+    expect(pickMusic({ track: 'own', url: 'https://a/1.mp3 | Song A' })).toEqual({ url: 'https://a/1.mp3', credits: { 'https://a/1.mp3': 'Song A' } });
+  });
+  it('puts the credit on the last line of the caption, and on a short caption only when it fits', async () => {
+    const { withMusicCredit } = await import('../src/utils/shortSpec.js');
+    expect(withMusicCredit('Hello', 'Song A')).toBe('Hello\n\n🎵 Song A');
+    expect(withMusicCredit('Hello', '')).toBe('Hello');
+    expect(withMusicCredit('Hello\n\n🎵 Song A', 'Song A')).toBe('Hello\n\n🎵 Song A');
+    expect(withMusicCredit('x'.repeat(275), 'Song A', 280)).toBe('x'.repeat(275));
+  });
+});

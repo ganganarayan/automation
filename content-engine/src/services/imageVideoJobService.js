@@ -181,6 +181,7 @@ export async function hookDone({ ticket, body = {} }) {
     made: Number(body.made) || 0,
     subtitled: !!body.subtitled,
     subtitleError: String(body.subtitleError || '').slice(0, 200),
+    musicCredit: String(body.musicCredit || '').slice(0, 300),
   });
   return { ok: true };
 }

@@ -182,7 +182,7 @@ async function imageVideo(job) {
         if (!res.ok) throw new Error(`status ${res.status}`);
         if (notAudio(res.headers.get('content-type'))) throw new Error('the link gave a web page, not a music file');
         await writeFile('music', Buffer.from(await res.arrayBuffer()));
-        got = { file: 'music' };
+        got = { file: 'music', credit: (music.credits || {})[url] || '' };
         break;
       } catch (err) {
         console.log(`Own music link unreadable (${err.message}), trying the next`);
@@ -216,7 +216,7 @@ async function imageVideo(job) {
     images[size] = await uploadToDrive({ file: pics[size], name: `${job.name} ${size}.png`, folderId, token: fresh.accessToken, mime: 'image/png' });
     videos[size] = await uploadToDrive({ file: `video-${size}.mp4`, name: `${job.name} ${size}.mp4`, folderId, token: fresh.accessToken });
   }
-  await hook('done', { images, videos, seconds, chars: voice.chars, made: job.sizes.length, subtitled: !!subPath, subtitleError });
+  await hook('done', { images, videos, seconds, chars: voice.chars, made: job.sizes.length, subtitled: !!subPath, subtitleError, musicCredit: music.credit || '' });
   console.log(`Done: ${job.sizes.length} sizes, ${seconds} s`);
 }
 

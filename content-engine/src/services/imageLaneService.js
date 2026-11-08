@@ -43,7 +43,7 @@ import { extractRow, composePrompt, composeCaptions, buildPlatformConfigs } from
 import { patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
 import * as imageShort from './imageShortService.js';
 import {
-  shortTitle, imageVideoMode, imageVideoConfigs, IMAGE_VIDEO_SIZES, sizedPrompt, sizesNeeded, videoRunner, otherRunner, failSafeOn,
+  shortTitle, imageVideoMode, imageVideoConfigs, IMAGE_VIDEO_SIZES, sizedPrompt, sizesNeeded, videoRunner, otherRunner, failSafeOn, withMusicCredit,
 } from '../utils/shortSpec.js';
 import * as imageVideoJob from './imageVideoJobService.js';
 import { settings } from '../settings/index.js';
@@ -222,7 +222,7 @@ export async function githubDone(instanceId, result) {
       ...img,
       image: { url: result.images.feed, thumbnailUrl: feedId ? `https://drive.google.com/thumbnail?id=${feedId}&sz=w1000` : result.images.feed, driveId: feedId || null },
       images: result.images,
-      render: { runner: 'github', videos: result.videos, videoIds: result.videoIds || {}, seconds: result.seconds, subtitled: result.subtitled, ...(result.subtitleError ? { subtitleError: result.subtitleError } : {}) },
+      render: { runner: 'github', videos: result.videos, videoIds: result.videoIds || {}, seconds: result.seconds, subtitled: result.subtitled, ...(result.subtitleError ? { subtitleError: result.subtitleError } : {}), ...(result.musicCredit ? { musicCredit: result.musicCredit } : {}) },
     },
   });
   const at = new Date().toISOString();
@@ -298,7 +298,7 @@ async function makeOnRailway(ctx) {
     const made2 = await imageShort.renderVideos({
       images, sizes: Object.keys(IMAGE_VIDEO_SIZES), voice, music: providers.resolved.shortMusic, upload: (path) => publish.uploadFile(path, 'video/mp4'), log,
     });
-    render = { runner: 'railway', videos: made2.videos, seconds: made2.seconds, subtitled: made2.subtitled, ...(made2.subtitleError ? { subtitleError: made2.subtitleError } : {}) };
+    render = { runner: 'railway', videos: made2.videos, seconds: made2.seconds, subtitled: made2.subtitled, ...(made2.subtitleError ? { subtitleError: made2.subtitleError } : {}), ...(made2.musicCredit ? { musicCredit: made2.musicCredit } : {}) };
   }
   steps = instanceService.parseSteps(await instanceRepo.get(instanceId));
   steps = patchStep(steps, 'images', {
@@ -579,7 +579,7 @@ export async function approve(approval) {
   // aloud and the video is as long as the reading.
   const ready = img.render && img.render.videos && img.render.videos.portrait ? img.render : null;
   const video = ready
-    ? { videos: ready.videos, url: ready.videos.portrait, seconds: ready.seconds, voiced: true, subtitled: ready.subtitled, subtitleError: ready.subtitleError || '', chars: 0, runner: ready.runner }
+    ? { videos: ready.videos, url: ready.videos.portrait, seconds: ready.seconds, voiced: true, subtitled: ready.subtitled, subtitleError: ready.subtitleError || '', chars: 0, runner: ready.runner, musicCredit: ready.musicCredit || '' }
     : await videoFor({ row, f, providers, publish, images, sizes, text: full || short, log });
   if (video && video.error) {
     log.error({ err: video.error }, 'voice video not made; nothing posted');
@@ -591,7 +591,10 @@ export async function approve(approval) {
     return null;
   }
   if (video) {
-    req.platformConfigurations = imageVideoConfigs({ platforms, full, short, title: ytConfig.title, videos: video.videos, images });
+    // Your credit for the music that was used goes last in every caption (X only when it still fits 280).
+    req.platformConfigurations = imageVideoConfigs({
+      platforms, full: withMusicCredit(full, video.musicCredit), short: withMusicCredit(short, video.musicCredit, 280), title: ytConfig.title, videos: video.videos, images,
+    });
     req.imageUrl = req.mediaUrl;
     req.mediaUrl = video.url;
     req.imageVideo = {

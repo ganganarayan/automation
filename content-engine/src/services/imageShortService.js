@@ -28,7 +28,7 @@ async function musicFor(choice, dir, log) {
       if (notAudio(res.headers.get('content-type'))) throw new Error('the link gave a web page, not a music file');
       const file = join(dir, 'music');
       await writeFile(file, Buffer.from(await res.arrayBuffer()));
-      return { file };
+      return { file, credit: (picked.credits || {})[url] || '' };
     } catch (err) {
       if (log) log.warn({ err: err.message, url }, 'own Short music unreadable, trying the next');
     }
@@ -137,7 +137,7 @@ export async function renderVideos({ images = {}, sizes = [PRIMARY_SIZE], voice,
       }
       videos[size] = await upload(outPath);
     }
-    return { videos, seconds, subtitled: !!subPath, subtitleError };
+    return { videos, seconds, subtitled: !!subPath, subtitleError, musicCredit: track.credit || '' };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
