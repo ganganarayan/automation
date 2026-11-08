@@ -33,6 +33,7 @@ import * as aiLane from '../services/aiLaneService.js';
 import * as festivalService from '../services/festivalService.js';
 import * as disapproveService from '../services/disapproveService.js';
 import { canDisapprove } from '../utils/disapproveSpec.js';
+import * as takeDownService from '../services/takeDownService.js';
 import * as jobRunner from '../core/jobRunner.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
@@ -479,6 +480,17 @@ export function register(ctx) {
     }
   });
 
+  // 🗑 Take down: remove a live post from the channels you tick, on each platform.
+  router.post('/admin/instances/:id/take-down', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const ids = Array.isArray(req.body?.accountIds) ? req.body.accountIds.map(String) : [];
+      res.json({ ok: true, ...(await takeDownService.takeDown({ instanceId: req.params.id, accountIds: ids })) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   router.post('/admin/instances/:id/delete', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -597,6 +609,44 @@ const STATUS_LABEL = {
 function channelsOf(steps) {
   const pub = ((steps || []).find((s) => s.key === 'publish') || {}).artifacts || {};
   return Array.isArray(pub.channels) ? pub.channels : [];
+}
+
+/**
+ * 🗑 Take down: one tick per live channel and one button that removes the post
+ * from every ticked one, on the platform itself. '' when nothing is live.
+ */
+function takeDownBox(row, chans) {
+  if (!row || !['posted', 'partial'].includes(row.status)) return '';
+  const live = takeDownService.liveChannels(chans);
+  const gone = (chans || []).filter((c) => c.state === 'ok' && c.removedAt);
+  const notes = (chans || []).filter((c) => c.state === 'ok' && !c.removedAt && c.removeError);
+  if (!live.length && !gone.length) return '';
+  const ticks = live.map((c) => `<label class="nowrow"><input type="checkbox" class="tdc" value="${esc(String(c.id))}" checked> ${esc(channelText(c))}</label>`).join('<br>');
+  return `<div class="schedbar bad" id="takedown"><b>🗑 Take down</b>: tick the channels to remove this post from, then press Delete. It is deleted on each platform, not just here, and cannot be undone.
+    ${live.length ? `<div class="chans">${ticks}</div>
+    <div><button class="act" onclick="tdAll(true)">Tick all</button> <button class="act" onclick="tdAll(false)">Untick all</button>
+      <button class="act primary" id="tdbtn" onclick="takeDown()">🗑 Delete from ticked channels</button> <span class="hint" id="tdmsg"></span></div>` : '<div class="hint">🟢 Taken down from every channel.</div>'}
+    ${notes.length ? `<div class="hint">${notes.map((c) => `🟡 ${esc([c.platform, c.name].filter(Boolean).join(' '))}: last try failed (${esc(c.removeError)})`).join('<br>')}</div>` : ''}
+    ${gone.length ? `<div class="hint">${gone.map((c) => `${esc(channelText(c))} on ${esc(formatIst(c.removedAt))} IST`).join('<br>')}</div>` : ''}
+  </div>
+  <script>
+    function tdAll(on){ document.querySelectorAll('.tdc').forEach(e=>{ e.checked=on; }); }
+    async function takeDown(){
+      const ids=Array.from(document.querySelectorAll('.tdc')).filter(e=>e.checked).map(e=>e.value);
+      const m=document.getElementById('tdmsg'), b=document.getElementById('tdbtn');
+      if(!ids.length){ m.textContent='🟡 Tick at least one channel'; return; }
+      if(!confirm('Delete this post from '+ids.length+' channel(s)? It is removed on the platforms and cannot be undone.')) return;
+      b.disabled=true; m.textContent='Deleting…';
+      try{
+        const r=await fetch(${JSON.stringify(`/api/v1/admin/instances/${row.id}/take-down`)},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ accountIds: ids })});
+        const j=await r.json();
+        if(!j.ok) throw new Error(j.error||'failed');
+        const bad=(j.channels||[]).filter(c=>!c.removed);
+        m.textContent=(j.removed?'🟢 Removed from '+j.removed+' channel(s). ':'')+(bad.length?'🟡 Not removed: '+bad.map(c=>(c.platform||c.name)+' ('+c.error+')').join('; '):'');
+        setTimeout(()=>location.reload(), bad.length?6000:2000);
+      }catch(e){ b.disabled=false; m.textContent='🔴 '+e.message; }
+    }
+  </script>`;
 }
 
 // One of the seven Library labels with its colour dot (utils/libraryStatus);
@@ -836,6 +886,8 @@ function detailPage(row, steps) {
       </div>
     </div>
     <p class="ro">Read-only here. ${row.locked ? 'Posted and locked.' : 'Approve or request a change from the link in the daily email.'}</p>
+    ${channelsOf(steps).length && ['posted', 'partial'].includes(row.status) ? `<div class="chans">${channelsOf(steps).map((c) => esc(channelText(c)) + (/^https?:\/\//i.test(String(c.url || '')) && !c.removedAt ? ` · <a href="${esc(c.url)}" target="_blank" rel="noopener">Open post</a>` : '')).join('<br>')}</div>` : ''}
+    ${takeDownBox(row, channelsOf(steps))}
     ${row.locked ? '' : `<div class="row">
       <button class="act" onclick="sendReview('script')">✉ Send script review</button>
       <button class="act primary" onclick="sendReview('final')">✉ Send final review</button>
@@ -1178,7 +1230,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     : postFailed
     ? `<div class="schedbar bad">🔴 ${single.post_status === 'posting' ? 'Posting did not finish (the server restarted?).' : `The post did not go out: ${esc(single.note || 'unknown error')}`} Nothing was scheduled. Fix it, then press Schedule or Post now again.</div>`
     : partial
-    ? `<div class="schedbar bad">🟡 Partly posted. Reconnect the ❌ accounts in Post for Me, then re-post to just those (the ✅ ones are not posted again).${autoNote} ${retryBtn} <span class="hint" id="edmsg"></span>${chanList}${linkBox}</div>`
+    ? `<div class="schedbar bad">🟡 Partly posted. Reconnect the ❌ accounts in Post for Me, then re-post to just those (the ✅ ones are not posted again).${autoNote} ${retryBtn} <span class="hint" id="edmsg"></span>${chanList}${linkBox}</div>${takeDownBox(single, chans)}`
     : scheduled && chans.some((c) => c.state === 'ok')
       ? `<div class="schedbar">⏳ Re-posting to the failed channels… ${chanList}</div>`
       : scheduled
@@ -1187,7 +1239,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     : failed
       ? `<div class="schedbar bad">🔴 Post for Me reported this post failed on every channel. Reconnect the accounts in Post for Me, then ${retryBtn || 'post again'}, or ✏ Edit it first.${autoNote} <button class="act" onclick="editSched()">✏ Edit</button> <span class="hint" id="edmsg"></span>${chanList}</div>`
       : single && single.status === 'posted' && chans.length
-      ? `<div class="schedbar">🟢 Posted${single.posted_at ? ` on <b>${esc(formatIst(single.posted_at))} IST</b>` : ''}.${liveLinks.length ? ' The links are below, one per line.' : ''}${chanList}${linkBox}</div>`
+      ? `<div class="schedbar">🟢 Posted${single.posted_at ? ` on <b>${esc(formatIst(single.posted_at))} IST</b>` : ''}.${liveLinks.length ? ' The links are below, one per line.' : ''}${chanList}${linkBox}</div>${takeDownBox(single, chans)}`
       : '';
   const head = single
     ? `<div class="top">

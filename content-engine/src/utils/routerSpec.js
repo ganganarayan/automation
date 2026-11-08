@@ -127,7 +127,7 @@ export const CELL_NEWLINE = String.fromCharCode(10);
 /** The live links of the channels that posted, in order, de-duped. */
 export function postedLinks(channels = []) {
   const list = (Array.isArray(channels) ? channels : [])
-    .filter((c) => c && c.state === 'ok' && c.url)
+    .filter((c) => c && c.state === 'ok' && c.url && !c.removedAt)
     .map((c) => String(c.url).trim());
   return [...new Set(list)];
 }

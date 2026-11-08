@@ -191,14 +191,15 @@ export function channelOutcome(channels = []) {
   return ok ? 'partial' : 'failed';
 }
 
-/** A channel's state: ✅ posted, ❌ failed, ⏳ waiting. */
+/** A channel's state: ✅ posted, 🗑 posted then taken down, ❌ failed, ⏳ waiting. */
 export function channelIcon(c = {}) {
+  if (c.state === 'ok' && c.removedAt) return '🗑';
   return c.state === 'ok' ? '✅' : c.state === 'failed' ? '❌' : '⏳';
 }
 
 /** One channel as "✅ youtube Ganga" / "❌ x (error)" / "⏳ threads name". */
 export function channelText(c = {}) {
-  return `${channelIcon(c)} ${[c.platform, c.name].filter(Boolean).join(' ')}${c.as ? ` [${c.as}]` : ''}${c.state === 'failed' && c.error ? ` (${c.error})` : ''}`;
+  return `${channelIcon(c)} ${[c.platform, c.name].filter(Boolean).join(' ')}${c.as ? ` [${c.as}]` : ''}${c.state === 'failed' && c.error ? ` (${c.error})` : ''}${c.state === 'ok' && c.removedAt ? ' (taken down)' : ''}`;
 }
 
 /**

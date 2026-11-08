@@ -63,7 +63,7 @@ const later = (minutes) => new Date(Date.now() + minutes * 60000);
  * (the one comment → DM already replies with) first, then Post for Me's.
  * Everything else: Post for Me's account token.
  */
-async function tokensFor(tenantId, platform, postId, account = {}) {
+export async function tokensFor(tenantId, platform, postId, account = {}) {
   const pfm = { via: 'postforme', token: account.access_token || '' };
   const key = commentPlatform(platform);
   if (key !== 'facebook' && key !== 'instagram') return [pfm];
