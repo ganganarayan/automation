@@ -1,0 +1,52 @@
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('../src/services/festivalService.js', () => ({
+  MAX_BYTES: 15 * 1024 * 1024,
+  MAX_COPY: 2000,
+  funnelReadiness: vi.fn(async () => [
+    { id: 1, name: 'HNI Parents', active: true, problem: '' },
+    { id: 2, name: 'No Voice', active: true, problem: 'no voice chosen for this funnel' },
+  ]),
+  batches: vi.fn(async () => [{
+    batchId: 'b1', title: 'Happy Diwali', copy: 'Light & joy', thumbUrl: '', createdAt: '2026-11-08T02:30:00Z',
+    rows: [{ id: 'i1', funnelName: 'HNI Parents', status: 'image_review', approvalId: 'a1', autoPost: false, videoUrl: 'https://x/v' }],
+  }]),
+}));
+vi.mock('../src/services/accessService.js', () => ({ keyOk: vi.fn(async () => true), currentSession: vi.fn(async () => null) }));
+vi.mock('../src/utils/time.js', () => ({
+  formatIst: (v) => String(v),
+  nowIst: () => ({ plus: () => ({ toFormat: () => '2026-11-08T08:00' }) }),
+}));
+vi.mock('../src/utils/retrySpec.js', () => ({ parseRetryDate: vi.fn() }));
+
+const { register } = await import('../src/modules/festival.js');
+
+async function renderPage() {
+  const routes = {};
+  const router = { get: (p, ...h) => { routes[`GET ${p}`] = h.at(-1); }, post: (p, ...h) => { routes[`POST ${p}`] = h.at(-1); } };
+  register({ router, log: { info: vi.fn(), warn: vi.fn() } });
+  let html = '';
+  const res = { set: () => res, type: () => res, send: (h) => { html = h; }, redirect: vi.fn() };
+  await routes['GET /admin/festival']({ tenantId: 'default', originalUrl: '/x' }, res, (e) => { throw e; });
+  return { html, routes };
+}
+
+describe('festival page', () => {
+  it('registers its routes, the photo compose included', async () => {
+    const { routes } = await renderPage();
+    expect(Object.keys(routes)).toEqual(expect.arrayContaining(['POST /admin/festival/upload', 'POST /admin/festival/compose', 'POST /admin/festival', 'POST /admin/festival/approve-all']));
+  });
+  it('renders the form, the funnels with their state, and a waiting batch', async () => {
+    const { html } = await renderPage();
+    expect(html).toContain('Your photo on it');
+    expect(html).toContain('🟢 HNI Parents');
+    expect(html).toContain('🔴 No Voice');
+    expect(html).toContain('Approve all 1 waiting');
+    expect(html).toContain('Light &amp; joy');
+  });
+  it('ships a browser script that parses', async () => {
+    const { html } = await renderPage();
+    const script = html.slice(html.indexOf('<script>') + 8, html.lastIndexOf('</script>'));
+    expect(() => new Function(script)).not.toThrow();
+  });
+});

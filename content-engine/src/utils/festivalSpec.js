@@ -41,4 +41,24 @@ export function stateOf(r = {}) {
   }
 }
 
-export default { festivalCaptions, stateOf, istText, X_LIMIT };
+/** How tall your photo stands, as a share of the picture's height. */
+export const CUTOUT_SIZES = { small: 0.45, medium: 0.6, large: 0.75 };
+export const CUTOUT_POSITIONS = ['left', 'center', 'right'];
+
+/**
+ * Where your background-removed photo goes on the picture (W x H): standing on
+ * the bottom edge, at `position`, `size` of the height tall, never wider than
+ * 90% of the picture. w x h is the photo's own size. Whole pixels.
+ */
+export function overlayBox({ W, H, w, h, position = 'right', size = 'medium' }) {
+  const share = CUTOUT_SIZES[size] || CUTOUT_SIZES.medium;
+  const scale = Math.min((H * share) / h, (W * 0.9) / w);
+  const width = Math.max(1, Math.round(w * scale));
+  const height = Math.max(1, Math.round(h * scale));
+  const margin = Math.round(W * 0.03);
+  const pos = CUTOUT_POSITIONS.includes(position) ? position : 'right';
+  const left = pos === 'left' ? margin : pos === 'center' ? Math.round((W - width) / 2) : W - width - margin;
+  return { width, height, left: Math.max(0, left), top: Math.max(0, H - height) };
+}
+
+export default { festivalCaptions, stateOf, istText, overlayBox, CUTOUT_SIZES, CUTOUT_POSITIONS, X_LIMIT };

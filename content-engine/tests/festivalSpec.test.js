@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { festivalCaptions, stateOf, X_LIMIT } from '../src/utils/festivalSpec.js';
+import { festivalCaptions, stateOf, overlayBox, X_LIMIT } from '../src/utils/festivalSpec.js';
 import { laneOf } from '../src/utils/laneSpec.js';
 import { retryAction } from '../src/utils/retrySpec.js';
 
@@ -38,5 +38,28 @@ describe('festival lane wiring', () => {
   });
   it('retries on its own, never through a router day', () => {
     expect(retryAction({ source_type: 'festival', status: 'failed' }, [])).toBe('festival');
+  });
+});
+
+describe('overlayBox (your photo on the picture)', () => {
+  const W = 1000;
+  const H = 1250;
+  it('stands on the bottom edge, at the right by default, 60% of the height', () => {
+    const b = overlayBox({ W, H, w: 400, h: 800 });
+    expect(b.height).toBe(750);
+    expect(b.width).toBe(375);
+    expect(b.top).toBe(H - 750);
+    expect(b.left).toBe(W - 375 - 30);
+  });
+  it('goes left or centre, small or large', () => {
+    expect(overlayBox({ W, H, w: 400, h: 800, position: 'left', size: 'small' }).left).toBe(30);
+    const c = overlayBox({ W, H, w: 400, h: 800, position: 'center', size: 'large' });
+    expect(c.height).toBe(938);
+    expect(c.left).toBe(Math.round((W - c.width) / 2));
+  });
+  it('is never wider than 90% of the picture', () => {
+    const b = overlayBox({ W, H, w: 2000, h: 500, size: 'large' });
+    expect(b.width).toBe(900);
+    expect(b.top + b.height).toBe(H);
   });
 });

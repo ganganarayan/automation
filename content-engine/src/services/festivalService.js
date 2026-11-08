@@ -10,6 +10,8 @@
  *               see festival instances (instanceRepository.liveOnDate skips them).
  * Responsibility:
  *               - upload: the picture to Drive, shared Anyone with the link.
+ *               - compose: your background-removed photo placed on the picture
+ *                 (standing on the bottom edge), saved as a new picture.
  *               - start: check each funnel (accounts, voice), make one instance per
  *                 funnel (source_type 'festival', source_ref = the batch id) and
  *                 have the image lane make its video, in the background.
@@ -27,6 +29,8 @@ import * as funnels from '../repositories/funnelsRepository.js';
 import { buildProviders } from './providerFactory.js';
 import * as heartbeat from '../core/heartbeat.js';
 import { childLogger } from '../core/logger.js';
+import sharp from 'sharp';
+import { overlayBox } from '../utils/festivalSpec.js';
 
 const log = childLogger({ module: 'festival' });
 
@@ -53,6 +57,42 @@ export async function upload({ tenantId = 'default', buffer, mime = '' }) {
   const up = await providers.storage.uploadMedia(folder || null, `festival-${stamp}.${ext}`, mime, buffer);
   if (!up || !up.downloadUrl) throw new Error('the picture could not be uploaded to Drive');
   return { url: up.downloadUrl, driveId: up.id || '', thumbnailUrl: up.thumbnailUrl || up.downloadUrl };
+}
+
+/** A Drive file's bytes: through the app's Drive access, else its public link. */
+async function bytesOf(providers, { driveId = '', url = '' } = {}) {
+  if (driveId) {
+    try {
+      return await providers.storage.download(driveId);
+    } catch (err) {
+      if (!url) throw err;
+    }
+  }
+  if (!/^https:\/\//.test(url)) throw new Error('the picture is missing');
+  const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`the picture could not be downloaded (${res.status})`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * Your background-removed photo on the festival picture, uploaded as a new
+ * picture. picture / cutout: { driveId, url }. Returns { url, driveId, thumbnailUrl }.
+ */
+export async function compose({ tenantId = 'default', picture, cutout, position = 'right', size = 'medium' }) {
+  const providers = await buildProviders(tenantId);
+  const [pic, cut] = await Promise.all([bytesOf(providers, picture), bytesOf(providers, cutout)]);
+  // Turned upright by its EXIF and kept within 2000 px, so the result stays well under the upload limit.
+  const { data: upright, info } = await sharp(pic).rotate().resize(2000, 2000, { fit: 'inside', withoutEnlargement: true }).png().toBuffer({ resolveWithObject: true });
+  const W = info.width;
+  const H = info.height;
+  const meta = await sharp(cut).metadata();
+  if (!meta.hasAlpha) throw new Error('your photo has no transparent background: upload the background-removed PNG (or WebP)');
+  // Trim the empty edges, so the photo stands right on the bottom of the picture.
+  const trimmed = await sharp(cut).trim().png().toBuffer({ resolveWithObject: true }).catch(() => sharp(cut).png().toBuffer({ resolveWithObject: true }));
+  const box = overlayBox({ W, H, w: trimmed.info.width, h: trimmed.info.height, position, size });
+  const layer = await sharp(trimmed.data).resize(box.width, box.height).png().toBuffer();
+  const out = await sharp(upright).composite([{ input: layer, left: box.left, top: box.top }]).png().toBuffer();
+  return upload({ tenantId, buffer: out, mime: 'image/png' });
 }
 
 /** Each funnel with whether it can take a festival post: [{ id, name, active, problem }]. */
@@ -184,4 +224,4 @@ export async function retry({ tenantId = 'default', id }) {
   return { ok: true };
 }
 
-export default { upload, funnelReadiness, start, viewOf, batches, approve, approveAll, retry, MAX_BYTES, IMAGE_TYPES, MAX_COPY };
+export default { upload, compose, funnelReadiness, start, viewOf, batches, approve, approveAll, retry, MAX_BYTES, IMAGE_TYPES, MAX_COPY };

@@ -8,6 +8,7 @@
  * Routes: GET  /api/v1/admin/festival                 the page (form + past festival posts)
  *         GET  /api/v1/admin/festival/status          JSON: the batches (the page polls it)
  *         POST /api/v1/admin/festival/upload          the picture as the raw body (image/png|jpeg|webp)
+ *         POST /api/v1/admin/festival/compose         { picture, cutout, position, size }: your photo on the picture
  *         POST /api/v1/admin/festival                 { title, copy, imageUrl, driveId, funnelIds, postAt, autoPost }
  *         POST /api/v1/admin/festival/:id/approve     approve one waiting post
  *         POST /api/v1/admin/festival/approve-all     { batchId }
@@ -20,7 +21,7 @@ import { keyOk, currentSession } from '../services/accessService.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst, nowIst } from '../utils/time.js';
 import { parseRetryDate } from '../utils/retrySpec.js';
-import { stateOf } from '../utils/festivalSpec.js';
+import { stateOf, CUTOUT_SIZES } from '../utils/festivalSpec.js';
 
 const BASE = '/api/v1/admin/festival';
 
@@ -76,6 +77,17 @@ export function register(ctx) {
       }
     },
   );
+
+  router.post('/admin/festival/compose', async (req, res) => {
+    if (!(await guardJson(req, res))) return;
+    try {
+      const b = req.body || {};
+      res.json({ ok: true, ...(await festival.compose({ tenantId: tenant(req), picture: b.picture, cutout: b.cutout, position: b.position, size: b.size })) });
+    } catch (err) {
+      log.warn({ err: err.message }, 'festival photo could not be placed');
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
 
   router.post('/admin/festival', async (req, res) => {
     if (!(await guardJson(req, res))) return;
@@ -189,7 +201,9 @@ ${NAV_CSS}
  .hint{color:#6f6f88;font-size:.8rem}
  .fn{display:block;padding:.3rem 0;font-size:.9rem}.fn.off{opacity:.6}
  .row{display:flex;gap:1.2rem;flex-wrap:wrap;align-items:center}
- #preview{max-width:240px;max-height:240px;border-radius:8px;margin-top:.5rem;display:none}
+ #preview{max-width:320px;max-height:320px;border-radius:8px;margin-top:.5rem;display:none;background:#000}
+ .me{display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.3rem}
+ #methumb{width:64px;height:64px;object-fit:contain;border-radius:8px;background:repeating-conic-gradient(#2a2a44 0 25%,#1a1a2a 0 50%) 0 0/16px 16px;display:none}
  #msg{margin-top:.8rem;font-size:.88rem;white-space:pre-line}
  .batch{background:#12121b;border:1px solid #24243a;border-radius:12px;padding:.9rem;margin-bottom:1rem}
  .bhead{display:flex;gap:.9rem;margin-bottom:.7rem}.bthumb{width:90px;height:90px;object-fit:cover;border-radius:8px}
@@ -207,7 +221,23 @@ ${NAV_CSS}
   <div class="card">
     <label class="blk">1. Picture (PNG, JPG or WebP, up to 15 MB). Used whole: it sits on a blurred copy of itself where a size needs more room.</label>
     <input type="file" id="pic" accept="image/png,image/jpeg,image/webp" onchange="showPic()">
-    <img id="preview" alt="">
+    <label class="blk">Your photo on it (optional): your background-removed PNG, standing on the bottom edge. It is remembered for next time.</label>
+    <div class="me">
+      <img id="methumb" alt="">
+      <input type="file" id="me" accept="image/png,image/webp" onchange="pickMe()">
+      <button class="act" type="button" id="meclear" onclick="clearMe()" style="display:none">✕ No photo</button>
+    </div>
+    <div class="row" id="meopts" style="display:none;margin-top:.4rem">
+      <span class="hint">Where:</span>
+      <label class="fn"><input type="radio" name="mepos" value="left" onchange="draw()"> Left</label>
+      <label class="fn"><input type="radio" name="mepos" value="center" onchange="draw()"> Centre</label>
+      <label class="fn"><input type="radio" name="mepos" value="right" checked onchange="draw()"> Right</label>
+      <span class="hint">Size:</span>
+      <label class="fn"><input type="radio" name="mesize" value="small" onchange="draw()"> Small</label>
+      <label class="fn"><input type="radio" name="mesize" value="medium" checked onchange="draw()"> Medium</label>
+      <label class="fn"><input type="radio" name="mesize" value="large" onchange="draw()"> Large</label>
+    </div>
+    <canvas id="preview"></canvas>
     <label class="blk">2. Title (the YouTube title and the name in the Library)</label>
     <input type="text" id="title" maxlength="90" placeholder="Happy Diwali">
     <label class="blk">3. Copy: the caption on every channel, and what the voice reads aloud</label>
@@ -233,7 +263,32 @@ ${NAV_CSS}
 <script>
 const $=(id)=>document.getElementById(id);
 function msg(t){ $('msg').textContent=t; }
-function showPic(){ const f=$('pic').files[0]; const p=$('preview'); if(!f){p.style.display='none';return;} p.src=URL.createObjectURL(f); p.style.display='block'; }
+// Same placement as the server (utils/festivalSpec overlayBox), for the preview.
+const SIZES=${JSON.stringify(CUTOUT_SIZES)};
+function box(W,H,w,h,pos,size){ const sc=Math.min(H*(SIZES[size]||SIZES.medium)/h, W*0.9/w); const bw=Math.max(1,Math.round(w*sc)), bh=Math.max(1,Math.round(h*sc)); const m=Math.round(W*0.03); const l=pos==='left'?m:pos==='center'?Math.round((W-bw)/2):W-bw-m; return {w:bw,h:bh,l:Math.max(0,l),t:Math.max(0,H-bh)}; }
+const KEY='festivalMe';
+let picImg=null, meImg=null, meFile=null, meSaved=null;
+try{ meSaved=JSON.parse(localStorage.getItem(KEY)||'null'); }catch(e){ meSaved=null; }
+function load(src){ return new Promise((ok,no)=>{ const i=new Image(); i.onload=()=>ok(i); i.onerror=no; i.src=src; }); }
+// Empty edges of the photo are cut off, as the server does, so it stands on the bottom.
+function trimmed(img){ const c=document.createElement('canvas'); c.width=img.naturalWidth; c.height=img.naturalHeight; const x=c.getContext('2d'); x.drawImage(img,0,0);
+  let d; try{ d=x.getImageData(0,0,c.width,c.height).data; }catch(e){ return {img, sx:0, sy:0, w:c.width, h:c.height}; }
+  let t=c.height,b=-1,l=c.width,r=-1; for(let y=0;y<c.height;y++) for(let q=0;q<c.width;q++){ if(d[(y*c.width+q)*4+3]>8){ if(y<t)t=y; if(y>b)b=y; if(q<l)l=q; if(q>r)r=q; } }
+  return b<0 ? {img, sx:0, sy:0, w:c.width, h:c.height} : {img, sx:l, sy:t, w:r-l+1, h:b-t+1}; }
+let meTrim=null;
+function draw(){
+  const c=$('preview'); if(!picImg){ c.style.display='none'; return; }
+  c.width=picImg.naturalWidth; c.height=picImg.naturalHeight; const x=c.getContext('2d'); x.drawImage(picImg,0,0);
+  if(meTrim){ const pos=document.querySelector('input[name=mepos]:checked').value, size=document.querySelector('input[name=mesize]:checked').value;
+    const b=box(c.width,c.height,meTrim.w,meTrim.h,pos,size); x.drawImage(meTrim.img,meTrim.sx,meTrim.sy,meTrim.w,meTrim.h,b.l,b.t,b.w,b.h); }
+  c.style.display='block';
+}
+async function showPic(){ const f=$('pic').files[0]; picImg=f ? await load(URL.createObjectURL(f)) : null; draw(); }
+async function setMe(src){ $('methumb').src=src; $('methumb').style.display='block'; $('meclear').style.display='inline-flex'; $('meopts').style.display='flex';
+  try{ meImg=await load(src); meTrim=trimmed(meImg); }catch(e){ meImg=null; meTrim=null; } draw(); }
+async function pickMe(){ const f=$('me').files[0]; if(!f) return; meFile=f; await setMe(URL.createObjectURL(f)); }
+function clearMe(){ meFile=null; meSaved=null; meImg=null; meTrim=null; localStorage.removeItem(KEY); $('me').value=''; $('methumb').style.display='none'; $('meclear').style.display='none'; $('meopts').style.display='none'; draw(); }
+if(meSaved && meSaved.url){ setMe(meSaved.thumbnailUrl||meSaved.url); if(meSaved.position){ const p=document.querySelector('input[name=mepos][value='+meSaved.position+']'); if(p) p.checked=true; } if(meSaved.size){ const z=document.querySelector('input[name=mesize][value='+meSaved.size+']'); if(z) z.checked=true; } }
 function count(){ const n=$('copy').value.trim().length; $('cnt').textContent=n+' characters. X gets the first 280, cut at a word.'; }
 function tick(on){ document.querySelectorAll('input[name=fn]:not(:disabled)').forEach(c=>c.checked=on); }
 function when(){ $('at').disabled=document.querySelector('input[name=when]:checked').value!=='at'; }
@@ -252,8 +307,23 @@ async function go(){
   try{
     const up=await (await fetch('${BASE}/upload',{method:'POST',headers:{'Content-Type':f.type},body:f})).json().catch(()=>({ok:false,error:'upload failed'}));
     if(!up.ok) throw new Error(up.error||'upload failed');
+    let pic=up;
+    if(meFile || (meSaved && meSaved.url)){
+      const position=document.querySelector('input[name=mepos]:checked').value, size=document.querySelector('input[name=mesize]:checked').value;
+      let me=meSaved;
+      if(meFile){
+        msg('🟡 Uploading your photo...');
+        me=await (await fetch('${BASE}/upload',{method:'POST',headers:{'Content-Type':meFile.type},body:meFile})).json().catch(()=>({ok:false,error:'upload failed'}));
+        if(!me.ok) throw new Error(me.error||'your photo did not upload');
+      }
+      msg('🟡 Placing your photo on the picture...');
+      pic=await post('${BASE}/compose',{picture:{driveId:up.driveId,url:up.url},cutout:{driveId:me.driveId,url:me.url},position,size});
+      if(!pic.ok) throw new Error(pic.error||'your photo could not be placed');
+      meSaved={url:me.url,driveId:me.driveId,thumbnailUrl:me.thumbnailUrl,position,size}; meFile=null;
+      localStorage.setItem(KEY, JSON.stringify(meSaved));
+    }
     msg('🟡 Starting the videos...');
-    const r=await post('${BASE}',{title:$('title').value.trim(),copy,imageUrl:up.url,driveId:up.driveId,funnelIds,postAt:at,autoPost:$('auto').checked});
+    const r=await post('${BASE}',{title:$('title').value.trim(),copy,imageUrl:pic.url,driveId:pic.driveId,funnelIds,postAt:at,autoPost:$('auto').checked});
     if(!r.ok) throw new Error(r.error||'could not start');
     let t='🟢 Making the video for: '+(r.started.join(', ')||'none')+'. Each takes a few minutes; this list updates by itself.';
     if(r.skipped.length) t+='\\n🔴 Skipped: '+r.skipped.map(s=>s.name+' ('+s.reason+')').join('; ');
