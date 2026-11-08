@@ -3,10 +3,12 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../src/services/festivalService.js', () => ({
   MAX_BYTES: 15 * 1024 * 1024,
   MAX_COPY: 2000,
+  voiceList: vi.fn(async () => [{ voice_id: 'v1abcdefgh', name: 'Ann', category: 'cloned', preview_url: 'https://x/p.mp3' }]),
   musicList: vi.fn(async () => [{ url: 'https://drive.google.com/uc?export=download&id=abc', credit: 'Diya by Asha, CC BY' }]),
   funnelReadiness: vi.fn(async () => [
     { id: 1, name: 'HNI Parents', active: true, problem: '' },
-    { id: 2, name: 'No Voice', active: true, problem: 'no voice chosen for this funnel' },
+    { id: 2, name: 'No Voice', active: true, problem: 'no voice chosen for this funnel', voiceOnly: true },
+    { id: 3, name: 'No Accounts', active: true, problem: 'no Post for Me accounts ticked on this funnel' },
   ]),
   batches: vi.fn(async () => [{
     batchId: 'b1', title: 'Happy Diwali', copy: 'Light & joy', thumbUrl: '', createdAt: '2026-11-08T02:30:00Z',
@@ -41,7 +43,11 @@ describe('festival page', () => {
     const { html } = await renderPage();
     expect(html).toContain('Your photo on it');
     expect(html).toContain('🟢 HNI Parents');
-    expect(html).toContain('🔴 No Voice');
+    expect(html).toContain('🟡 No Voice');
+    expect(html).toContain('data-voiceonly="1"');
+    expect(html).toContain('🔴 No Accounts');
+    expect(html).toContain("Each funnel's own voice");
+    expect(html).toContain('Ann (cloned)');
     expect(html).toContain('Approve all 1 waiting');
     expect(html).toContain('Light &amp; joy');
     expect(html).toContain('🔇 None: voice only');

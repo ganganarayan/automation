@@ -207,7 +207,7 @@ async function startOnGithub({ instanceId, f, providers }) {
     prompts: given ? {} : Object.fromEntries(sizes.map((s) => [s, sizedPrompt(img.prompt || '', s)])),
     ...(given ? { imageUrls: Object.fromEntries(sizes.map((s) => [s, img.festival.imageUrl])), subMargins: photoSubMargins(img.festival), subTop: true, title: img.festival.title || '', musicSetting: musicChoice(providers.resolved.shortMusic, img.festival.music, img.festival.musicCredit) } : {}),
     text: script.captionFull || script.captionShort || '',
-    voiceId: cfg.voice_id || '',
+    voiceId: (img.festival && img.festival.voiceId) || cfg.voice_id || '',
     name: `${poster.slug(f.name)}-${poster.slug((img.sheet || {}).key || (given ? 'festival' : ''))}-r${inst.round || 1}`,
   };
   await imageVideoJob.start({ instance: inst, providers, job, baseUrl: settings.app.publicBaseUrl });
@@ -300,7 +300,7 @@ async function makeOnRailway(ctx) {
   let render = null;
   let chars = 0;
   if (video) {
-    const voiceCfg = await voiceSetup({ funnelId: f.id, providers, log });
+    const voiceCfg = await voiceSetup({ funnelId: f.id, providers, log, voiceId: (img.festival || {}).voiceId || '' });
     if (voiceCfg.error) throw new Error(voiceCfg.error);
     const voice = await imageShort.makeVoice({ tts: voiceCfg.tts, text: script.captionFull || script.captionShort || '', log });
     chars = voice.chars;
@@ -439,7 +439,7 @@ export async function prepareFestival({ funnelRow, title, festival, postAt = nul
   const f = await funnels.resolve(funnelRow);
   if (!(f.accounts || []).length) throw new LaneError('no Post for Me accounts ticked on this funnel');
   const providers = await buildProviders(f.tenantId);
-  const voice = await voiceSetup({ funnelId: f.id, providers, log });
+  const voice = await voiceSetup({ funnelId: f.id, providers, log, voiceId: festival.voiceId || '' });
   if (voice.error) throw new LaneError(voice.error);
   const inst = await instanceService.createForFunnel({
     tenantId: f.tenantId,
@@ -460,10 +460,10 @@ export async function prepareFestival({ funnelRow, title, festival, postAt = nul
 }
 
 /** Why a funnel can't take a festival post ('' when it can): accounts and the voice, checked before anything is made. */
-export async function festivalProblem(funnelRow, providers, log = baseLog) {
+export async function festivalProblem(funnelRow, providers, log = baseLog, voiceId = '') {
   const f = await funnels.resolve(funnelRow);
   if (!(f.accounts || []).length) return 'no Post for Me accounts ticked on this funnel';
-  const voice = await voiceSetup({ funnelId: f.id, providers, log });
+  const voice = await voiceSetup({ funnelId: f.id, providers, log, voiceId });
   return voice.error || '';
 }
 
@@ -728,9 +728,14 @@ export async function approve(approval) {
  * The funnel's voice for image-post videos: { tts } or { error } saying what
  * to set up. Both the voice (lane setup) and the ElevenLabs key are needed.
  */
-async function voiceSetup({ funnelId, providers, log }) {
-  const cfg = await funnels.getConfig(funnelId).catch(() => ({}));
+async function voiceSetup({ funnelId, providers, log, voiceId = '' }) {
   const apiKey = ((providers.resolved.tts || {}).elevenlabsApiKey) || '';
+  // A festival post may pick one ElevenLabs voice for every funnel.
+  if (voiceId) {
+    if (!apiKey) return { error: 'no ElevenLabs key: add it on Keys and credit' };
+    return { tts: createTtsProvider({ provider: 'elevenlabs', apiKey, voiceId }, log) };
+  }
+  const cfg = await funnels.getConfig(funnelId).catch(() => ({}));
   if (!cfg.voice_id) return { error: 'no voice chosen for this funnel: pick one in its lane setup (Lane 2, Voice)' };
   if (!apiKey) return { error: 'no ElevenLabs key: add it on Keys and credit' };
   if (String(cfg.tts_provider || 'elevenlabs').toLowerCase() !== 'elevenlabs') return { error: 'image-post videos need an ElevenLabs voice (this funnel uses another voice provider)' };

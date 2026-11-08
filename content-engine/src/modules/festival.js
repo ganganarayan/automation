@@ -49,13 +49,14 @@ export function register(ctx) {
   router.get('/admin/festival', async (req, res, next) => {
     try {
       if (!(await guardHtml(req, res))) return;
-      const [session, funnels, batches, music] = await Promise.all([
+      const [session, funnels, batches, music, voices] = await Promise.all([
         currentSession(req),
         festival.funnelReadiness(tenant(req)).catch(() => []),
         festival.batches(tenant(req)).catch(() => []),
         festival.musicList(tenant(req)).catch(() => []),
+        festival.voiceList(tenant(req)).catch(() => []),
       ]);
-      res.set('Cache-Control', 'no-store').type('html').send(page({ session, funnels, batches, music }));
+      res.set('Cache-Control', 'no-store').type('html').send(page({ session, funnels, batches, music, voices }));
     } catch (err) {
       next(err);
     }
@@ -181,9 +182,11 @@ function funnelsHtml(funnels = []) {
   if (!funnels.length) return '<p class="hint">No funnels yet. Add one in Setup, Funnels.</p>';
   return funnels.map((f) => {
     const ok = !f.problem;
-    const on = ok && f.active;
-    return `<label class="fn${ok ? '' : ' off'}"><input type="checkbox" name="fn" value="${esc(f.id)}" ${on ? 'checked' : ''} ${ok ? '' : 'disabled'}>
-      ${ok ? '🟢' : '🔴'} ${esc(f.name)}${f.active ? '' : ' <span class="hint">(paused)</span>'}${ok ? '' : `<span class="hint"> : ${esc(f.problem)}</span>`}</label>`;
+    // A funnel with no voice of its own can still take the post when a voice is picked above.
+    const dot = ok ? '🟢' : f.voiceOnly ? '🟡' : '🔴';
+    const note = ok ? '' : f.voiceOnly ? ' : no voice of its own, pick a voice above to include it' : ` : ${f.problem}`;
+    return `<label class="fn${ok ? '' : ' off'}"><input type="checkbox" name="fn" value="${esc(f.id)}" ${ok && f.active ? 'checked' : ''} ${ok ? '' : 'disabled'}${f.voiceOnly ? ' data-voiceonly="1"' : ''}>
+      ${dot} ${esc(f.name)}${f.active ? '' : ' <span class="hint">(paused)</span>'}${note ? `<span class="hint">${esc(note)}</span>` : ''}</label>`;
   }).join('');
 }
 
@@ -197,7 +200,16 @@ function musicHtml(music = []) {
   <button class="act" type="button" id="mplay" onclick="playMusic()" style="display:none">▶ Play</button>`;
 }
 
-function page({ session, funnels, batches, music = [] }) {
+function voiceHtml(voices = []) {
+  return `<select id="voice" onchange="voicePicked()" style="max-width:100%;background:#0b0b12;color:#e8e8ef;border:1px solid #2a2a44;border-radius:8px;padding:.45rem">
+    <option value="">🗣 Each funnel's own voice</option>
+    ${voices.map((v) => `<option value="${esc(v.voice_id)}" data-preview="${esc(v.preview_url || '')}">${esc(v.name)}${v.category ? ` (${esc(v.category)})` : ''}</option>`).join('')}
+  </select>
+  <button class="act" type="button" id="vplay" onclick="playVoice()" style="display:none">▶ Sample</button>
+  ${voices.length ? '' : '<div class="hint">No ElevenLabs voices to list (is the key set on Keys and credit?). Each funnel uses its own voice.</div>'}`;
+}
+
+function page({ session, funnels, batches, music = [], voices = [] }) {
   const minAt = nowIst().plus({ minutes: 15 }).toFormat("yyyy-MM-dd'T'HH:mm");
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Festival post, automation</title>
@@ -264,6 +276,8 @@ ${NAV_CSS}
     <label class="blk">3. Copy: the caption on every channel, read aloud, its lines shown at the top of the video</label>
     <textarea id="copy" maxlength="${festival.MAX_COPY}" placeholder="Wishing you and your family a bright and joyful Diwali..." oninput="count();draw()" onkeyup="draw()" onclick="draw()"></textarea>
     <div class="hint" id="cnt">0 characters. X gets the first 280, cut at a word.</div>
+    <label class="blk">Voice that reads the copy (this festival post only)</label>
+    ${voiceHtml(voices)}
     <label class="blk">Background music (under the voice; its credit goes last in the caption)</label>
     ${musicHtml(music)}
     <label class="blk">4. Funnels</label>
@@ -394,7 +408,7 @@ async function go(){
       localStorage.setItem(KEY, JSON.stringify(meSaved));
     }
     msg('🟡 Starting the videos...');
-    const r=await post('${BASE}',{title:$('title').value.trim(),copy,imageUrl:pic.url,driveId:pic.driveId,photo:pic.photoTop?{aspect:pic.aspect,photoTop:pic.photoTop}:null,music:$('music').value,musicCredit:($('music').selectedOptions[0]||{}).dataset?.credit||'',funnelIds,postAt:at,autoPost:$('auto').checked});
+    const r=await post('${BASE}',{title:$('title').value.trim(),copy,imageUrl:pic.url,driveId:pic.driveId,photo:pic.photoTop?{aspect:pic.aspect,photoTop:pic.photoTop}:null,music:$('music').value,musicCredit:($('music').selectedOptions[0]||{}).dataset?.credit||'',voiceId:$('voice').value,funnelIds,postAt:at,autoPost:$('auto').checked});
     if(!r.ok) throw new Error(r.error||'could not start');
     let t='🟢 Making the video for: '+(r.started.join(', ')||'none')+'. Each takes a few minutes; this list updates by itself.';
     if(r.skipped.length) t+='\\n🔴 Skipped: '+r.skipped.map(s=>s.name+' ('+s.reason+')').join('; ');
@@ -411,6 +425,11 @@ async function approveAll(batchId){
   const r=await post('${BASE}/approve-all',{batchId});
   if(!r.ok) alert(r.error||'failed'); else msg('🟢 Approved '+r.approved+'.'); refresh();
 }
+let vaudio=null;
+function voicePicked(){ if(vaudio){ vaudio.pause(); vaudio=null; } const o=$('voice').selectedOptions[0]; $('vplay').style.display=o&&o.dataset.preview?'inline-flex':'none'; $('vplay').textContent='▶ Sample';
+  document.querySelectorAll('input[name=fn][data-voiceonly]').forEach(c=>{ c.disabled=!$('voice').value; if(c.disabled) c.checked=false; }); }
+function playVoice(){ if(vaudio){ vaudio.pause(); vaudio=null; $('vplay').textContent='▶ Sample'; return; }
+  const o=$('voice').selectedOptions[0]; if(!o||!o.dataset.preview) return; vaudio=new Audio(o.dataset.preview); vaudio.onended=()=>{ vaudio=null; $('vplay').textContent='▶ Sample'; }; vaudio.play().then(()=>{ $('vplay').textContent='■ Stop'; }).catch(()=>{ vaudio=null; }); }
 let audio=null;
 function musicPicked(){ if(audio){ audio.pause(); audio=null; } const v=$('music').value; $('mplay').style.display=/^https:/.test(v)?'inline-flex':'none'; $('mplay').textContent='▶ Play'; }
 function playMusic(){ if(audio){ audio.pause(); audio=null; $('mplay').textContent='▶ Play'; return; }

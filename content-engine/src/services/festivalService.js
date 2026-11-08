@@ -33,6 +33,7 @@ import sharp from 'sharp';
 import { overlayBox } from '../utils/festivalSpec.js';
 import { musicEntries } from '../utils/shortSpec.js';
 import { expandMusic } from './musicFolderService.js';
+import { listElevenLabsVoices } from '../providers/ttsProvider.js';
 
 const log = childLogger({ module: 'festival' });
 
@@ -98,6 +99,12 @@ export async function compose({ tenantId = 'default', picture, cutout, position 
   return { ...(await upload({ tenantId, buffer: out, mime: 'image/png' })), aspect: W / H, photoTop: box.top / H };
 }
 
+/** Your ElevenLabs voices to pick from: [{ voice_id, name, category, preview_url }] ([] with no key). */
+export async function voiceList(tenantId = 'default') {
+  const key = (((await buildProviders(tenantId)).resolved || {}).tts || {}).elevenlabsApiKey || '';
+  return key ? listElevenLabsVoices(key) : [];
+}
+
 /** Your music (Settings, with its Drive folders opened) to pick from: [{ url, credit }]. */
 export async function musicList(tenantId = 'default') {
   const r = (await buildProviders(tenantId)).resolved || {};
@@ -114,7 +121,7 @@ export async function funnelReadiness(tenantId = 'default') {
     name: row.name,
     active: !!row.active,
     problem: await imageLane.festivalProblem(await funnels.get(row.id), providers, log).catch((err) => err.message),
-  })));
+  }))).then((list) => list.map((f) => ({ ...f, voiceOnly: /no voice chosen|uses another voice provider/.test(f.problem || '') })));
 }
 
 /**
@@ -122,7 +129,7 @@ export async function funnelReadiness(tenantId = 'default') {
  * skipped with the reason; the videos are made in the background.
  * @returns {{ batchId, started: string[], skipped: {name, reason}[] }}
  */
-export async function start({ tenantId = 'default', title = '', copy = '', imageUrl = '', driveId = '', funnelIds = [], postAt = null, autoPost = true, photo = null, music = 'random', musicCredit = '' }) {
+export async function start({ tenantId = 'default', title = '', copy = '', imageUrl = '', driveId = '', funnelIds = [], postAt = null, autoPost = true, photo = null, music = 'random', musicCredit = '', voiceId = '' }) {
   const text = String(copy || '').trim();
   if (!text) throw new Error('write the copy: it is the caption and it is read aloud');
   if (text.length > MAX_COPY) throw new Error(`the copy is over ${MAX_COPY} characters`);
@@ -133,14 +140,14 @@ export async function start({ tenantId = 'default', title = '', copy = '', image
   const batchId = randomUUID();
   const p = photo || {};
   const placed = Number(p.aspect) > 0 && Number(p.photoTop) > 0 && Number(p.photoTop) < 1;
-  const festival = { batchId, imageUrl, driveId: driveId || '', copy: text, title: String(title || '').trim().slice(0, 90), music: /^(none|random|https:\/\/\S+)$/.test(String(music || '')) ? String(music) : 'random', musicCredit: String(musicCredit || '').slice(0, 200), autoPost: !!autoPost, ...(placed ? { aspect: Number(p.aspect), photoTop: Number(p.photoTop) } : {}) };
+  const festival = { batchId, imageUrl, driveId: driveId || '', copy: text, title: String(title || '').trim().slice(0, 90), music: /^(none|random|https:\/\/\S+)$/.test(String(music || '')) ? String(music) : 'random', musicCredit: String(musicCredit || '').slice(0, 200), voiceId: /^[A-Za-z0-9]{8,40}$/.test(String(voiceId || '')) ? String(voiceId) : '', autoPost: !!autoPost, ...(placed ? { aspect: Number(p.aspect), photoTop: Number(p.photoTop) } : {}) };
   const started = [];
   const skipped = [];
   const ready = [];
   for (const id of ids) {
     const row = await funnels.get(Number(id));
     if (!row || String(row.tenant_id) !== String(tenantId)) { skipped.push({ name: `funnel ${id}`, reason: 'not found' }); continue; }
-    const problem = await imageLane.festivalProblem(row, providers, log).catch((err) => err.message);
+    const problem = await imageLane.festivalProblem(row, providers, log, festival.voiceId).catch((err) => err.message);
     if (problem) { skipped.push({ name: row.name, reason: problem }); continue; }
     ready.push(row);
     started.push(row.name);
@@ -236,4 +243,4 @@ export async function retry({ tenantId = 'default', id }) {
   return { ok: true };
 }
 
-export default { upload, compose, musicList, funnelReadiness, start, viewOf, batches, approve, approveAll, retry, MAX_BYTES, IMAGE_TYPES, MAX_COPY };
+export default { upload, compose, musicList, voiceList, funnelReadiness, start, viewOf, batches, approve, approveAll, retry, MAX_BYTES, IMAGE_TYPES, MAX_COPY };
