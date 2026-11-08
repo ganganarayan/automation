@@ -134,6 +134,8 @@ export async function hookJob({ ticket }) {
     prompts: job.prompts || {},
     // A festival post brings its own picture: the runner fetches it instead of drawing.
     imageUrls: job.imageUrls || {},
+    // Subtitles lifted above your photo, per size (a festival post with your photo).
+    subMargins: job.subMargins || {},
     imageModel: (r.openai || {}).imageModel || 'gpt-image-1',
     openaiKey: (r.openai || {}).apiKey || '',
     text: job.text || '',

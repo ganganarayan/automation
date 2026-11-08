@@ -67,3 +67,28 @@ describe('overlayBox (your photo on the picture)', () => {
     expect(b.top + b.height).toBe(H);
   });
 });
+
+describe('subtitles above your photo', async () => {
+  const { subMarginV, photoSubMargins, imageShortArgs } = await import('../src/utils/shortSpec.js');
+  it('keeps the usual place with no photo', () => {
+    expect(subMarginV({ width: 1080, height: 1920, aspect: 0.8, photoTop: 0 })).toBe(null);
+    expect(photoSubMargins({})).toEqual({});
+  });
+  it('lifts the line above the head on a 4:5 picture in every size', () => {
+    // A small photo (25%) on a 4:5 picture: its top is 75% down the picture.
+    const m = photoSubMargins({ aspect: 0.8, photoTop: 0.75 });
+    // 9:16: picture 1350 tall from y=285, head at 1297.5, so 622.5 px from the bottom = 93.4 rows (+3.85).
+    expect(m.portrait).toBe(98);
+    expect(m.feed).toBe(76);
+    expect(m.landscape).toBe(78);
+  });
+  it('never goes below the usual place, nor off the top', () => {
+    expect(subMarginV({ width: 1080, height: 1920, aspect: 0.8, photoTop: 0.99 })).toBe(70);
+    expect(subMarginV({ width: 1080, height: 1920, aspect: 0.8, photoTop: 0.01 })).toBe(240);
+  });
+  it('reaches ffmpeg', () => {
+    const args = imageShortArgs({ imagePath: 'a.png', outPath: 'o.mp4', subPath: 'subs.srt', marginV: 98, voicePath: 'v.mp3' });
+    expect(args.join(' ')).toContain('MarginV=98');
+    expect(imageShortArgs({ imagePath: 'a.png', outPath: 'o.mp4', subPath: 'subs.srt', voicePath: 'v.mp3' }).join(' ')).toContain('MarginV=70');
+  });
+});

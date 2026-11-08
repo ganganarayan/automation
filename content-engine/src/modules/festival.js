@@ -21,6 +21,7 @@ import { keyOk, currentSession } from '../services/accessService.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst, nowIst } from '../utils/time.js';
 import { parseRetryDate } from '../utils/retrySpec.js';
+import { subMarginV } from '../utils/shortSpec.js';
 import { stateOf, CUTOUT_SIZES } from '../utils/festivalSpec.js';
 
 const BASE = '/api/v1/admin/festival';
@@ -107,7 +108,7 @@ export function register(ctx) {
       }
       const out = await festival.start({
         tenantId: tenant(req), title: b.title, copy: b.copy, imageUrl: b.imageUrl, driveId: b.driveId,
-        funnelIds: b.funnelIds, postAt, autoPost: b.autoPost !== false,
+        funnelIds: b.funnelIds, postAt, autoPost: b.autoPost !== false, photo: b.photo || null,
       });
       res.json({ ok: true, ...out });
     } catch (err) {
@@ -303,6 +304,7 @@ let meTrim=null;
 const FRAMES={portrait:{w:1080,h:1920,fs:11,mv:70},feed:{w:1080,h:1350,fs:11,mv:70},landscape:{w:1920,h:1080,fs:16,mv:30}};
 // The words the voice reads (shortSpec voiceText), grouped into lines like the subtitles (5 words, 30 characters).
 ${SPOKEN_JS}
+${subMarginV.toString()}
 function cues(t){ const out=[]; let cur=[]; const flush=()=>{ if(cur.length){ out.push(cur.join(' ')); cur=[]; } };
   for(const w of spoken(t).split(' ').filter(Boolean)){ const len=cur.reduce((n,x)=>n+x.length+1,0)+w.length; if(cur.length&&(cur.length>=5||len>30)) flush(); cur.push(w); if(/[.!?;:,]$/.test(w)&&cur.length>=2) flush(); }
   flush(); return out; }
@@ -313,9 +315,11 @@ function lineNow(){ const t=$('copy').value; const all=cues(t); if(!all.length) 
   const before=cues(t.slice(0,$('copy').selectionStart||0)); const i=Math.min(Math.max(before.length-1,0),all.length-1); return {text:all[i],n:all.length,i}; }
 function playLines(){ if(playing!==null){ clearInterval(playing); playing=null; $('playbtn').textContent='▶ Play lines'; draw(); return; }
   playAt=0; $('playbtn').textContent='■ Stop'; playing=setInterval(()=>{ playAt++; if(playAt>=cues($('copy').value).length){ playLines(); return; } draw(); },1400); draw(); }
+let photoTop=0;
 function artCanvas(){ const a=document.createElement('canvas'); a.width=picImg.naturalWidth; a.height=picImg.naturalHeight; const x=a.getContext('2d'); x.drawImage(picImg,0,0);
+  photoTop=0;
   if(meTrim){ const pos=document.querySelector('input[name=mepos]:checked').value, size=document.querySelector('input[name=mesize]:checked').value;
-    const b=box(a.width,a.height,meTrim.w,meTrim.h,pos,size); x.drawImage(meTrim.img,meTrim.sx,meTrim.sy,meTrim.w,meTrim.h,b.l,b.t,b.w,b.h); }
+    const b=box(a.width,a.height,meTrim.w,meTrim.h,pos,size); x.drawImage(meTrim.img,meTrim.sx,meTrim.sy,meTrim.w,meTrim.h,b.l,b.t,b.w,b.h); photoTop=b.t/a.height; }
   return a; }
 function draw(){
   const c=$('preview'); if(!picImg){ c.style.display='none'; $('pvempty').style.display='block'; $('pvnote').textContent=''; return; }
@@ -327,7 +331,7 @@ function draw(){
   x.drawImage(a,(W-a.width*fit)/2,(H-a.height*fit)/2,a.width*fit,a.height*fit);
   const ln=lineNow();
   if(ln.text){ const fs=H*F.fs/288; x.font='bold '+fs+'px Arial, sans-serif'; x.textAlign='center'; x.textBaseline='bottom'; x.lineJoin='round';
-    x.lineWidth=H*2/288*2; x.strokeStyle='#000'; const y=H-H*F.mv/288; x.strokeText(ln.text,W/2,y,W*0.94); x.fillStyle='#fff'; x.fillText(ln.text,W/2,y,W*0.94); }
+    x.lineWidth=H*2/288*2; x.strokeStyle='#000'; const mv=subMarginV({width:F.w,height:F.h,aspect:a.width/a.height,photoTop})||F.mv; const y=H-H*mv/288; x.strokeText(ln.text,W/2,y,W*0.94); x.fillStyle='#fff'; x.fillText(ln.text,W/2,y,W*0.94); }
   c.style.display='block';
   $('pvnote').textContent=ln.n ? 'Subtitle line '+(ln.i+1)+' of '+ln.n+'. Each shows while the voice reads it.' : 'Type the copy to see the subtitles.';
 }
@@ -371,7 +375,7 @@ async function go(){
       localStorage.setItem(KEY, JSON.stringify(meSaved));
     }
     msg('🟡 Starting the videos...');
-    const r=await post('${BASE}',{title:$('title').value.trim(),copy,imageUrl:pic.url,driveId:pic.driveId,funnelIds,postAt:at,autoPost:$('auto').checked});
+    const r=await post('${BASE}',{title:$('title').value.trim(),copy,imageUrl:pic.url,driveId:pic.driveId,photo:pic.photoTop?{aspect:pic.aspect,photoTop:pic.photoTop}:null,funnelIds,postAt:at,autoPost:$('auto').checked});
     if(!r.ok) throw new Error(r.error||'could not start');
     let t='🟢 Making the video for: '+(r.started.join(', ')||'none')+'. Each takes a few minutes; this list updates by itself.';
     if(r.skipped.length) t+='\\n🔴 Skipped: '+r.skipped.map(s=>s.name+' ('+s.reason+')').join('; ');

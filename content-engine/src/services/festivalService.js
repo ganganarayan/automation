@@ -92,7 +92,8 @@ export async function compose({ tenantId = 'default', picture, cutout, position 
   const box = overlayBox({ W, H, w: trimmed.info.width, h: trimmed.info.height, position, size });
   const layer = await sharp(trimmed.data).resize(box.width, box.height).png().toBuffer();
   const out = await sharp(upright).composite([{ input: layer, left: box.left, top: box.top }]).png().toBuffer();
-  return upload({ tenantId, buffer: out, mime: 'image/png' });
+  // Where your head is, so the subtitles can sit above it (shortSpec subMarginV).
+  return { ...(await upload({ tenantId, buffer: out, mime: 'image/png' })), aspect: W / H, photoTop: box.top / H };
 }
 
 /** Each funnel with whether it can take a festival post: [{ id, name, active, problem }]. */
@@ -112,7 +113,7 @@ export async function funnelReadiness(tenantId = 'default') {
  * skipped with the reason; the videos are made in the background.
  * @returns {{ batchId, started: string[], skipped: {name, reason}[] }}
  */
-export async function start({ tenantId = 'default', title = '', copy = '', imageUrl = '', driveId = '', funnelIds = [], postAt = null, autoPost = true }) {
+export async function start({ tenantId = 'default', title = '', copy = '', imageUrl = '', driveId = '', funnelIds = [], postAt = null, autoPost = true, photo = null }) {
   const text = String(copy || '').trim();
   if (!text) throw new Error('write the copy: it is the caption and it is read aloud');
   if (text.length > MAX_COPY) throw new Error(`the copy is over ${MAX_COPY} characters`);
@@ -121,7 +122,9 @@ export async function start({ tenantId = 'default', title = '', copy = '', image
   if (!ids.length) throw new Error('tick at least one funnel');
   const providers = await buildProviders(tenantId);
   const batchId = randomUUID();
-  const festival = { batchId, imageUrl, driveId: driveId || '', copy: text, autoPost: !!autoPost };
+  const p = photo || {};
+  const placed = Number(p.aspect) > 0 && Number(p.photoTop) > 0 && Number(p.photoTop) < 1;
+  const festival = { batchId, imageUrl, driveId: driveId || '', copy: text, autoPost: !!autoPost, ...(placed ? { aspect: Number(p.aspect), photoTop: Number(p.photoTop) } : {}) };
   const started = [];
   const skipped = [];
   const ready = [];

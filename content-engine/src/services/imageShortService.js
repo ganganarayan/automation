@@ -99,7 +99,7 @@ export async function makeVoice({ tts, text = '', log }) {
  * a finished file somewhere public and returns its URL.
  * Returns { videos: size -> URL, seconds, subtitled, subtitleError }.
  */
-export async function renderVideos({ images = {}, sizes = [PRIMARY_SIZE], voice, music = {}, upload, log }) {
+export async function renderVideos({ images = {}, sizes = [PRIMARY_SIZE], voice, music = {}, upload, subMargins = {}, log }) {
   if (!images[PRIMARY_SIZE]) throw new Error('no image to make the video from');
   if (!voice || !voice.buffer) throw new Error('no voice to put on the video');
   const dir = await mkdtemp(join(tmpdir(), 'imgvid-'));
@@ -124,7 +124,7 @@ export async function renderVideos({ images = {}, sizes = [PRIMARY_SIZE], voice,
       if (!local[src]) local[src] = await localPng(src, join(dir, `in-${Object.keys(local).length}.png`));
       const outPath = join(dir, `video-${size}.mp4`);
       const args = (withSubs) => imageShortArgs({
-        imagePath: local[src], outPath, music: track, seconds, voicePath, width: spec.w, height: spec.h, subPath: withSubs ? subPath : '',
+        imagePath: local[src], outPath, music: track, seconds, voicePath, width: spec.w, height: spec.h, subPath: withSubs ? subPath : '', marginV: (subMargins || {})[size] || null,
       });
       try {
         await ffmpeg.imageToShort({ args: args(!!subPath), cwd: dir });

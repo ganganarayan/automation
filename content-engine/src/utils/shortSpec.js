@@ -369,7 +369,37 @@ export function imageVideoSeconds(voiceSec = 0) {
  * the music faded in and out. With a voice file, the music drops low and the
  * voice starts half a second in.
  */
-export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT_SECONDS, voicePath = '', width = 1080, height = 1920, subPath = '' }) {
+/**
+ * Where the subtitles sit (libass MarginV, in its 288 rows) when your photo stands
+ * on the bottom of the picture: just above your head, so the words never cover
+ * you, and never lower than the usual place (clear of the apps' buttons).
+ * aspect = picture width / height, photoTop = the photo's top as a share of the
+ * picture's height. null when there is no photo (the usual place).
+ * Self-contained: the festival page's preview runs this same source.
+ */
+export function subMarginV({ width = 1080, height = 1920, aspect = 0, photoTop = 0 } = {}) {
+  if (!(aspect > 0) || !(photoTop > 0 && photoTop < 1)) return null;
+  const tall = height > width;
+  const base = tall ? 70 : 30;
+  const fs = tall ? 11 : 16;
+  const ph = Math.min(width / aspect, height);
+  const top = (height - ph) / 2 + photoTop * ph;
+  const mv = Math.ceil(((height - top) / height) * 288 + fs * 0.35);
+  return Math.max(base, Math.min(mv, 240));
+}
+
+/** Each video size's subtitle margin for a festival post with your photo ({} without one). */
+export function photoSubMargins(festival = null) {
+  const f = festival || {};
+  const out = {};
+  for (const [size, spec] of Object.entries(IMAGE_VIDEO_SIZES)) {
+    const mv = subMarginV({ width: spec.w, height: spec.h, aspect: Number(f.aspect), photoTop: Number(f.photoTop) });
+    if (mv) out[size] = mv;
+  }
+  return out;
+}
+
+export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT_SECONDS, voicePath = '', width = 1080, height = 1920, subPath = '', marginV = null }) {
   if (subPath && /[\\/:'\\,;[\]]/.test(subPath)) throw new Error('subtitle path must be a plain relative file name');
   // No music that loads = silence under the voice: the video still has its voice.
   const audioIn = music.file
@@ -390,7 +420,7 @@ export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=30:2[bg]`,
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
     // Subtitles: white on a dark outline, bottom centre, lifted clear of the apps' buttons.
-    `[bg][fg]overlay=(W-w)/2:(H-h)/2${subPath ? `,subtitles=${subPath}:force_style='Fontsize=${height > width ? 11 : 16},Bold=1,Outline=2,Shadow=0,Alignment=2,MarginV=${height > width ? 70 : 30}'` : ''},format=yuv420p[v]`,
+    `[bg][fg]overlay=(W-w)/2:(H-h)/2${subPath ? `,subtitles=${subPath}:force_style='Fontsize=${height > width ? 11 : 16},Bold=1,Outline=2,Shadow=0,Alignment=2,MarginV=${Number(marginV) > 0 ? Math.round(Number(marginV)) : (height > width ? 70 : 30)}'` : ''},format=yuv420p[v]`,
     ...audio,
   ].join(';');
   return [
