@@ -92,3 +92,20 @@ describe('subtitles above your photo', async () => {
     expect(imageShortArgs({ imagePath: 'a.png', outPath: 'o.mp4', subPath: 'subs.srt', voicePath: 'v.mp3' }).join(' ')).toContain('MarginV=70');
   });
 });
+
+describe('festival text placement in the video', async () => {
+  const { subtitleFilters, imageShortArgs } = await import('../src/utils/shortSpec.js');
+  it('usual posts keep the spoken lines at the bottom', () => {
+    expect(subtitleFilters({ width: 1080, height: 1920, subPath: 'subs.srt' })).toBe(",subtitles=subs.srt:force_style='Fontsize=11,Bold=1,Outline=2,Shadow=0,Alignment=2,MarginV=70'");
+  });
+  it('festival: spoken lines at the top, the title at the bottom above the photo', () => {
+    const f = subtitleFilters({ width: 1080, height: 1920, subPath: 'subs.srt', subTop: true, titlePath: 'title.srt', marginV: 98 });
+    expect(f).toBe(",subtitles=subs.srt:force_style='Fontsize=11,Bold=1,Outline=2,Shadow=0,Alignment=6,MarginV=36',subtitles=title.srt:force_style='Fontsize=15,Bold=1,Outline=2,Shadow=0,Alignment=2,MarginV=98'");
+  });
+  it('no subtitles, no title either', () => {
+    expect(subtitleFilters({ width: 1920, height: 1080, subPath: '', subTop: true, titlePath: 'title.srt' })).toBe('');
+  });
+  it('refuses an unsafe title path', () => {
+    expect(() => imageShortArgs({ imagePath: 'a.png', outPath: 'o.mp4', subPath: 'subs.srt', titlePath: "x'y.srt", voicePath: 'v.mp3' })).toThrow();
+  });
+});

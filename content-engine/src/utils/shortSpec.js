@@ -399,7 +399,27 @@ export function photoSubMargins(festival = null) {
   return out;
 }
 
-export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT_SECONDS, voicePath = '', width = 1080, height = 1920, subPath = '', marginV = null }) {
+/** A festival post's subtitles at the top: clear of the apps' top bar (libass rows from the top). */
+export const TOP_MARGIN_V = { tall: 36, wide: 20 };
+
+/**
+ * The subtitles filter(s). Usual: the spoken lines bottom centre at marginV (or
+ * the usual place). Festival (subTop): the spoken lines at the top, and the
+ * title (titlePath, one cue for the whole video) bottom centre at marginV.
+ */
+export function subtitleFilters({ width, height, subPath = '', marginV = null, subTop = false, titlePath = '' }) {
+  if (!subPath) return '';
+  const tall = height > width;
+  const style = (fs, align, mv) => `force_style='Fontsize=${fs},Bold=1,Outline=2,Shadow=0,Alignment=${align},MarginV=${mv}'`;
+  const bottom = Number(marginV) > 0 ? Math.round(Number(marginV)) : (tall ? 70 : 30);
+  if (!subTop) return `,subtitles=${subPath}:${style(tall ? 11 : 16, 2, bottom)}`;
+  // SRT takes the old SSA alignment numbers: 2 is bottom centre, 6 top centre (8 would be middle left).
+  const top = `,subtitles=${subPath}:${style(tall ? 11 : 16, 6, tall ? TOP_MARGIN_V.tall : TOP_MARGIN_V.wide)}`;
+  return titlePath ? `${top},subtitles=${titlePath}:${style(tall ? 15 : 21, 2, bottom)}` : top;
+}
+
+export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT_SECONDS, voicePath = '', width = 1080, height = 1920, subPath = '', marginV = null, subTop = false, titlePath = '' }) {
+  if (titlePath && /[\\/:'\\,;[\]]/.test(titlePath)) throw new Error('title path must be a plain relative file name');
   if (subPath && /[\\/:'\\,;[\]]/.test(subPath)) throw new Error('subtitle path must be a plain relative file name');
   // No music that loads = silence under the voice: the video still has its voice.
   const audioIn = music.file
@@ -420,7 +440,7 @@ export function imageShortArgs({ imagePath, outPath, music = {}, seconds = SHORT
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=30:2[bg]`,
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg]`,
     // Subtitles: white on a dark outline, bottom centre, lifted clear of the apps' buttons.
-    `[bg][fg]overlay=(W-w)/2:(H-h)/2${subPath ? `,subtitles=${subPath}:force_style='Fontsize=${height > width ? 11 : 16},Bold=1,Outline=2,Shadow=0,Alignment=2,MarginV=${Number(marginV) > 0 ? Math.round(Number(marginV)) : (height > width ? 70 : 30)}'` : ''},format=yuv420p[v]`,
+    `[bg][fg]overlay=(W-w)/2:(H-h)/2${subtitleFilters({ width, height, subPath, marginV, subTop, titlePath })},format=yuv420p[v]`,
     ...audio,
   ].join(';');
   return [

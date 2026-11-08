@@ -21,7 +21,7 @@ import { keyOk, currentSession } from '../services/accessService.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst, nowIst } from '../utils/time.js';
 import { parseRetryDate } from '../utils/retrySpec.js';
-import { subMarginV } from '../utils/shortSpec.js';
+import { subMarginV, TOP_MARGIN_V } from '../utils/shortSpec.js';
 import { stateOf, CUTOUT_SIZES } from '../utils/festivalSpec.js';
 
 const BASE = '/api/v1/admin/festival';
@@ -248,9 +248,9 @@ ${NAV_CSS}
       <label class="fn"><input type="radio" name="mesize" value="medium" checked onchange="draw()"> Medium</label>
       <label class="fn"><input type="radio" name="mesize" value="large" onchange="draw()"> Large</label>
     </div>
-    <label class="blk">2. Title (the YouTube title and the name in the Library)</label>
-    <input type="text" id="title" maxlength="90" placeholder="Happy Diwali">
-    <label class="blk">3. Copy: the caption on every channel, and what the voice reads aloud</label>
+    <label class="blk">2. Title: shown at the bottom of the video the whole time (also the YouTube title)</label>
+    <input type="text" id="title" maxlength="90" placeholder="Happy Diwali" oninput="draw()">
+    <label class="blk">3. Copy: the caption on every channel, read aloud, its lines shown at the top of the video</label>
     <textarea id="copy" maxlength="${festival.MAX_COPY}" placeholder="Wishing you and your family a bright and joyful Diwali..." oninput="count();draw()" onkeyup="draw()" onclick="draw()"></textarea>
     <div class="hint" id="cnt">0 characters. X gets the first 280, cut at a word.</div>
     <label class="blk">4. Funnels</label>
@@ -301,6 +301,7 @@ function trimmed(img){ const c=document.createElement('canvas'); c.width=img.nat
 let meTrim=null;
 // The video frame, as shortSpec renders it: the picture fitted on a blurred copy of
 // itself, subtitles bold white with a black outline, bottom centre (libass, 288 rows).
+const TOP=${JSON.stringify(TOP_MARGIN_V)};
 const FRAMES={portrait:{w:1080,h:1920,fs:11,mv:70},feed:{w:1080,h:1350,fs:11,mv:70},landscape:{w:1920,h:1080,fs:16,mv:30}};
 // The words the voice reads (shortSpec voiceText), grouped into lines like the subtitles (5 words, 30 characters).
 ${SPOKEN_JS}
@@ -330,8 +331,13 @@ function draw(){
   x.save(); x.filter='blur('+Math.round(H*0.02)+'px)'; x.drawImage(a,(W-a.width*cover)/2,(H-a.height*cover)/2,a.width*cover,a.height*cover); x.restore();
   x.drawImage(a,(W-a.width*fit)/2,(H-a.height*fit)/2,a.width*fit,a.height*fit);
   const ln=lineNow();
-  if(ln.text){ const fs=H*F.fs/288; x.font='bold '+fs+'px Arial, sans-serif'; x.textAlign='center'; x.textBaseline='bottom'; x.lineJoin='round';
-    x.lineWidth=H*2/288*2; x.strokeStyle='#000'; const mv=subMarginV({width:F.w,height:F.h,aspect:a.width/a.height,photoTop})||F.mv; const y=H-H*mv/288; x.strokeText(ln.text,W/2,y,W*0.94); x.fillStyle='#fff'; x.fillText(ln.text,W/2,y,W*0.94); }
+  // As the video burns them (shortSpec subtitleFilters): the spoken line at the top, the title at the bottom, above your photo.
+  const say=(text,fs,y,base)=>{ x.font='bold '+(H*fs/288)+'px Arial, sans-serif'; x.textAlign='center'; x.textBaseline=base; x.lineJoin='round';
+    x.lineWidth=H*2/288*2; x.strokeStyle='#000'; x.strokeText(text,W/2,y,W*0.94); x.fillStyle='#fff'; x.fillText(text,W/2,y,W*0.94); };
+  const tall=F.h>F.w;
+  if(ln.text) say(ln.text,F.fs,H*(tall?TOP.tall:TOP.wide)/288,'top');
+  const title=$('title').value.trim();
+  if(title){ const mv=subMarginV({width:F.w,height:F.h,aspect:a.width/a.height,photoTop})||F.mv; say(title,tall?15:21,H-H*mv/288,'bottom'); }
   c.style.display='block';
   $('pvnote').textContent=ln.n ? 'Subtitle line '+(ln.i+1)+' of '+ln.n+'. Each shows while the voice reads it.' : 'Type the copy to see the subtitles.';
 }

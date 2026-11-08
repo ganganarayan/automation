@@ -186,6 +186,12 @@ async function imageVideo(job) {
   const seconds = imageVideoSeconds(voice.seconds);
   let subPath = 'subs.srt';
   await writeFile(subPath, buildSrt(voice.cues), 'utf8');
+  // Festival: the spoken lines at the top, the title at the bottom for the whole video.
+  let titlePath = '';
+  if (job.subTop && String(job.title || '').trim()) {
+    titlePath = 'title.srt';
+    await writeFile(titlePath, buildSrt([{ start: 0, end: seconds, text: String(job.title).trim() }]), 'utf8');
+  }
   let music = job.music || {};
   if (music.url) {
     // A link that fails, or gives a web page, falls back to the default track: the post still goes.
@@ -209,7 +215,7 @@ async function imageVideo(job) {
   let subtitleError = '';
   for (const size of job.sizes) {
     const spec = job.specs[size];
-    const args = (withSubs) => imageShortArgs({ imagePath: pics[size], outPath: `video-${size}.mp4`, music, seconds, voicePath: 'voice.mp3', width: spec.w, height: spec.h, subPath: withSubs ? subPath : '', marginV: (job.subMargins || {})[size] || null });
+    const args = (withSubs) => imageShortArgs({ imagePath: pics[size], outPath: `video-${size}.mp4`, music, seconds, voicePath: 'voice.mp3', width: spec.w, height: spec.h, subPath: withSubs ? subPath : '', marginV: (job.subMargins || {})[size] || null, subTop: !!job.subTop, titlePath: withSubs ? titlePath : '' });
     try {
       await run('ffmpeg', args(!!subPath));
     } catch (err) {

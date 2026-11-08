@@ -205,7 +205,7 @@ async function startOnGithub({ instanceId, f, providers }) {
   const job = {
     sizes,
     prompts: given ? {} : Object.fromEntries(sizes.map((s) => [s, sizedPrompt(img.prompt || '', s)])),
-    ...(given ? { imageUrls: Object.fromEntries(sizes.map((s) => [s, img.festival.imageUrl])), subMargins: photoSubMargins(img.festival) } : {}),
+    ...(given ? { imageUrls: Object.fromEntries(sizes.map((s) => [s, img.festival.imageUrl])), subMargins: photoSubMargins(img.festival), subTop: true, title: img.festival.title || '' } : {}),
     text: script.captionFull || script.captionShort || '',
     voiceId: cfg.voice_id || '',
     name: `${poster.slug(f.name)}-${poster.slug((img.sheet || {}).key || (given ? 'festival' : ''))}-r${inst.round || 1}`,
@@ -307,7 +307,7 @@ async function makeOnRailway(ctx) {
     const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
     const images = Object.fromEntries(Object.keys(IMAGE_VIDEO_SIZES).map((s) => [s, sized[s] || sized.feed]));
     const made2 = await imageShort.renderVideos({
-      images, sizes: Object.keys(IMAGE_VIDEO_SIZES), voice, music: providers.resolved.shortMusic, upload: (path) => publish.uploadFile(path, 'video/mp4'), subMargins: photoSubMargins(img.festival), log,
+      images, sizes: Object.keys(IMAGE_VIDEO_SIZES), voice, music: providers.resolved.shortMusic, upload: (path) => publish.uploadFile(path, 'video/mp4'), subMargins: photoSubMargins(img.festival), subTop: !!img.festival, title: (img.festival || {}).title || '', log,
     });
     render = { runner: 'railway', videos: made2.videos, seconds: made2.seconds, subtitled: made2.subtitled, ...(made2.subtitleError ? { subtitleError: made2.subtitleError } : {}), ...(made2.musicCredit ? { musicCredit: made2.musicCredit } : {}) };
   }

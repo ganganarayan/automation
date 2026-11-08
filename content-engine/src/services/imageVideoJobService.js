@@ -136,6 +136,9 @@ export async function hookJob({ ticket }) {
     imageUrls: job.imageUrls || {},
     // Subtitles lifted above your photo, per size (a festival post with your photo).
     subMargins: job.subMargins || {},
+    // Festival: spoken lines at the top, this title at the bottom.
+    subTop: !!job.subTop,
+    title: job.title || '',
     imageModel: (r.openai || {}).imageModel || 'gpt-image-1',
     openaiKey: (r.openai || {}).apiKey || '',
     text: job.text || '',
