@@ -497,14 +497,26 @@ async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessTok
       return { thumbs, sizes, thumbError };
     }
     const imageModel = /^gpt-image/.test(String(providers.resolved.openai?.imageModel || '')) ? providers.resolved.openai.imageModel : 'gpt-image-1';
-    let base = null;
-    try {
-      base = await providers.llm.generateImage({ prompt: thumbImagePrompt(imagePrompt, providers.resolved.prompts?.thumbnail, text, { asWritten: !!providers.claude }), size: THUMB_ART_SIZE, model: imageModel });
-      costs.push({ step: 'images', ...costImages({ count: 1, size: THUMB_ART_SIZE, model: imageModel }) });
-    } catch (err) {
-      log.warn({ err: err.message }, 'thumbnail artwork failed (using a video frame)');
-      thumbError = `artwork: ${err.message}`;
-    }
+    // Each shape gets its own drawing: a wide one for 16:9, a tall one for 9:16 and 4:5.
+    // Never a crop of the wide picture on a blurred copy of itself.
+    const prompt = thumbImagePrompt(imagePrompt, providers.resolved.prompts?.thumbnail, text, { asWritten: !!providers.claude });
+    const shapes = [...new Set(platforms.map((k) => artShape(THUMB_SIZES[PLATFORM_SIZE[k]])).filter(Boolean))];
+    const drawn = await Promise.all(shapes.map(async (shape) => {
+      const size = ART_SIZE[shape];
+      try {
+        const buf = await providers.llm.generateImage({ prompt: `${shape === 'tall' ? prompt.replace(/ in landscape format|Landscape format\. ?/g, '') : prompt}
+
+${ART_FRAME[shape]}`, size, model: imageModel });
+        costs.push({ step: 'images', ...costImages({ count: 1, size, model: imageModel }) });
+        return [shape, buf];
+      } catch (err) {
+        log.warn({ err: err.message, shape }, 'thumbnail artwork failed');
+        thumbError = `artwork: ${err.message}`;
+        return [shape, null];
+      }
+    }));
+    let base = Object.fromEntries(drawn.filter(([, b]) => b));
+    if (!Object.keys(base).length) base = null;
     if (!base) {
       base = video
         ? await ffmpeg.extractFrame({ videoBuffer: video, ext })
@@ -645,11 +657,26 @@ export async function silentDriveIds({ funnel, resolved, files = [] }) {
   }).map((f) => String(f.id));
 }
 
+/** Which drawing a size is cut from: wide (16:9) or tall (9:16, 4:5). */
+const ART_SIZE = { wide: THUMB_ART_SIZE, tall: '1024x1536' };
+const ART_FRAME = {
+  wide: 'Frame: a wide 16:9 landscape picture.',
+  tall: 'Frame: a tall vertical portrait picture, composed for a phone screen. Keep the top third calm and empty for the words, and the subject whole in the lower part.',
+};
+function artShape(spec) {
+  return spec ? (spec.h > spec.w ? 'tall' : 'wide') : null;
+}
+
 /**
- * One size. A full-frame size crops the picture to fill it. A narrow one puts
+ * One size from a video frame (no drawing). A full-frame size crops the picture to fill it. A narrow one puts
  * the picture on a panel under the headline, over a soft blurred copy of itself.
  */
 async function composeBase(base, spec) {
+  if (!Buffer.isBuffer(base)) {
+    // Drawn per shape: crop this size from the picture drawn in its own shape.
+    const own = base[artShape(spec)] || base.wide || base.tall;
+    return sharp(own).resize(spec.w, spec.h, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
+  }
   const art = thumbArt(spec);
   if (!art) return sharp(base).resize(spec.w, spec.h, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
   const panel = await sharp(base).resize(art.w, art.h, { fit: 'cover' }).toBuffer();
