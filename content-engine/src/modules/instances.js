@@ -33,6 +33,7 @@ import * as aiLane from '../services/aiLaneService.js';
 import * as festivalService from '../services/festivalService.js';
 import * as disapproveService from '../services/disapproveService.js';
 import { canDisapprove } from '../utils/disapproveSpec.js';
+import { HOLD_STATUS, HOLD_SECONDS, holdLeft } from '../utils/lessonSpec.js';
 import * as takeDownService from '../services/takeDownService.js';
 import * as jobRunner from '../core/jobRunner.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
@@ -78,6 +79,8 @@ export function register(ctx) {
       const funnel = req.query.funnel ? String(req.query.funnel) : '';
       // Scheduled posts whose time has come: ask Post for Me whether they went out.
       await readyPost.refreshScheduled({ tenantId: req.tenantId }).catch((err) => log.warn({ err: err.message }, 'scheduled refresh failed'));
+      // A Disapprove whose Remake minute ran out (a restart lost its timer): into the log now.
+      await disapproveService.finalizeDue(req.tenantId).catch((err) => log.warn({ err: err.message }, 'disapprove holds not finished'));
       // Label / funnel chips filter in memory over a wider page; an old ?status=
       // bookmark still filters in SQL.
       const [all, funnelList, approver, deleted] = await Promise.all([
@@ -425,7 +428,7 @@ export function register(ctx) {
     cron.schedule('*/5 * * * *', async () => {
       if (checking) return;
       checking = true;
-      try { await readyPost.refreshAllTenants(); } catch (err) { log.warn({ err: err.message }, 'scheduled post check failed'); } finally { checking = false; }
+      try { await disapproveService.finalizeDue('default').catch(() => 0); await readyPost.refreshAllTenants(); } catch (err) { log.warn({ err: err.message }, 'scheduled post check failed'); } finally { checking = false; }
     });
   }
 
@@ -567,11 +570,45 @@ export function register(ctx) {
   });
 
   // ✕ Disapprove: the files go, the entry stays in Log and cost's record as Disapproved (with its cost).
+  // ✕ Disapprove with a reason: held for a minute so 🔁 Remake can follow.
+  router.post('/admin/instances/:id/disapprove-hold', async (req, res) => {
+    try {
+      if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to disapprove' });
+      const s = await currentSession(req);
+      res.json(await disapproveService.hold({ tenantId: req.tenantId || 'default', instanceId: req.params.id, reason: String(req.body?.reason || ''), by: (s && s.email) || '' }));
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Writing corrections: the Remake minute starts again, so it never runs out mid-sentence.
+  router.post('/admin/instances/:id/remake-wait', async (req, res) => {
+    try {
+      if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to remake' });
+      res.json({ ok: await disapproveService.extendHold({ tenantId: req.tenantId || 'default', instanceId: req.params.id }) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // 🔁 Remake with corrections ('image' = picture and copy, 'video' = the video).
+  router.post('/admin/instances/:id/remake', async (req, res) => {
+    try {
+      if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to remake' });
+      res.json(await disapproveService.remake({
+        tenantId: req.tenantId || 'default', instanceId: req.params.id,
+        corrections: String(req.body?.corrections || ''), what: req.body?.what === 'video' ? 'video' : 'image',
+      }));
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   router.post('/admin/instances/:id/disapprove', async (req, res) => {
     try {
       if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to disapprove' });
       const s = await currentSession(req).catch(() => null);
-      res.json(await disapproveService.disapprove({ tenantId: req.tenantId || 'default', instanceId: req.params.id, by: (s && s.email) || '' }));
+      res.json(await disapproveService.disapprove({ tenantId: req.tenantId || 'default', instanceId: req.params.id, by: (s && s.email) || '', reason: String(req.body?.reason || '') }));
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -614,6 +651,8 @@ const STATUS_LABEL = {
   transcript_review: 'Transcript review',
   scheduled: 'Scheduled',
   partial: 'Partly posted',
+  disapproved_hold: 'Disapproved, Remake open for a minute',
+  disapproved_final: 'Disapproved, moving to the log',
 };
 
 function channelsOf(steps) {
@@ -734,6 +773,40 @@ function finalVideoId(steps) {
   return stitch && stitch.artifacts && stitch.artifacts.video ? stitch.artifacts.video.driveId : '';
 }
 
+/**
+ * ✕ Disapprove, 🔁 Remake and 🎬 Video corrections. Waiting for approval:
+ * Disapprove on, the other two off. Disapproved (held): the other way round.
+ * A ready video is your own, so it has no video corrections.
+ */
+function remakeButtons(r, { held = false } = {}) {
+  const id = esc(r.id);
+  const video = laneOf(r) !== 'ready';
+  return `<button class="act big danger" ${held ? 'disabled' : ''} onclick="dOpen('${id}')">${held ? '🔴 Disapproved' : '✕ Disapprove'}</button>`
+    + `<button class="act big" ${held ? '' : 'disabled title="Press ✕ Disapprove first"'} onclick="rmOpen('${id}','image')">🔁 Remake</button>`
+    + (video ? `<button class="act big" ${held ? '' : 'disabled title="Press ✕ Disapprove first"'} onclick="rmOpen('${id}','video')">🎬 Video corrections</button>` : '');
+}
+
+/** The reason box ✕ Disapprove opens (it is required: the app learns from it). */
+function reasonBox(r) {
+  const id = esc(r.id);
+  return `<div class="rmbox" id="dbox-${id}" style="display:none">
+    <textarea id="dwhy-${id}" rows="2" placeholder="Why? e.g. text covers the face, wrong product, headline too small"></textarea>
+    <div><button class="act danger" onclick="dSend(this,'${id}')">✕ Disapprove</button> <span class="hint">You get one minute to 🔁 Remake; after that it moves to Log and cost.</span></div>
+  </div>`;
+}
+
+/** A run disapproved a moment ago: Remake / Video corrections open, with the countdown. */
+function heldPanel(r) {
+  const id = esc(r.id);
+  const why = String(r.note || '').replace(/^Disapproved:\s*/, '');
+  return `<div class="apbtns">${remakeButtons(r, { held: true })}</div>
+    <div class="hint">🔴 ${esc(why || 'Disapproved')} · 🔁 Remake open for <b data-hold="${holdLeft(r)}">${holdLeft(r)}</b> s, then it moves to Log and cost.</div>
+    <div class="rmbox" id="rmbox-${id}" style="display:none">
+      <textarea id="rmfix-${id}" rows="3"></textarea>
+      <div><button class="act primary" id="rmgo-${id}" onclick="rmSend(this,'${id}')">🔁 Remake</button> <span class="hint" id="rmmsg-${id}"></span></div>
+    </div>`;
+}
+
 function listPage(all, { status = null, label = '', funnel = '', funnelList = [], pending = new Map(), approver = false, deleted = null } = {}) {
   // Replaced (superseded) runs are hidden unless asked for by an old ?status= link.
   const visible = (all || []).filter((r) => status === 'superseded' || !libraryStatus(r.status).hidden);
@@ -767,7 +840,7 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
       const ab = approvalButtons(r, pending.get(String(r.id)) || null, { canApprove: approver, videoId: vid });
       const approve = ab ? `<div class="apbtns">${ab.videoId
         ? `<button class="act big" onclick="openVideo('${esc(ab.videoId)}')">▶ Review</button>`
-        : `<a class="act big" href="${esc(ab.reviewHref)}">Review</a>`}<button class="act big approve" onclick="approveRow(this,'${esc(r.id)}','${esc(ab.approveLabel)}')">${esc(ab.approveLabel)}</button><button class="act big danger" onclick="disapproveRow(this,'${esc(r.id)}')">✕ Disapprove</button></div>` : (approver && canDisapprove(r) && r.status === 'failed' ? `<div class="apbtns"><button class="act danger" onclick="disapproveRow(this,'${esc(r.id)}')">✕ Disapprove</button></div>` : '');
+        : `<a class="act big" href="${esc(ab.reviewHref)}">Review</a>`}<button class="act big approve" onclick="approveRow(this,'${esc(r.id)}','${esc(ab.approveLabel)}')">${esc(ab.approveLabel)}</button>${remakeButtons(r, { held: false })}</div>${reasonBox(r)}` : approver && r.status === HOLD_STATUS ? heldPanel(r) : (approver && canDisapprove(r) && r.status === 'failed' ? `<div class="apbtns"><button class="act danger" onclick="disapproveRow(this,'${esc(r.id)}')">✕ Disapprove</button></div>` : '');
       const ra = retryAction(r, steps);
       const retry = ra === 'open'
         ? `<div class="apbtns"><a class="act big" href="/api/v1/admin/instances/${esc(r.id)}">↻ Retry</a></div>`
@@ -815,6 +888,36 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
       try{ const r=await fetch('/api/v1/admin/instances/'+id+'/retry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(postAt?{postAt}:{})}); const j=await r.json(); if(j.ok){ b.textContent='🟢 Started'; setTimeout(()=>location.reload(), 900); } else { b.disabled=false; b.textContent=t; if(j.pickDate) retryPick(b,id,j); else alert(j.error||'failed'); } }
       catch(e){ b.disabled=false; b.textContent=t; alert(e.message); }
     }
+    function dOpen(id){ const b=document.getElementById('dbox-'+id); if(b){ b.style.display='block'; document.getElementById('dwhy-'+id).focus(); } }
+    async function dSend(b, id){
+      const why=document.getElementById('dwhy-'+id).value.trim();
+      if(!why){ alert('Write why: the app learns from it.'); return; }
+      b.disabled=true; b.textContent='Disapproving…';
+      try{ const r=await fetch('/api/v1/admin/instances/'+id+'/disapprove-hold',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ reason: why })}); const j=await r.json(); if(j.ok) location.reload(); else { b.disabled=false; b.textContent='✕ Disapprove'; alert(j.error||'failed'); } }
+      catch(e){ b.disabled=false; b.textContent='✕ Disapprove'; alert(e.message); }
+    }
+    let rmWhat={};
+    // Keep the minute going while you write (it restarts on open and every 15 s of typing).
+    function rmKeep(id){ fetch('/api/v1/admin/instances/'+id+'/remake-wait',{method:'POST'}).then(r=>r.json()).then(j=>{ if(j.ok) document.querySelectorAll('[data-hold]').forEach(e=>{ e.dataset.hold=${'${HOLD_SECONDS}'}; e.textContent=${'${HOLD_SECONDS}'}; }); }).catch(()=>{}); }
+    function rmOpen(id, what){
+      rmWhat[id]=what; const box=document.getElementById('rmbox-'+id), t=document.getElementById('rmfix-'+id); if(!box) return;
+      box.style.display='block'; rmKeep(id);
+      if(!t.dataset.kept){ t.dataset.kept='1'; let last=0; t.addEventListener('input',()=>{ if(Date.now()-last>15000){ last=Date.now(); rmKeep(id); } }); }
+      t.placeholder = what==='video' ? 'Video corrections: what to change in the video, e.g. slower voice, no stock footage of offices, shorter intro' : 'Corrections for the thumbnail and copy, e.g. person on the left, text off the face, bigger product';
+      document.getElementById('rmgo-'+id).textContent = what==='video' ? '🎬 Remake with these video corrections' : '🔁 Remake';
+      t.focus();
+    }
+    async function rmSend(b, id){
+      const fix=document.getElementById('rmfix-'+id).value.trim(), m=document.getElementById('rmmsg-'+id);
+      if(!fix){ m.textContent='🟡 Write the corrections first'; return; }
+      b.disabled=true; m.textContent='Starting…';
+      try{ const r=await fetch('/api/v1/admin/instances/'+id+'/remake',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ corrections: fix, what: rmWhat[id]||'image' })}); const j=await r.json();
+        if(j.ok){ m.textContent='🟢 Remaking. The old attempt is in Log and cost; the new one shows here for approval when it is ready.'; setTimeout(()=>location.reload(), 2500); }
+        else { b.disabled=false; m.textContent='🔴 '+(j.error||'failed'); } }
+      catch(e){ b.disabled=false; m.textContent='🔴 '+e.message; }
+    }
+    // The Remake minute: count down; at 0 the page reloads and the run moves to the log.
+    setInterval(()=>{ document.querySelectorAll('[data-hold]').forEach(e=>{ const n=Math.max(0, Number(e.dataset.hold)-1); e.dataset.hold=n; e.textContent=n; if(n===0 && !Array.from(document.querySelectorAll('.rmbox')).some(b=>b.style.display==='block')) setTimeout(()=>location.reload(), 3000); }); }, 1000);
     async function disapproveRow(b, id){
       if(!confirm('Disapprove this? Its pictures and videos are deleted from Drive to free the space. The entry stays in Log and cost as Disapproved, with its cost. This cannot be undone.')) return;
       b.disabled=true; const t=b.textContent; b.textContent='Disapproving…';
@@ -984,9 +1087,10 @@ function reviewPage(row, steps, approval, buttons, script) {
       b.disabled=false;
     }
     async function disapprove(){
-      if(!confirm('Disapprove this? Its pictures and videos are deleted from Drive. The entry stays in Log and cost as Disapproved, with its cost.')) return;
+      const why=(prompt('Why are you disapproving it? The app learns from this. You then get one minute in the Library to 🔁 Remake it.')||'').trim();
+      if(!why) return;
       const b=document.getElementById('dabtn'); b.disabled=true; msg('Disapproving…');
-      try{ const j=await post('/disapprove'); if(j.ok){ msg('🔴 Disapproved. Opening Library…'); setTimeout(()=>{ location.href='/api/v1/admin/instances'; }, 900); } else { b.disabled=false; msg('🔴 '+(j.error||'failed')); } }
+      try{ const j=await post('/disapprove-hold', { reason: why }); if(j.ok){ msg('🔴 Disapproved. Opening Library, where 🔁 Remake is open…'); setTimeout(()=>{ location.href='/api/v1/admin/instances'; }, 900); } else { b.disabled=false; msg('🔴 '+(j.error||'failed')); } }
       catch(e){ b.disabled=false; msg('🔴 '+e.message); }
     }
     async function approve(){
@@ -1896,6 +2000,7 @@ ${NAV_CSS}
  table.lib td .act.big{padding:.55rem 1rem}
  .act.approve{background:#0a7d32}
  .apbtns{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.45rem}
+ .rmbox{margin-top:.45rem;display:flex;flex-direction:column;gap:.35rem}.rmbox textarea{width:100%;font:inherit;font-size:.82rem}
  .rtpick{flex-basis:100%;display:flex;flex-direction:column;gap:.4rem;font-weight:400}
  .rvplayer{width:100%;height:65vh;border:0;border-radius:10px;background:#000;margin-bottom:.8rem}
  .rvimg{display:block;max-width:100%;max-height:60vh;border-radius:8px;margin:0 auto .8rem}

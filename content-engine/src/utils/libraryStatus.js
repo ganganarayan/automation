@@ -57,6 +57,9 @@ export function libraryStatus(status) {
   if (s === 'superseded') return { key: 'superseded', label: 'Replaced', dot: '⚫', note: '', hidden: true };
   // You turned it down: its files are gone, the record (with its cost) stays in Log and cost.
   if (s === 'disapproved') return { key: 'disapproved', label: 'Disapproved', dot: '🔴', note: '', hidden: true };
+  // Disapproved a moment ago: 🔁 Remake works for one minute, then it moves to the log.
+  if (s === 'disapproved_hold') return { key: 'disapproved', label: 'Disapproved', dot: '🟡', note: 'Remake open', hidden: false };
+  if (s === 'disapproved_final') return { key: 'disapproved', label: 'Disapproved', dot: '🔴', note: 'moving to the log', hidden: false };
   const key = STATUS_TO_LABEL[s] || 'preparing';
   const base = LIBRARY_LABELS.find((l) => l.key === key);
   // Partly posted: some channels went out, some did not, attention, not OK.

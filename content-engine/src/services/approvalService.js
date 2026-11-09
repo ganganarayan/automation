@@ -94,6 +94,19 @@ export async function approveById(id, body = {}) {
   return { ok: true, kind: approval.kind };
 }
 
+/**
+ * Remake from the app: the kind's rework handler with your corrections, exactly
+ * what the email's Request Rework does. Returns false for a kind with none.
+ */
+export function reworkById(approval, note = '') {
+  const handler = handlers.get(approval && approval.kind);
+  if (!handler || !handler.onRework) return false;
+  Promise.resolve(handler.onRework(approval, note, { decision: 'rework', note })).catch((e) =>
+    log.error({ err: e.message, id: approval.id }, 'remake handler failed'),
+  );
+  return true;
+}
+
 /** Mount the review routes on a router. */
 export function register(router) {
   router.get('/review/:token', async (req, res, next) => {
@@ -210,4 +223,4 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export default { onKind, createRequest, reviewPath, approveById, register };
+export default { onKind, createRequest, reviewPath, approveById, reworkById, register };

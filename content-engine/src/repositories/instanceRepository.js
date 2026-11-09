@@ -8,6 +8,7 @@
  *               rejects every mutation: enforced in the UPDATE WHERE clause.
  * Dependencies: core/db.
  */
+import { randomUUID } from 'node:crypto';
 import { query } from '../core/db.js';
 
 export async function create({
@@ -308,6 +309,19 @@ export async function saveLinks(id, steps) {
   await query('UPDATE instances SET steps = $2 WHERE id = $1', [id, JSON.stringify(steps)]);
 }
 
+/**
+ * One remade attempt into the deleted-runs log, while the run itself goes on.
+ * Its cost is 0 here: the costs stay on the run (they add up across attempts),
+ * so nothing is counted twice. Steps are kept without their costs, for the record.
+ */
+export async function logAttempt(row, { title, status = 'disapproved', steps = [] } = {}) {
+  await query(
+    `INSERT INTO deleted_instances (id, tenant_id, funnel_id, funnel_name, title, status, cost_usd, steps, created_at)
+     VALUES ($8, $1, $2, $3, $4, $5, 0, $6, $7)`,
+    [row.tenant_id || 'default', row.funnel_id || null, row.funnel_name || '', title || row.title || '', status, JSON.stringify(steps), row.created_at || new Date(), randomUUID()],
+  );
+}
+
 /** The title of a + Sample instance: its costs are made up, so they never count as spend. */
 export const SAMPLE_TITLE = 'SAMPLE: delete me';
 
@@ -504,5 +518,5 @@ export default {
   festivalRows,
   create, get, list, logRows, saveSteps, setStatus, transition, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, moveFunnel, unschedule, scheduledDue, retryDue, setPostStatus, markPosting, markPostFailed, remove,
   existsForFunnelOnDate, videoOnDate, postedDriveIds, draftsByDriveIds, liveOnDate, openSheetRefs, recentForFunnel,
-  routerHeldDriveIds, releaseSlot, supersede, missingLinks, saveLinks,
+  routerHeldDriveIds, releaseSlot, supersede, missingLinks, saveLinks, logAttempt,
 };

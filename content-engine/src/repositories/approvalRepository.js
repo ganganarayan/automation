@@ -80,6 +80,15 @@ export async function openForInstances({ tenantId, limit = 500 }) {
   return rows;
 }
 
+/** The newest approval for one instance in any state (a Remake reruns its kind), or null. */
+export async function latestForInstance(instanceId) {
+  const { rows } = await query(
+    `SELECT * FROM approvals WHERE payload->>'instanceId' = $1 ORDER BY created_at DESC LIMIT 1`,
+    [String(instanceId)],
+  );
+  return rows[0] || null;
+}
+
 /** The newest open approval for one instance, or null. */
 export async function openForInstance(instanceId) {
   const { rows } = await query(

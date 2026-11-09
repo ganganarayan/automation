@@ -166,6 +166,8 @@ export async function forTenant(tenantId = 'default') {
     // the fail-safe ('on' default) makes it in the other place when that fails.
     imageVideoRunner: pick('image_video_runner', 'github'),
     imageVideoFailSafe: pick('image_video_failsafe', 'on'),
+    // What the app learned from your Disapprove reasons and Remake corrections (utils/lessonSpec).
+    lessons: { image: pick('lessons_image', ''), video: pick('lessons_video', '') },
     // System prompts (API Keys → System prompts). Blank = the built-in default.
     prompts: {
       global: pick('system_prompt_global', ''),

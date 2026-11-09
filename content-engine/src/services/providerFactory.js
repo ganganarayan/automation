@@ -13,6 +13,7 @@
  *               sender: comes from platform settings.
  * Dependencies: tenantSettings, provider factories, settings, logger.
  */
+import { imagePromptWithRules, parseLessons } from '../utils/lessonSpec.js';
 import * as tenantSettings from '../core/tenantSettings.js';
 import { settings } from '../settings/index.js';
 import { logger } from '../core/logger.js';
@@ -41,13 +42,23 @@ function mailRecorder(tenantId) {
  * @param {string} tenantId
  * @returns {Promise<{ llm, storage, sheets, publish, video, mail, resolved }>}
  */
+/** The llm provider with generateImage adding the fixed image rules and the learned lessons. */
+export function withImageRules(llm, lessons = []) {
+  if (!llm || typeof llm.generateImage !== 'function') return llm;
+  const generateImage = llm.generateImage.bind(llm);
+  return Object.assign(Object.create(Object.getPrototypeOf(llm)), llm, {
+    generateImage: (opts = {}) => generateImage({ ...opts, prompt: imagePromptWithRules(opts.prompt, lessons) }),
+  });
+}
+
 export async function buildProviders(tenantId = 'default') {
   const r = await tenantSettings.forTenant(tenantId);
   const log = logger.child({ tenant_id: tenantId });
 
   return {
     // Tenant-scoped credentials (from the app UI; env is only a default).
-    llm: createLlmProvider({ openai: r.openai, gemini: r.gemini, globalSystem: r.prompts.global }, log),
+    // Every picture gets the face rule and what was learned from your corrections.
+    llm: withImageRules(createLlmProvider({ openai: r.openai, gemini: r.gemini, globalSystem: r.prompts.global }, log), parseLessons(r.lessons && r.lessons.image)),
     // Only with a key in Settings; the Ready video copy falls back to llm without one.
     claude: r.claude.apiKey ? createClaudeProvider({ apiKey: r.claude.apiKey, model: r.claude.model, context: r.prompts.claudeContext, globalSystem: r.prompts.global }, log) : null,
     publish: createPostForMeProvider({ apiKey: r.postformeKey }, log),

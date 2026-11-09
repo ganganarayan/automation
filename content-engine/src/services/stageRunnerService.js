@@ -20,6 +20,7 @@
  * On any step error the step + instance are marked failed and the run stops; a
  * missing provider key therefore fails the instance cleanly rather than crashing.
  */
+import { lessonsBlock, parseLessons } from '../utils/lessonSpec.js';
 import * as funnels from '../repositories/funnelsRepository.js';
 import * as instanceService from '../services/instanceService.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
@@ -161,7 +162,8 @@ export async function generateScript({ instanceId, correction = '' }) {
   // A router AI video writes from its researched brief (topic, angle, format).
   const { brief } = routerInfo(instance);
   const { text, model, usage } = await providers.llm.generateTextDetailed({
-    system: scriptSystemPrompt(cfg.script_tone, providers.resolved.prompts.script),
+    // Your past video corrections ride along, so the next script already follows them.
+    system: [scriptSystemPrompt(cfg.script_tone, providers.resolved.prompts.script), lessonsBlock(parseLessons(providers.resolved.lessons && providers.resolved.lessons.video), 'video')].filter(Boolean).join('\n\n'),
     user: scriptUserPrompt({ topic: (brief && briefTopic(brief)) || funnel?.name || instance.title || '', audience: resolved.audiencePrefix || '', correction }),
   });
   if (!text) throw new Error('empty script from model');
