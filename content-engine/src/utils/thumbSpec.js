@@ -120,36 +120,70 @@ export function thumbArt({ w, h, layout = 'top' }) {
  */
 export function thumbSvg({ w, h, text, sub = '', layout = 'top', accent = '#FFFFFF', tag = '' }) {
   const box = thumbBox({ w, h, layout });
-  const boxW = box.x1 - box.x0;
-  const boxH = box.y1 - box.y0;
   const stack = layout === 'stack';
   const maxSize = stack ? w * 0.085 : h * 0.11;
-  const head = fitText(text, { boxW, boxH: boxH * (sub ? 0.66 : 1), maxSize, glyph: 0.62 });
-  const lines = head.lines;
-  const size = head.size || Math.round(maxSize * 0.6);
-  const lh = Math.round(size * 1.15);
-  const subFit = fitText(sub, { boxW, boxH: boxH * 0.3, maxSize: size * 0.6, glyph: 0.56, lineH: 1.25 });
-  const subLines = subFit.lines;
-  const subSize = subFit.size;
-  const subLh = Math.round(subSize * 1.25);
-  const subGap = subLines.length ? Math.round(size * 0.2) : 0;
-  const block = lh * lines.length + subGap + subLh * subLines.length;
-  const x = Math.round((box.x0 + box.x1) / 2);
-  const top = box.y0 + Math.max(0, (boxH - block) / 2);
-  const y0 = Math.round(top + size * 0.9);
   const hazeH = stack ? thumbArt({ w, h, layout }).top : Math.round(h * 0.34);
   const stops = stack
     ? '<stop offset="0" stop-color="#000" stop-opacity=".3"/><stop offset="1" stop-color="#000" stop-opacity=".3"/>'
     : '<stop offset="0" stop-color="#000" stop-opacity=".62"/><stop offset=".65" stop-color="#000" stop-opacity=".45"/><stop offset="1" stop-color="#000" stop-opacity="0"/>';
-  const font = 'font-family="Noto Sans, Noto Sans Devanagari, DejaVu Sans, sans-serif"';
-  const stroke = (px) => `stroke="#000000" stroke-width="${Math.max(2, Math.round(px * 0.06))}" paint-order="stroke"`;
-  const tspans = lines.map((l, i) => `<tspan x="${x}" y="${y0 + i * lh}">${xmlEsc(l)}</tspan>`).join('');
-  const subY0 = y0 + (lines.length - 1) * lh + subGap + subLh;
-  const subSpans = subLines.map((l, i) => `<tspan x="${x}" y="${subY0 + i * subLh}">${xmlEsc(l)}</tspan>`).join('');
-  const subText = subLines.length ? `
-<text text-anchor="middle" ${font} font-weight="700" font-size="${subSize}" fill="${accent}" ${stroke(subSize)}>${subSpans}</text>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">${stops}</linearGradient></defs><rect width="${w}" height="${hazeH}" fill="url(#g)"/>
-<text text-anchor="middle" ${font} font-weight="800" font-size="${size}" fill="#FFFFFF" ${stroke(size)}>${tspans}</text>${subText}${tag ? thumbTagSvg({ w, h, layout, tag }) : ''}</svg>`;
+${textBlock({ box, text, sub, tag, accent, maxSize, align: 'center', color: 'light' })}</svg>`;
+}
+
+/**
+ * The audience line (eyebrow) that sits above the headline: who the post is
+ * for, up to 40 characters, no hashtags or emojis, no full stop at the end.
+ * '' when unusable, never an error.
+ */
+export function eyebrowClean(raw) {
+  const t = String(raw ?? '').replace(/\s+/g, ' ').trim().replace(/[.,;:!]+$/u, '').trim();
+  if (!t || t.length > 40 || t.includes('#')) return '';
+  if (/[\p{Extended_Pictographic}\p{Regional_Indicator}\u200D\uFE0F\u20E3]/u.test(t)) return '';
+  return t;
+}
+
+const SANS = 'font-family="Noto Sans, Noto Sans Devanagari, DejaVu Sans, sans-serif"';
+const SERIF = 'font-family="Noto Serif, DejaVu Serif, serif"';
+
+/**
+ * The three lines as one block inside box: the audience eyebrow (small serif
+ * italic capitals, accent colour), the headline (big bold sans) and the
+ * sub-head under it, all fitted so no word is cut, aligned left, centre or
+ * right, and centred in the box's height.
+ */
+export function textBlock({ box, text, sub = '', tag = '', accent = '#FFC400', maxSize, align = 'center', color = 'light' }) {
+  const { x0, y0, x1, y1 } = box;
+  const boxW = x1 - x0;
+  const boxH = y1 - y0;
+  const brow = eyebrowClean(tag).toUpperCase();
+  const browShare = brow ? 0.16 : 0;
+  const head = fitText(text, { boxW, boxH: boxH * ((sub ? 0.64 : 1) - browShare), maxSize, glyph: 0.62 });
+  const size = head.size || Math.round(maxSize * 0.5);
+  const lh = Math.round(size * 1.15);
+  const subFit = fitText(sub, { boxW, boxH: boxH * 0.26, maxSize: size * 0.6, glyph: 0.56, lineH: 1.25 });
+  const subLh = Math.round(subFit.size * 1.25);
+  const subGap = subFit.lines.length ? Math.round(size * 0.2) : 0;
+  const browSize = brow ? Math.max(10, Math.floor(Math.min(size * 0.42, boxW / (brow.length * 0.72)))) : 0;
+  const browGap = brow ? Math.round(browSize * 0.55) : 0;
+  const block = browSize + browGap + lh * head.lines.length + subGap + subLh * subFit.lines.length;
+  const top = y0 + Math.max(0, (boxH - block) / 2);
+  const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
+  const x = align === 'left' ? x0 : align === 'right' ? x1 : Math.round((x0 + x1) / 2);
+  const dark = color === 'dark';
+  const fill = dark ? '#111111' : '#FFFFFF';
+  const edge = dark ? '#FFFFFF' : '#000000';
+  const stroke = (px) => `stroke="${edge}" stroke-width="${Math.max(2, Math.round(px * 0.06))}" paint-order="stroke"`;
+  const parts = [];
+  if (brow) {
+    parts.push(`<text x="${x}" y="${Math.round(top + browSize * 0.85)}" text-anchor="${anchor}" ${SERIF} font-style="italic" font-weight="700" letter-spacing="${(browSize * 0.08).toFixed(1)}" font-size="${browSize}" fill="${dark ? '#9A6B00' : accent}" ${stroke(browSize)}>${xmlEsc(brow)}</text>`);
+  }
+  const hy0 = Math.round(top + browSize + browGap + size * 0.9);
+  parts.push(`<text text-anchor="${anchor}" ${SANS} font-weight="800" font-size="${size}" fill="${fill}" ${stroke(size)}>${head.lines.map((l, i) => `<tspan x="${x}" y="${hy0 + i * lh}">${xmlEsc(l)}</tspan>`).join('')}</text>`);
+  if (subFit.lines.length) {
+    const sy0 = hy0 + (head.lines.length - 1) * lh + subGap + subLh;
+    parts.push(`<text text-anchor="${anchor}" ${SANS} font-weight="700" font-size="${subFit.size}" fill="${dark ? '#111111' : '#FFFFFF'}" ${stroke(subFit.size)}>${subFit.lines.map((l, i) => `<tspan x="${x}" y="${sy0 + i * subLh}">${xmlEsc(l)}</tspan>`).join('')}</text>`);
+  }
+  return parts.join('\n');
 }
 
 /**
@@ -203,47 +237,13 @@ function thumbTagSvg({ w, h, layout, tag }) {
 
 /**
  * The overlay with the text in a box picked from the picture (thumbPlaceSpec):
- * headline, sub-head and audience pill stacked inside it, aligned as asked,
- * light text with a dark outline or dark text with a light one. No haze: the
- * box is already a calm part of the picture.
+ * audience eyebrow, headline and sub-head stacked inside it, aligned as asked.
+ * No haze: the box is already a calm part of the picture.
  */
-export function thumbSvgPlaced({ w, h, text, sub = '', tag = '', accent = '#FFFFFF', place, layout = 'top' }) {
-  const { x0, y0, x1, y1, align = 'center', color = 'light' } = place;
-  const boxW = x1 - x0;
-  const pill = tag ? thumbTagBox({ w, h, layout, tag }) : null;
-  const pillGap = pill ? Math.round(pill.h * 0.5) : 0;
-  const boxH = y1 - y0 - (pill ? pill.h + pillGap : 0);
-  const maxSize = Math.min(w, h) * 0.13;
-  const head = fitText(text, { boxW, boxH: boxH * (sub ? 0.7 : 1), maxSize, glyph: 0.62 });
-  const size = head.size || Math.round(maxSize * 0.5);
-  const lh = Math.round(size * 1.15);
-  const subFit = fitText(sub, { boxW, boxH: boxH * 0.28, maxSize: size * 0.6, glyph: 0.56, lineH: 1.25 });
-  const subLh = Math.round(subFit.size * 1.25);
-  const subGap = subFit.lines.length ? Math.round(size * 0.2) : 0;
-  const textH = lh * head.lines.length + subGap + subLh * subFit.lines.length;
-  const block = textH + (pill ? pillGap + pill.h : 0);
-  const top = y0 + Math.max(0, (y1 - y0 - block) / 2);
-  const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
-  const x = align === 'left' ? x0 : align === 'right' ? x1 : Math.round((x0 + x1) / 2);
-  const fill = color === 'dark' ? '#111111' : '#FFFFFF';
-  const edge = color === 'dark' ? '#FFFFFF' : '#000000';
-  const subFill = color === 'dark' ? '#111111' : accent;
-  const font = 'font-family="Noto Sans, Noto Sans Devanagari, DejaVu Sans, sans-serif"';
-  const stroke = (px) => `stroke="${edge}" stroke-width="${Math.max(2, Math.round(px * 0.06))}" paint-order="stroke"`;
-  const hy0 = Math.round(top + size * 0.9);
-  const tspans = head.lines.map((l, i) => `<tspan x="${x}" y="${hy0 + i * lh}">${xmlEsc(l)}</tspan>`).join('');
-  const subY0 = hy0 + (head.lines.length - 1) * lh + subGap + subLh;
-  const subSpans = subFit.lines.map((l, i) => `<tspan x="${x}" y="${subY0 + i * subLh}">${xmlEsc(l)}</tspan>`).join('');
-  const subText = subFit.lines.length ? `
-<text text-anchor="${anchor}" ${font} font-weight="700" font-size="${subFit.size}" fill="${subFill}" ${stroke(subFit.size)}>${subSpans}</text>` : '';
-  let pillPart = '';
-  if (pill) {
-    const px = align === 'left' ? x0 : align === 'right' ? x1 - pill.w : Math.round((x0 + x1 - pill.w) / 2);
-    const py = Math.min(h - pill.h, Math.round(top + textH + pillGap));
-    pillPart = pillSvg({ ...pill, x: Math.max(0, px), y: py });
-  }
+export function thumbSvgPlaced({ w, h, text, sub = '', tag = '', accent = '#FFFFFF', place }) {
+  const { align = 'center', color = 'light' } = place;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
-<text text-anchor="${anchor}" ${font} font-weight="800" font-size="${size}" fill="${fill}" ${stroke(size)}>${tspans}</text>${subText}${pillPart}</svg>`;
+${textBlock({ box: place, text, sub, tag, accent, maxSize: Math.min(w, h) * 0.13, align, color })}</svg>`;
 }
 
 /** A pill box from thumbTagBox, drawn: solid accent, black bold capitals. */

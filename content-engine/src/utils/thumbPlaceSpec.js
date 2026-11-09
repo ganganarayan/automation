@@ -51,7 +51,8 @@ const MIN_H = 0.14;
 const EDGE = 0.03; // kept clear on every side
 const MAX_OVERLAP = 0.06; // of the text box allowed on the subject
 
-export function placeSystem() {
+export function placeSystem({ bottomClear = 0 } = {}) {
+  const keep = Math.round(Math.max(0, Math.min(0.5, Number(bottomClear) || 0)) * 100);
   return [
     'You place the headline on finished social media thumbnails. Each image has no text yet.',
     'For each image, return:',
@@ -60,7 +61,8 @@ export function placeSystem() {
     '- align: left, center or right, whichever sits best in that area next to the subject.',
     '- color: light (white text) when the area is dark, dark (near-black text) when it is bright.',
     'Never put the text box over a face, eyes, hands or the main subject, even partly. Judge each size on its own picture: they are cropped differently.',
-  ].join('\n');
+    keep ? `The bottom ${keep}% of every image is kept for subtitles: the text box must end above it.` : '',
+  ].filter(Boolean).join('\n');
 }
 
 /** items: [{ size, label, w, h, b64 }] (JPEG base64). Returns the user content blocks. */
@@ -103,12 +105,12 @@ export function overlapShare(a, b) {
  * The checked text box for one size, in pixels: { x0, y0, x1, y1, align, color },
  * or null when the model gave none, it is too small, or it sits on the subject.
  */
-export function placeFor(raw, { w, h }) {
+export function placeFor(raw, { w, h, bottomClear = 0 }) {
   if (!raw) return null;
   const box = toPx(raw.text, w, h);
   if (!box) return null;
   box.x0 = Math.max(box.x0, w * EDGE); box.y0 = Math.max(box.y0, h * EDGE);
-  box.x1 = Math.min(box.x1, w * (1 - EDGE)); box.y1 = Math.min(box.y1, h * (1 - EDGE));
+  box.x1 = Math.min(box.x1, w * (1 - EDGE)); box.y1 = Math.min(box.y1, h * (1 - Math.max(EDGE, Math.min(0.5, Number(bottomClear) || 0))));
   if (box.x1 - box.x0 < w * MIN_W || box.y1 - box.y0 < h * MIN_H) return null;
   if (overlapShare(box, toPx(raw.subject, w, h)) > MAX_OVERLAP) return null;
   const align = ['left', 'center', 'right'].includes(raw.align) ? raw.align : 'center';

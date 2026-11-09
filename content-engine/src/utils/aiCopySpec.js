@@ -18,7 +18,7 @@
  */
 
 import { DEFAULT_COMPARISON_PROMPT, comparisonCopyFacts, stripCc } from './comparisonSpec.js';
-import { thumbMedia, thumbTagClean, IMAGE_PROMPT_MAX } from './thumbSpec.js';
+import { thumbMedia, eyebrowClean, IMAGE_PROMPT_MAX } from './thumbSpec.js';
 
 export const LIMITS = {
   title: 100, // YouTube title
@@ -60,8 +60,8 @@ const CLAUDE_THUMB_PROMPT_LINE = '  "thumbPrompt": the complete prompt for an im
 /** The output keys, for a provider that can hold the model to a schema. */
 export const COPY_SCHEMA = {
   type: 'object',
-  properties: Object.fromEntries(['title', 'description', 'igCaption', 'short', 'thumbText', 'thumbTag', 'thumbPrompt'].map((k) => [k, { type: 'string' }])),
-  required: ['title', 'description', 'igCaption', 'short', 'thumbText', 'thumbTag', 'thumbPrompt'],
+  properties: Object.fromEntries(['title', 'description', 'igCaption', 'short', 'thumbText', 'thumbSub', 'thumbTag', 'thumbPrompt'].map((k) => [k, { type: 'string' }])),
+  required: ['title', 'description', 'igCaption', 'short', 'thumbText', 'thumbSub', 'thumbTag', 'thumbPrompt'],
   additionalProperties: false,
 };
 
@@ -76,8 +76,9 @@ export function copySystemPrompt({ brief = '', audience = '', keyword = '', base
   return [
     freePrompt && lead === DEFAULT_COPY_PROMPT ? lead.replace(THUMB_PROMPT_LINE, CLAUDE_THUMB_PROMPT_LINE) : lead,
     comparison ? String(comparisonPrompt || '').trim() || DEFAULT_COMPARISON_PROMPT : '',
-    'Return ONLY a JSON object with exactly these string keys: "title", "description", "igCaption", "short", "thumbText", "thumbTag", "thumbPrompt".',
-    '"thumbTag" names who the video is for, drawn as a small label on the thumbnail: 2 to 4 words, at most 24 characters, such as "For founders" or "For GCC leaders". No hashtags, no emojis, no punctuation at the end.',
+    'Return ONLY a JSON object with exactly these string keys: "title", "description", "igCaption", "short", "thumbText", "thumbSub", "thumbTag", "thumbPrompt".',
+    '"thumbTag" is the audience line drawn small above the thumbnail headline: who this video is for, taken from what the transcript says about its viewers, 2 to 6 words, at most 40 characters, such as "For NRI parents" or "For first-time founders". No hashtags, no emojis, no punctuation at the end.',
+    '"thumbSub" is the sub-head drawn under the thumbnail headline: one short line, at most 8 words, that adds the promise or the twist the headline leaves open. No hashtags, no emojis.',
     freePrompt && !comparison ? 'The title, description, thumbText and thumbPrompt must all make the same one point.' : '',
     comparison || freePrompt ? '' : 'The title, description, thumbText and thumbPrompt must all make the same one point. thumbPrompt must show that point literally, whatever shows it most directly: a chart, a product screen, a before and after, a diagram, or a real close-up of the exact thing. Example, for viewers leaving a video: a retention line chart, horizontal axis 0% to 100% of the video, the line falling sharply at 68% with a bold red marker labelled "68%". Illustrative numbers on a chart are allowed. Clean, bright, product-marketing look. Never a metaphor, never someone at a desk, never silhouettes, and no mood, lighting or camera directions.',
     'Never use em dashes or en dashes anywhere. Use a comma, a full stop or a colon instead.',
@@ -127,7 +128,8 @@ export function normalizeCopy(raw) {
     igCaption: clip(str(o.igCaption ?? o.ig_caption ?? o.caption), LIMITS.igCaption),
     short: str(o.short ?? o.shortPost ?? o.short_post),
     thumbText: clip(str(o.thumbText ?? o.thumb_text ?? o.thumbnailText).replace(/[#"“”]/g, ''), 60),
-    thumbTag: thumbTagClean(str(o.thumbTag ?? o.thumb_tag)),
+    thumbSub: clip(str(o.thumbSub ?? o.thumb_sub).replace(/[#"“”]/g, ''), 80),
+    thumbTag: eyebrowClean(str(o.thumbTag ?? o.thumb_tag)),
     thumbPrompt: clip(str(o.thumbPrompt ?? o.thumb_prompt ?? o.imagePrompt), IMAGE_PROMPT_MAX),
   };
 }
@@ -143,7 +145,8 @@ export function keepHiddenCopy(copy, stored) {
   return {
     ...copy,
     thumbText: (copy && copy.thumbText) || String(s.thumbText || ''),
-    thumbTag: (copy && copy.thumbTag) || thumbTagClean(s.thumbTag),
+    thumbSub: (copy && copy.thumbSub) || String(s.thumbSub || ''),
+    thumbTag: (copy && copy.thumbTag) || eyebrowClean(s.thumbTag),
     thumbPrompt: (copy && copy.thumbPrompt) || String(s.thumbPrompt || ''),
   };
 }

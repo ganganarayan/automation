@@ -184,11 +184,11 @@ export function register(ctx) {
   router.post('/admin/instances/ready-ai/transcript', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      const { funnelId, driveId, name, text, headline, subhead, imagePrompt, approve, source } = req.body || {};
+      const { funnelId, driveId, name, text, headline, subhead, audience, imagePrompt, approve, source } = req.body || {};
       if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
       res.json({ ok: true, ...(await readyPost.saveTranscript({
         funnelId, driveId: String(driveId), name: String(name || ''), text: String(text || ''),
-        headline: String(headline || ''), subhead: String(subhead || ''), imagePrompt: String(imagePrompt || ''), approve: approve === true, source,
+        headline: String(headline || ''), subhead: String(subhead || ''), audience: String(audience || ''), imagePrompt: String(imagePrompt || ''), approve: approve === true, source,
       })) });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
@@ -237,11 +237,11 @@ export function register(ctx) {
   router.post('/admin/instances/ready-ai/thumbnail', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      const { funnelId, driveId, name, accessToken, accounts, headline, subhead, imagePrompt, source } = req.body || {};
+      const { funnelId, driveId, name, accessToken, accounts, headline, subhead, audience, imagePrompt, source } = req.body || {};
       if (!funnelId || !driveId) return res.status(400).json({ ok: false, error: 'funnelId and driveId required' });
       res.json({ ok: true, ...(await readyPost.generateThumbnail({
         tenantId: req.tenantId, funnelId, driveId: String(driveId), name: String(name || ''), accessToken: String(accessToken || ''), accounts,
-        headline: String(headline || ''), subhead: String(subhead || ''), imagePrompt: String(imagePrompt || ''), source,
+        headline: String(headline || ''), subhead: String(subhead || ''), audience: String(audience || ''), imagePrompt: String(imagePrompt || ''), source,
       })) });
     } catch (err) {
       log.error({ err: err.message }, 'ready-ai thumbnail failed');
@@ -1287,7 +1287,8 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
             <div class="hint" id="ch-${id}"></div>
             <label class="fl">Edit the transcript, or paste an SRT, cue numbers and timestamps are removed before the AI reads it (the SRT itself is kept)<textarea id="tx-${id}" rows="7" oninput="txEdited('${id}')"></textarea></label>
             <label class="fl">Thumbnail headline: big text on the image (blank = the AI's hook)<input id="hl-${id}" maxlength="80" placeholder="e.g. Why STHIRA works"></label>
-            <label class="fl">Thumbnail sub-head: smaller line under it (optional)<input id="su-${id}" maxlength="120"></label>
+            <label class="fl">Thumbnail audience: small line above the headline (blank = from the transcript)<input id="au-${id}" maxlength="40" placeholder="e.g. For NRI parents"></label>
+            <label class="fl">Thumbnail sub-head: smaller line under it (blank = from the transcript)<input id="su-${id}" maxlength="120"></label>
             <label class="fl">Image prompt: the artwork you want on the thumbnail (left blank, ✅ Approve + generate copy writes one here; yours is never replaced)<textarea id="ip-${id}" rows="4"></textarea></label>
             <div class="nowrow">
               <button class="act" id="tb-${id}" onclick="transcribe('${id}')">🎙 Transcribe</button>
@@ -1528,7 +1529,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       $('ts',id).disabled=true;
       let ok=false;
       try{
-        const j=await post('transcript', { driveId:id, name:$('nm',id).value, source:SOURCE, text, approve, headline:$('hl',id).value, subhead:$('su',id).value, imagePrompt:$('ip',id).value });
+        const j=await post('transcript', { driveId:id, name:$('nm',id).value, source:SOURCE, text, approve, headline:$('hl',id).value, subhead:$('su',id).value, audience:$('au',id).value, imagePrompt:$('ip',id).value });
         if(!j.ok) throw new Error(j.error||'failed');
         $('tx',id).value=j.transcript||''; approved[id]=!!j.approved; timed[id]=!!j.timed; subsNote(id); setStage(id, j.stage); setInst(id, j.instanceId);
         $('tg',id).textContent=(j.approved?'🟢 Approved '+j.approvedIst+'.':'💾 Saved: not approved yet.')+(j.srt?' SRT timestamps removed for the AI; the SRT is kept.':'');
@@ -1564,7 +1565,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if(thumbBusy[id]) return;
       thumbBusy[id]=true; $('gt',id).disabled=true; $('gs',id).textContent='🖼 Designing the thumbnail… (under a minute): your copy is not touched';
       try{
-        const j=await post('thumbnail', { driveId:id, name:$('nm',id).value, source:SOURCE, accounts: pickedAccounts(), accessToken: await driveToken(), headline:$('hl',id).value, subhead:$('su',id).value, imagePrompt:$('ip',id).value });
+        const j=await post('thumbnail', { driveId:id, name:$('nm',id).value, source:SOURCE, accounts: pickedAccounts(), accessToken: await driveToken(), headline:$('hl',id).value, subhead:$('su',id).value, audience:$('au',id).value, imagePrompt:$('ip',id).value });
         if(!j.ok) throw new Error(j.error||'failed');
         showThumbs(id, j); setInst(id, j.instanceId);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
@@ -1642,7 +1643,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       timed[id]=!!d.timed;
       if(d.clean) showClean(id, d.clean);
       if(d.hasTranscript || d.transcript) $('tx',id).value=d.transcript||'';
-      $('hl',id).value=d.headline||''; $('su',id).value=d.subhead||''; $('ip',id).value=d.imagePrompt||'';
+      $('hl',id).value=d.headline||''; $('su',id).value=d.subhead||''; $('au',id).value=d.audience||''; $('ip',id).value=d.imagePrompt||'';
       approved[id]=!!d.approved; gateUi(id);
       if(d.hasTranscript) $('tg',id).textContent=d.approved?('🟢 Approved '+d.approvedIst+(d.srt?' · SRT kept':'')):'🟡 Waiting for you. Check the names, type the headline, check the image prompt, then ✅ Approve + generate copy and 🖼 Generate thumbnail.';
       if(d.noSpeech && !compOn[id]) $('tg',id).textContent='🟡 No speech found in this video. Paste what it says, or pick its comparison above. The daily router leaves it alone until then.';

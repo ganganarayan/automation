@@ -51,7 +51,7 @@ describe('clip / normalizeCopy', () => {
   });
   it('strips angle brackets from the title and maps snake_case keys', () => {
     const c = normalizeCopy({ title: '<Hi>', description: 'd', ig_caption: 'ig', short_post: 's', thumb_text: '"Hook" #x', thumb_prompt: 'A lotus' });
-    expect(c).toEqual({ title: 'Hi', description: 'd', igCaption: 'ig', short: 's', thumbText: 'Hook x', thumbTag: '', thumbPrompt: 'A lotus' });
+    expect(c).toEqual({ title: 'Hi', description: 'd', igCaption: 'ig', short: 's', thumbText: 'Hook x', thumbSub: '', thumbTag: '', thumbPrompt: 'A lotus' });
   });
 });
 

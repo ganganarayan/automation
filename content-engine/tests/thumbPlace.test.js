@@ -47,9 +47,7 @@ describe('the text drawn in that box', () => {
     expect(svg).toContain('x="1240"');
     expect(svg).toContain('fill="#111111"');
     expect(svg).toContain('FOR NRI PARENTS');
-    const rect = svg.match(/<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/);
-    expect(Number(rect[2]) + Number(rect[4])).toBeLessThanOrEqual(720);
-    expect(Number(rect[1]) + Number(rect[3])).toBeLessThanOrEqual(1240);
+    expect(svg.indexOf('FOR NRI PARENTS')).toBeLessThan(svg.indexOf('He just'));
   });
 
   it('Claude-written prompts ask for an empty area and no text', () => {

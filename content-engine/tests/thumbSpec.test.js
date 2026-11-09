@@ -59,10 +59,11 @@ describe('thumbSpec', () => {
 });
 
 describe('thumbSvg sub-head', () => {
-  it('draws the sub-head under the headline in the accent colour', () => {
-    const svg = thumbSvg({ ...THUMB_SPECS.youtube, text: 'Why STHIRA works', sub: 'The combat engine, repaired' });
+  it('draws the sub-head under the headline, and the audience line above it in the accent colour', () => {
+    const svg = thumbSvg({ ...THUMB_SPECS.youtube, text: 'Why STHIRA works', sub: 'The combat engine, repaired', tag: 'For founders' });
     expect(svg).toContain('The combat engine');
     expect(svg).toContain(`fill="${THUMB_SPECS.youtube.accent}"`);
+    expect(svg.indexOf('FOR FOUNDERS')).toBeLessThan(svg.indexOf('Why STHIRA'));
     expect(thumbSvg({ ...THUMB_SPECS.youtube, text: 'Only headline' })).not.toContain('font-weight="700"');
   });
 });

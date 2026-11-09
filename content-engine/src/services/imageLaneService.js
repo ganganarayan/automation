@@ -50,7 +50,11 @@ import { settings } from '../settings/index.js';
 import { imageSpec } from '../utils/imageGateSpec.js';
 import { platformKey } from '../utils/aiCopySpec.js';
 import { createTtsProvider } from '../providers/ttsProvider.js';
-import { costImages, costAnimation, costTts } from '../utils/pricing.js';
+import { costImages, costAnimation, costTts, costClaude } from '../utils/pricing.js';
+import sharp from 'sharp';
+import { placeText, drawText } from './textPlaceService.js';
+import { eyebrowClean } from '../utils/thumbSpec.js';
+import { SPLIT_SCHEMA, splitSystem, splitUser, splitResult } from '../utils/imageSplitSpec.js';
 import { totalClipSeconds } from '../utils/stageSpec.js';
 import { stepDownOf, stepDownPicture, stepDownText, stepDownCaption, stepDownPrompt, stepDownNote } from '../utils/stepDownSpec.js';
 import { headlineImage } from './imageComposer.js';
@@ -138,7 +142,7 @@ async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '
   let steps = instanceService.parseSteps(inst);
   for (const k of ['animate', 'voiceover', 'transcript', 'stitch']) steps = patchStep(steps, k, { status: 'skipped' });
   steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: short || full, copy: { title: fields.headline || '', description: full }, captionFull: full, captionShort: short } });
-  steps = patchStep(steps, 'images', { status: 'running', startedAt: new Date().toISOString(), artifacts: { prompt, note: note || '', row: fields, sheet, tried: [], ...(festival ? { festival } : {}) } });
+  steps = patchStep(steps, 'images', { status: 'running', startedAt: new Date().toISOString(), artifacts: { prompt, note: note || '', row: fields, sheet, tried: [], placed: null, ...(festival ? { festival } : {}) } });
   await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
   await stepLog.start(instanceId, 'images');
   const video = imageVideoMode(providers.resolved.imageVideo) === 'on';
@@ -194,17 +198,32 @@ async function contextOf(inst, log) {
 }
 
 /** Hand the whole job to GitHub; its done hook continues in githubDone. */
-async function startOnGithub({ instanceId, f, providers }) {
-  const inst = await instanceRepo.get(instanceId);
-  const steps = instanceService.parseSteps(inst);
-  const img = art(steps, 'images');
+async function startOnGithub({ instanceId, f, providers, log = baseLog }) {
+  let inst = await instanceRepo.get(instanceId);
+  let steps = instanceService.parseSteps(inst);
+  let img = art(steps, 'images');
+  // With Claude set the pictures are made here in two steps (no text, then the words placed);
+  // GitHub then only voices them. Their cost is recorded now.
+  let drawn = null;
+  if (providers.claude && !(img.festival && img.festival.imageUrl)) {
+    const d = await drawOnRailway({ instanceId, f, providers, log }, img, inst.round);
+    inst = await instanceRepo.get(instanceId);
+    steps = instanceService.parseSteps(inst);
+    const at = new Date().toISOString();
+    if (providers.resolved?.openai?.apiKey && d.made) steps = addCostToSteps(steps, 'images', { ...costImages({ count: d.made, size: '1024x1536' }), at });
+    for (const { step, ...c } of d.costs || []) steps = addCostToSteps(steps, 'images', { ...c, at });
+    await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
+    img = art(steps, 'images');
+    drawn = Object.fromEntries(Object.keys(IMAGE_VIDEO_SIZES).map((s) => [s, d.sized[s] || d.sized.feed]));
+  }
   const script = art(steps, 'script');
   const cfg = await funnels.getConfig(f.id).catch(() => ({}));
   const sizes = Object.keys(IMAGE_VIDEO_SIZES);
   const given = img.festival && img.festival.imageUrl;
   const job = {
     sizes,
-    prompts: given ? {} : Object.fromEntries(sizes.map((s) => [s, sizedPrompt(img.prompt || '', s)])),
+    prompts: given || drawn ? {} : Object.fromEntries(sizes.map((s) => [s, sizedPrompt(img.prompt || '', s)])),
+    ...(drawn && !given ? { imageUrls: drawn } : {}),
     ...(given ? { imageUrls: Object.fromEntries(sizes.map((s) => [s, img.festival.imageUrl])), subMargins: photoSubMargins(img.festival), subTop: true, title: img.festival.title || '', musicSetting: musicChoice(providers.resolved.shortMusic, img.festival.music, img.festival.musicCredit) } : {}),
     text: script.captionFull || script.captionShort || '',
     voiceId: (img.festival && img.festival.voiceId) || cfg.voice_id || '',
@@ -263,31 +282,91 @@ async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
     const upload = { id, downloadUrl: given, thumbnailUrl: id ? `https://drive.google.com/thumbnail?id=${id}&sz=w1000` : given };
     return { upload, sized: Object.fromEntries(Object.keys(IMAGE_VIDEO_SIZES).map((s) => [s, given])), made: 0 };
   }
+  // Already drawn this round (e.g. on Railway before handing the video to GitHub): not paid for twice.
+  if (img.placed && img.placed.round === (round || 1) && img.placed.sized && img.placed.upload) {
+    return { upload: img.placed.upload, sized: img.placed.sized, made: 0, costs: [] };
+  }
   const sized = {};
   let made = 0;
+  const costs = [];
   const name = (size) => `${poster.slug(f.name)}-${poster.slug((img.sheet || {}).key || '')}-r${round || 1}${size === 'feed' ? '' : `-${size}`}.png`;
+  // Two steps when Claude is set: a picture with no text, then the words where it is empty.
+  const split = await splitPrompt({ providers, img, costs, log });
+  const pictures = {};
   const draw = async (size) => {
     const spec = IMAGE_VIDEO_SIZES[size];
     // Gemini draws square only: cropping that to 9:16 could cut the headline, so it stays whole
     // (the video fits it on a blurred copy of itself).
     const key = providers.resolved?.openai?.apiKey ? spec.gen : 'square';
-    const image = await poster.generate(providers, sizedPrompt(img.prompt || '', size), imageSpec(spec.gen).size, key);
+    const image = await poster.generate(providers, sizedPrompt(split ? split.picture : img.prompt || '', size), imageSpec(spec.gen).size, key);
     made += 1;
+    if (split) { pictures[size] = image; return null; }
     const up = await providers.storage.uploadPng(f.driveFolder, name(size), image);
     if (!up || !up.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
     return up;
   };
   // The 4:5 one is the preview and the picture-mode post; a size that fails uses it.
-  const upload = await draw('feed');
-  sized.feed = upload.downloadUrl;
+  let upload = await draw('feed');
+  if (upload) sized.feed = upload.downloadUrl;
   for (const size of ['portrait', 'landscape']) {
     try {
-      sized[size] = (await draw(size)).downloadUrl;
+      const up = await draw(size);
+      if (up) sized[size] = up.downloadUrl;
     } catch (err) {
       log.warn({ err: err.message, size, instance: instanceId }, 'one image size failed, the 4:5 picture stands in');
     }
   }
-  return { upload, sized, made };
+  if (split) {
+    const pics = {};
+    for (const [size, buf] of Object.entries(pictures)) {
+      const { width, height } = await sharp(buf).metadata();
+      pics[size] = { buf, w: width, h: height, label: IMAGE_VIDEO_SIZES[size].label };
+    }
+    const tag = eyebrowClean(split.tag);
+    const sub = split.sub;
+    const places = await placeText({ claude: providers.claude, pictures: pics, text: split.headline, sub, tag, bottomClear: SUB_CLEAR, costs, log });
+    for (const [size, p] of Object.entries(pics)) {
+      const png = await drawText(p.buf, { text: split.headline, sub, tag, place: places[size] || null });
+      const up = await providers.storage.uploadPng(f.driveFolder, name(size), png);
+      if (!up || !up.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
+      if (size === 'feed') upload = up;
+      sized[size] = up.downloadUrl;
+    }
+    if (!upload) throw new Error('the 4:5 picture was not made');
+  }
+  await rememberPlaced(instanceId, { round: round || 1, upload, sized, split: !!split });
+  return { upload, sized, made, costs };
+}
+
+// Share of the height kept free of the headline: the video's subtitles run there.
+const SUB_CLEAR = 0.25;
+
+/** Claude splits the sheet prompt into a no-text picture and the words; null = draw it in one step as before. */
+async function splitPrompt({ providers, img, costs, log }) {
+  if (!providers.claude || !String(img.prompt || '').trim()) return null;
+  try {
+    const { data, model, usage } = await providers.claude.generateJsonDetailed({ system: splitSystem(), user: splitUser(img.prompt, img.row || {}), schema: SPLIT_SCHEMA, maxTokens: 8000 });
+    costs.push({ step: 'images', ...costClaude({ ...usage, model }) });
+    const split = splitResult(data, img.row || {});
+    if (!split) log.warn('prompt split gave no picture or headline, drawing in one step');
+    return split;
+  } catch (err) {
+    log.warn({ err: err.message }, 'prompt split failed, drawing in one step');
+    return null;
+  }
+}
+
+/** The finished pictures of this round, kept so a hand-over or a retry does not draw them again. */
+async function rememberPlaced(instanceId, placed) {
+  try {
+    await instanceService.updateStep(instanceId, 'images', { artifacts: { ...imagesArtOf(await instanceRepo.get(instanceId)), placed } });
+  } catch (err) {
+    baseLog.warn({ err: err.message, instanceId }, 'finished pictures not remembered (a retry draws them again)');
+  }
+}
+
+function imagesArtOf(inst) {
+  return art(instanceService.parseSteps(inst), 'images');
 }
 
 /** The whole job on Railway: pictures, and in video mode the voice and the videos; then the approval. */
@@ -297,7 +376,7 @@ async function makeOnRailway(ctx) {
   let steps = instanceService.parseSteps(inst);
   const img = art(steps, 'images');
   const script = art(steps, 'script');
-  const { upload, sized, made } = await drawOnRailway(ctx, img, inst.round);
+  const { upload, sized, made, costs: drawCosts = [] } = await drawOnRailway(ctx, img, inst.round);
   const at = new Date().toISOString();
   let render = null;
   let chars = 0;
@@ -326,6 +405,7 @@ async function makeOnRailway(ctx) {
   });
   // Real cost when OpenAI made it (Gemini has no per-image price table here).
   if (providers.resolved?.openai?.apiKey && made) steps = addCostToSteps(steps, 'images', { ...costImages({ count: made, size: '1024x1536' }), at });
+  for (const { step, ...c } of drawCosts) steps = addCostToSteps(steps, 'images', { ...c, at });
   if (chars) steps = addCostToSteps(steps, 'images', { ...costTts({ provider: 'elevenlabs', chars }), at });
   await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
   await finishReview(instanceId, f, log);
