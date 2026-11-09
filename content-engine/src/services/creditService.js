@@ -36,6 +36,8 @@ import { signKlingToken } from '../utils/animationSpec.js';
 import { providerOrder, creditState, laneTwoVerdict, dryTransition, VIDEO_PROVIDERS } from '../utils/routerSpec.js';
 import { todayKeyIst, formatIst } from '../utils/time.js';
 import { childLogger } from '../core/logger.js';
+import * as workView from '../repositories/workViewRepository.js';
+import { ESTIMATED, parseBalance, balanceItem } from '../utils/balanceSpec.js';
 
 const log = childLogger({ module: 'credit' });
 const STORE = 'router_credit';
@@ -194,3 +196,49 @@ export async function status(tenantId = 'default') {
 }
 
 export default { check, markExhausted, clearExhausted, noteVerdict, status };
+
+/**
+ * The balance strip for Keys and credit: every key that is set, with what is
+ * left (utils/balanceSpec). Live where the provider has a balance API, else
+ * the balance you typed minus what the app spent there since.
+ */
+export async function balances(tenantId = 'default') {
+  const providers = await buildProviders(tenantId);
+  const r = providers.resolved || {};
+  const a = r.animation || {};
+  const set = {
+    openai: !!r.openai?.apiKey,
+    anthropic: !!r.claude?.apiKey,
+    hailuo: !!(a.hailuoApiKey && a.hailuoGroupId),
+    gemini: !!r.gemini?.apiKey,
+    kling: !!(a.klingAccessKey && a.klingSecretKey),
+    runway: !!a.runwayApiKey,
+    elevenlabs: !!r.tts?.elevenlabsApiKey,
+  };
+  const [kling, runway, voice] = await Promise.all([
+    set.kling ? safe(klingBalance(a.klingAccessKey, a.klingSecretKey)) : null,
+    set.runway ? safe(runwayBalance(a.runwayApiKey)) : null,
+    set.elevenlabs ? safe(elevenlabsLeft(r.tts.elevenlabsApiKey)) : null,
+  ]);
+  const items = [];
+  for (const [key, def] of Object.entries(ESTIMATED)) {
+    if (!set[key]) continue;
+    const balance = parseBalance(await tenantConfig.get(tenantId, `balance_${key}`).catch(() => null));
+    const spent = balance ? await workView.spendSince({ tenantId, provider: def.provider, fromUtc: balance.at }).catch(() => 0) : 0;
+    items.push({ ...balanceItem({ key, kind: 'estimated', name: def.name, balance, spent }), since: balance ? formatIst(balance.at) : '' });
+  }
+  if (set.gemini) items.push(balanceItem({ key: 'gemini', kind: 'none', name: 'Gemini' }));
+  if (set.kling) items.push(balanceItem({ key: 'kling', kind: 'live', name: 'Kling', value: kling, unit: 'units' }));
+  if (set.runway) items.push(balanceItem({ key: 'runway', kind: 'live', name: 'Runway', value: runway, unit: 'credits' }));
+  if (set.elevenlabs) items.push(balanceItem({ key: 'elevenlabs', kind: 'live', name: 'ElevenLabs', value: voice, unit: 'chars' }));
+  return items;
+}
+
+/** "Balance now": what a provider's dashboard shows after a top-up, from this moment. */
+export async function setBalance(tenantId = 'default', key, usd) {
+  if (!ESTIMATED[key]) throw new Error('unknown key');
+  const n = Number(usd);
+  if (!Number.isFinite(n) || n < 0 || n > 100000) throw new Error('type the balance in USD, e.g. 20');
+  await tenantConfig.set(tenantId, `balance_${key}`, JSON.stringify({ usd: n, at: new Date().toISOString() }));
+  return true;
+}

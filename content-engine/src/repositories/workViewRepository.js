@@ -159,3 +159,22 @@ export async function commentsForPosts({ tenantId = 'default', refs = [] }) {
 }
 
 export default { wastedTotal, needsYou, pendingImageApprovals, liveCounts, readyLeft, routerDays, calendarInstances, costSince, deletedRows, deletedTotal, commentsForPosts };
+
+/**
+ * USD the app recorded for one provider since fromUtc, from every cost entry on
+ * live and deleted runs (an entry's own time, else its run's start).
+ */
+export async function spendSince({ tenantId = 'default', provider, fromUtc }) {
+  const { rows } = await query(
+    `SELECT COALESCE(sum((c->>'costUsd')::float), 0)::float AS usd
+       FROM (SELECT steps, created_at FROM instances WHERE tenant_id = $1
+             UNION ALL
+             SELECT steps, created_at FROM deleted_instances WHERE tenant_id = $1) t
+       CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(t.steps) = 'array' THEN t.steps ELSE '[]'::jsonb END) s
+       CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(s->'costs') = 'array' THEN s->'costs' ELSE '[]'::jsonb END) c
+      WHERE c->>'provider' = $2
+        AND COALESCE(NULLIF(c->>'at', '')::timestamptz, t.created_at) >= $3`,
+    [tenantId, provider, fromUtc],
+  );
+  return (rows[0] && rows[0].usd) || 0;
+}

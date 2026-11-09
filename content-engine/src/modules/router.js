@@ -126,6 +126,28 @@ export function register(ctx) {
     }
   });
 
+  // The balance strip on top of Keys and credit.
+  router.get('/admin/credit/balances', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      res.set('Cache-Control', 'no-store').json({ ok: true, items: await credit.balances(req.tenantId || 'default') });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // You typed what a provider's dashboard shows now: the strip counts down from it.
+  router.post('/admin/credit/balance', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const { key, usd } = req.body || {};
+      await credit.setBalance(req.tenantId || 'default', String(key || ''), usd);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   // "I topped up": clear today's out-of-credit mark for one provider.
   router.post('/admin/credit/clear', async (req, res) => {
     try {

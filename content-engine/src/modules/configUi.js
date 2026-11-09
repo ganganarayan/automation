@@ -505,6 +505,40 @@ export function register(ctx) {
  * Lane 2 needs (video providers in the first active funnel's order, ElevenLabs,
  * image API, LLM, GitHub assembly). Filled by GET /api/v1/admin/credit-status.
  */
+/**
+ * One or two lines on top of Keys and credit: what is left on every key that
+ * is set. Live for Kling, Runway and ElevenLabs; for OpenAI, Claude and
+ * MiniMax, click the name and type what its dashboard shows after a top-up,
+ * and the strip counts down from it with what the app spends there.
+ */
+function balanceStrip() {
+  return `<div id="balstrip" class="hint" style="margin:0 0 .8rem;padding:.5rem .7rem;border:1px solid #2a2a3a;border-radius:8px;line-height:1.7">Reading balances…</div>
+    <script>
+      async function setBal(key,name){
+        const v=prompt(name+': balance now, in USD, as its billing page shows it (e.g. 20)');
+        if(v===null)return;
+        const r=await fetch('/api/v1/admin/credit/balance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,usd:Number(String(v).replace(/[^0-9.]/g,''))})}).then((x)=>x.json()).catch(()=>({ok:false}));
+        if(!r.ok)alert(r.error||'Not saved, try again');
+        loadBal();
+      }
+      async function loadBal(){
+        const box=document.getElementById('balstrip');
+        const e=(t)=>String(t==null?'':t).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        try{
+          const j=await (await fetch('/api/v1/admin/credit/balances',{cache:'no-store'})).json();
+          if(!j.ok){box.textContent='🟡 Balances not readable just now: '+(j.error||'no reply');return;}
+          if(!j.items.length){box.textContent='No keys set yet.';return;}
+          const dot={ok:'🟢',low:'🟡',out:'🔴',unknown:'⚪'};
+          box.innerHTML='<b>Balance</b> · '+j.items.map((i)=>{
+            const nm=i.set?'<a href="#" title="'+e(i.since?'Typed '+i.since+'; click after a top-up':'Click and type its balance')+'" onclick="setBal(\\''+e(i.key)+'\\',\\''+e(i.name)+'\\');return false">'+e(i.name)+'</a>':e(i.name);
+            return (dot[i.tone]||'⚪')+' '+nm+' '+e(i.text);
+          }).join(' &nbsp;·&nbsp; ');
+        }catch(err){box.textContent='🟡 Balances not readable just now ('+err.message+')';}
+      }
+      loadBal();
+    </script>`;
+}
+
 function creditPanel() {
   return `<fieldset><legend>AI video credit (daily router, Lane 2)</legend>
     <p class="hint" style="margin:0 0 .4rem">What the daily router's AI videos can use right now. Runway, Kling and ElevenLabs balances are read live, so a top-up shows when you press Check again. Hailuo, OpenAI and Gemini don't show a balance: they are used until one says "out of credit", then rest for the day. After topping one of those up, press I topped up.</p>
@@ -1232,6 +1266,7 @@ function appSection(app, tenantId, configMap, key, extra = '') {
 
   return `<section class="panel card" id="panel-${esc(app)}">
     <h2>${esc(m.label)}</h2><p class="blurb">${esc(m.blurb)}</p>
+    ${app === 'api-keys' ? balanceStrip() : ''}
     <form method="post" action="settings/save">
       <input type="hidden" name="app" value="${esc(app)}">
       <input type="hidden" name="tenant" value="${esc(tenantId)}">
