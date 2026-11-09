@@ -27,6 +27,7 @@ import { libraryStatus, statusText, NEEDS_YOU_STATUSES } from '../utils/libraryS
 import { laneOf, channelText, commentStatus } from '../utils/laneSpec.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS, HOME_PATH } from '../utils/adminNav.js';
 import { nowIst, formatIst, todayKeyIst, ZONE } from '../utils/time.js';
+import { tookText } from '../utils/lessonSpec.js';
 import { costBreakdown } from '../utils/instanceSpec.js';
 import { stepDownOf } from '../utils/stepDownSpec.js';
 import { keyOk, currentSession } from '../services/accessService.js';
@@ -94,15 +95,16 @@ export function register(ctx) {
       if (!(await guardHtml(req, res))) return;
       const tenantId = req.tenantId || 'default';
       const monthStart = nowIst().startOf('month');
-      const [session, rows, month, deleted, deletedAll] = await Promise.all([
+      const [session, rows, month, deleted, deletedAll, wasted] = await Promise.all([
         currentSession(req),
         instances.list({ tenantId, limit: 30 }),
         views.costSince({ tenantId, fromUtc: monthStart.toUTC().toISO() }).catch(() => null),
         views.deletedRows({ tenantId }).catch(() => []),
         views.deletedTotal({ tenantId }).catch(() => null),
+        views.wastedTotal({ tenantId }).catch(() => null),
       ]);
       const comments = await views.commentsForPosts({ tenantId, refs: rows.flatMap(postRefsOf) }).catch(() => []);
-      res.type('html').send(logPage({ session, rows, month, monthStart, deleted, deletedAll, comments }));
+      res.type('html').send(logPage({ session, rows, month, monthStart, deleted, deletedAll, wasted, comments }));
     } catch (err) {
       next(err);
     }
@@ -249,15 +251,19 @@ function deliveryLine(c, jobs) {
   return `<div>${[esc(channelText(c)), link, esc(commentStatus(c, jobs))].filter(Boolean).join(' · ')}</div>`;
 }
 
-function logPage({ session, rows, month, monthStart, deleted = [], deletedAll = null, comments = [] }) {
+function logPage({ session, rows, month, monthStart, deleted = [], deletedAll = null, wasted = null, comments = [] }) {
   const deletedBody = deleted
     .map((r) => {
       const parts = Object.entries(costBreakdown(instances.parseSteps(r))).filter(([, c]) => Number(c) > 0);
+      // Each attempt has its own id; remade ones also name their run and their number.
+      const ids = [`id ${String(r.id).slice(0, 8)}`,
+        r.run_id && String(r.run_id) !== String(r.id) ? `run ${String(r.run_id).slice(0, 8)}` : '',
+        r.attempt ? `attempt ${r.attempt}` : ''].filter(Boolean).join(' · ');
       return `<tr>
         <td class="hint">${esc(formatIst(r.deleted_at))}</td>
         <td class="hint">${esc(formatIst(r.created_at))}</td>
-        <td>${esc(r.title || 'Untitled')}<div class="hint">${esc(r.funnel_name || '-')} · ${esc(String(r.id).slice(0, 8))}</div></td>
-        <td>${esc(statusText(r.status))}</td>
+        <td>${esc(r.title || 'Untitled')}<div class="hint">${esc(r.funnel_name || '-')} · ${esc(ids)}</div></td>
+        <td>${esc(statusText(r.status))}<div class="hint">took ${esc(tookText(r.created_at, r.deleted_at))}</div></td>
         <td>${esc(usd(r.cost_usd))}${parts.length ? `<div class="hint">${esc(parts.map(([k, c]) => `${k} ${usd(c)}`).join(', '))}</div>` : ''}</td>
       </tr>`;
     })
@@ -288,15 +294,16 @@ function logPage({ session, rows, month, monthStart, deleted = [], deletedAll = 
       ${tile(`Cost since ${formatIst(monthStart, { withTime: false })}`, month ? usd(month.total) : '-', `this month, all funnels, ${month ? usd(month.deleted) : '-'} of it on deleted runs`)}
       ${tile('Runs this month', month ? String(month.runs) : '-', 'instances created, deleted ones included')}
       ${tile('Deleted, all time', deletedAll ? usd(deletedAll.total) : '-', deletedAll ? `${deletedAll.n} deleted instance(s)` : 'log not readable')}
+      ${tile('Wasted on disapproved, all time', wasted ? usd(wasted.total) : '-', wasted ? `${wasted.n} turned-down attempt(s) over ${wasted.runs} run(s)` : 'log not readable')}
     </div>
     <table>
       <thead><tr><th>Created</th><th>Video</th><th>Status</th><th>Cost</th><th>Delivery</th></tr></thead>
       <tbody>${body || '<tr><td colspan="5" class="hint">No runs yet.</td></tr>'}</tbody>
     </table>
     <h2 id="deleted">Deleted instances</h2>
-    <div class="sub">A permanent record of the money spent on deleted runs. Nothing here can be restored. Shows the latest 200; the totals above count them all.</div>
+    <div class="sub">A permanent record of the money spent on deleted runs and on every attempt you disapproved: each attempt has its own id, its run and its number, its real cost and how long it took. Nothing here can be restored. Shows the latest 200; the totals above count them all.</div>
     <table>
-      <thead><tr><th>Deleted</th><th>Created</th><th>Video</th><th>Status when deleted</th><th>Cost</th></tr></thead>
+      <thead><tr><th>Ended</th><th>Started</th><th>Video</th><th>Status when deleted</th><th>Cost</th></tr></thead>
       <tbody>${deletedBody || '<tr><td colspan="5" class="hint">Nothing deleted yet.</td></tr>'}</tbody>
     </table>
   `, { current: 'log', session });

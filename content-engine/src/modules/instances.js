@@ -912,7 +912,7 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
       if(!fix){ m.textContent='🟡 Write the corrections first'; return; }
       b.disabled=true; m.textContent='Starting…';
       try{ const r=await fetch('/api/v1/admin/instances/'+id+'/remake',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ corrections: fix, what: rmWhat[id]||'image' })}); const j=await r.json();
-        if(j.ok){ m.textContent='🟢 Remaking. The old attempt is in Log and cost; the new one shows here for approval when it is ready.'; setTimeout(()=>location.reload(), 2500); }
+        if(j.ok){ m.textContent='🟢 Remaking.'+(j.attempt?' Attempt '+j.attempt+' is in Log and cost'+(j.cost!=null?', it cost $'+Number(j.cost).toFixed(4):'')+'.':' The old attempt is in Log and cost.')+' The new one shows here for approval when it is ready.'; setTimeout(()=>location.reload(), 4000); }
         else { b.disabled=false; m.textContent='🔴 '+(j.error||'failed'); } }
       catch(e){ b.disabled=false; m.textContent='🔴 '+e.message; }
     }

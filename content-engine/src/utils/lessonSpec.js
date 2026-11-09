@@ -68,4 +68,16 @@ export function holdLeft(row = {}, now = Date.now()) {
   return Math.max(0, left);
 }
 
-export default { lessonsText, LESSON_MAX, LESSON_CHARS, HOLD_SECONDS, HOLD_STATUS, NO_TEXT_ON_FACE, parseLessons, addLesson, lessonsBlock, imagePromptWithRules, holdLeft };
+/** How long an attempt took, start to end: "40 s", "12 min", "2 h 05 min", "3 d 4 h". */
+export function tookText(from, to) {
+  const ms = new Date(to).getTime() - new Date(from).getTime();
+  if (!(ms >= 0)) return '-';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s} s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h} h ${String(m % 60).padStart(2, '0')} min` : `${Math.floor(h / 24)} d ${h % 24} h`;
+}
+
+export default { tookText, lessonsText, LESSON_MAX, LESSON_CHARS, HOLD_SECONDS, HOLD_STATUS, NO_TEXT_ON_FACE, parseLessons, addLesson, lessonsBlock, imagePromptWithRules, holdLeft };

@@ -7,7 +7,9 @@
  *               HOLD_SECONDS: its Disapprove button turns off and 🔁 Remake
  *               turns on. Nothing more happens in that window.
  *               - 🔁 Remake (your corrections): the attempt you turned down goes
- *                 to the log (Log and cost) as Disapproved, and the run is made
+ *                 to the log (Log and cost) as Disapproved with its own id, its
+ *                 run's id, its number and its real cost (the run's cost goes back
+ *                 to 0 for the next attempt), and the run is made
  *                 again by its own lane's rework with your corrections, then
  *                 waits for approval again (Approve / Disapprove are back).
  *               - No Remake in time: the hold ends the old way: a sheet row it
@@ -171,12 +173,11 @@ export async function remake({ tenantId = 'default', instanceId, corrections = '
   clearTimeout(timers.get(String(row.id)));
   timers.delete(String(row.id));
 
-  const steps = instanceService.parseSteps(row).map(({ costs, ...s }) => s);
+  // The turned-down attempt, with what it really cost, moves to the log; the run starts its next attempt at 0.
   const reason = String(row.note || '').replace(/^Disapproved:\s*/, '');
-  await instanceRepo.logAttempt(row, {
-    title: `${row.title || 'Untitled'} · attempt ${row.round || 1}${reason ? ` · ${reason}` : ''}`.slice(0, 300),
-    steps,
-  }).catch((err) => log.warn({ err: err.message, instance: row.id }, 'old attempt not logged'));
+  const logged = await instanceRepo.logAttempt(row, {
+    title: [row.title || 'Untitled', reason ? 'disapproved: ' + reason : '', 'remake: ' + fix].filter(Boolean).join(' · ').slice(0, 500),
+  }).catch((err) => { log.warn({ err: err.message, instance: row.id }, 'old attempt not logged'); return null; });
   await learn(tenantId, what === 'video' ? 'video' : 'image', fix, 'remake').catch((err) => log.warn({ err: err.message }, 'lesson not saved'));
 
   const note = what === 'video' ? `Video corrections: ${fix}` : fix;
@@ -184,8 +185,8 @@ export async function remake({ tenantId = 'default', instanceId, corrections = '
     await instanceRepo.setStatus(row.id, 'failed', 'Remake: this kind of run has no remake');
     throw new Error('this kind of run cannot be remade');
   }
-  log.info({ instance: row.id, kind: approval.kind, what, corrections: fix }, 'remake started');
-  return { ok: true };
+  log.info({ instance: row.id, kind: approval.kind, what, corrections: fix, attempt: logged && logged.attempt, cost: logged && logged.cost }, 'remake started');
+  return { ok: true, attempt: logged ? logged.attempt : null, cost: logged ? logged.cost : null };
 }
 
 export default { disapprove, hold, remake, extendHold, finalizeHold, finalizeDue, learn };

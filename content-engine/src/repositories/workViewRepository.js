@@ -116,11 +116,25 @@ export async function costSince({ tenantId = 'default', fromUtc }) {
 /** The deleted-instance log, newest first. */
 export async function deletedRows({ tenantId = 'default', limit = 200 }) {
   const { rows } = await query(
-    `SELECT id, title, funnel_name, status, cost_usd, steps, created_at, deleted_at
+    `SELECT id, run_id, attempt, title, funnel_name, status, cost_usd, steps, created_at, deleted_at
        FROM deleted_instances WHERE tenant_id = $1 ORDER BY deleted_at DESC LIMIT $2`,
     [tenantId, limit],
   );
   return rows;
+}
+
+/**
+ * What disapproved attempts cost, all time: the money the AI spent on work you
+ * turned down, how many attempts, and over how many runs.
+ */
+export async function wastedTotal({ tenantId = 'default' }) {
+  const { rows } = await query(
+    `SELECT COALESCE(sum(cost_usd), 0)::float AS total, count(*)::int AS n,
+            count(DISTINCT COALESCE(run_id, id))::int AS runs
+       FROM deleted_instances WHERE tenant_id = $1 AND status IN ('disapproved', 'disapproved_final')`,
+    [tenantId],
+  );
+  return rows[0] || { total: 0, n: 0, runs: 0 };
 }
 
 /** All-time cost and count of deleted instances, optionally for one funnel. */
@@ -144,4 +158,4 @@ export async function commentsForPosts({ tenantId = 'default', refs = [] }) {
   return rows;
 }
 
-export default { needsYou, pendingImageApprovals, liveCounts, readyLeft, routerDays, calendarInstances, costSince, deletedRows, deletedTotal, commentsForPosts };
+export default { wastedTotal, needsYou, pendingImageApprovals, liveCounts, readyLeft, routerDays, calendarInstances, costSince, deletedRows, deletedTotal, commentsForPosts };

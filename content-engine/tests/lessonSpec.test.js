@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseLessons, addLesson, lessonsText, lessonsBlock, imagePromptWithRules, holdLeft, NO_TEXT_ON_FACE, HOLD_STATUS, LESSON_MAX } from '../src/utils/lessonSpec.js';
+import { tookText, parseLessons, addLesson, lessonsText, lessonsBlock, imagePromptWithRules, holdLeft, NO_TEXT_ON_FACE, HOLD_STATUS, LESSON_MAX } from '../src/utils/lessonSpec.js';
 import { libraryStatus } from '../src/utils/libraryStatus.js';
 
 describe('lessons', () => {
@@ -44,5 +44,15 @@ describe('the Remake minute', () => {
 
   it('a held run stays visible in the Library', () => {
     expect(libraryStatus(HOLD_STATUS)).toMatchObject({ hidden: false, dot: '🟡' });
+  });
+});
+
+describe('attempt time in the log', () => {
+  it('reads as s, min, h, d', () => {
+    const t0 = '2026-11-09T10:00:00Z';
+    expect(tookText(t0, '2026-11-09T10:00:40Z')).toBe('40 s');
+    expect(tookText(t0, '2026-11-09T10:12:00Z')).toBe('12 min');
+    expect(tookText(t0, '2026-11-09T12:05:00Z')).toBe('2 h 05 min');
+    expect(tookText(t0, '2026-11-12T14:00:00Z')).toBe('3 d 4 h');
   });
 });

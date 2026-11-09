@@ -310,16 +310,39 @@ export async function saveLinks(id, steps) {
 }
 
 /**
- * One remade attempt into the deleted-runs log, while the run itself goes on.
- * Its cost is 0 here: the costs stay on the run (they add up across attempts),
- * so nothing is counted twice. Steps are kept without their costs, for the record.
+ * One turned-down attempt into the deleted-runs log, with its real cost, while
+ * the run itself goes on: in one statement, the attempt's costs leave the run
+ * (its steps keep their output, the cost entries move) and land on the log row,
+ * so each attempt shows what it cost and nothing is counted twice. The log row
+ * has its own id, the run's id (run_id) and its number (attempt); it started
+ * when the previous attempt ended (or when the run was created) and ends now.
+ * Returns { id, attempt, cost }.
  */
-export async function logAttempt(row, { title, status = 'disapproved', steps = [] } = {}) {
-  await query(
-    `INSERT INTO deleted_instances (id, tenant_id, funnel_id, funnel_name, title, status, cost_usd, steps, created_at)
-     VALUES ($8, $1, $2, $3, $4, $5, 0, $6, $7)`,
-    [row.tenant_id || 'default', row.funnel_id || null, row.funnel_name || '', title || row.title || '', status, JSON.stringify(steps), row.created_at || new Date(), randomUUID()],
+export async function logAttempt(row, { title, status = 'disapproved' } = {}) {
+  const id = randomUUID();
+  const { rows } = await query(
+    `WITH prev AS (
+       SELECT count(*)::int AS n, max(deleted_at) AS ended FROM deleted_instances WHERE run_id = $1
+     ), run AS (
+       SELECT * FROM instances WHERE id = $1 AND locked = false FOR UPDATE
+     ), logged AS (
+       INSERT INTO deleted_instances (id, tenant_id, funnel_id, funnel_name, title, status, cost_usd, steps, created_at, run_id, attempt)
+       SELECT $2, run.tenant_id, run.funnel_id, run.funnel_name, COALESCE(NULLIF($3, ''), run.title), $4,
+              run.cost_usd, run.steps, COALESCE(prev.ended, run.created_at), run.id, prev.n + 1
+         FROM run, prev
+       RETURNING attempt, cost_usd
+     ), cleared AS (
+       UPDATE instances i
+          SET steps = (SELECT COALESCE(jsonb_agg(s - 'costs' ORDER BY o), '[]'::jsonb)
+                         FROM jsonb_array_elements(i.steps) WITH ORDINALITY AS e(s, o)),
+              cost_usd = 0, updated_at = now()
+        WHERE i.id = $1 AND EXISTS (SELECT 1 FROM logged)
+       RETURNING i.id
+     )
+     SELECT attempt, cost_usd::float AS cost FROM logged`,
+    [row.id, id, title || '', status],
   );
+  return rows[0] ? { id, attempt: rows[0].attempt, cost: rows[0].cost } : null;
 }
 
 /** The title of a + Sample instance: its costs are made up, so they never count as spend. */
@@ -334,11 +357,13 @@ export async function remove(id) {
     `WITH gone AS (
        DELETE FROM instances WHERE id = $1 AND locked = false RETURNING *
      ), logged AS (
-       INSERT INTO deleted_instances (id, tenant_id, funnel_id, funnel_name, title, status, cost_usd, steps, created_at)
+       INSERT INTO deleted_instances (id, tenant_id, funnel_id, funnel_name, title, status, cost_usd, steps, created_at, run_id, attempt)
        SELECT id, tenant_id, funnel_id, funnel_name, title, status,
               CASE WHEN title = $2 THEN 0 ELSE cost_usd END,
               CASE WHEN title = $2 THEN '[]'::jsonb ELSE steps END,
-              created_at
+              COALESCE((SELECT max(deleted_at) FROM deleted_instances d WHERE d.run_id = gone.id), created_at),
+              id,
+              (SELECT count(*)::int + 1 FROM deleted_instances d WHERE d.run_id = gone.id)
          FROM gone
        RETURNING id
      )
