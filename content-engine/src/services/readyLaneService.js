@@ -36,6 +36,7 @@ import { imagePromptOf } from '../utils/aiCopySpec.js';
 import { VIDEO_REVIEW, pickNextVideo, sidecarsFor, copyFromCaption, thumbsForAll, istSlot } from '../utils/routerSpec.js';
 import { formatIst } from '../utils/time.js';
 import { childLogger } from '../core/logger.js';
+import * as heartbeat from '../core/heartbeat.js';
 
 export const KIND = 'ready_video';
 
@@ -59,7 +60,7 @@ async function schedule({ funnelId, video, copy, thumbs, ctaLink = '', scheduled
 }
 
 /** Open (or re-open) the approval for a draft that has its copy; the daily email carries the link. */
-async function sendApproval({ inst, funnel, video, log, clean = null, cleanNote = '' }) {
+async function sendApproval({ inst, funnel, video, log, clean = null, cleanNote = '', cleanChecked = false }) {
   const steps = instanceService.parseSteps(await instanceRepo.get(inst.id));
   const copy = art(steps, 'script').copy || {};
   const sizes = art(steps, 'images').sizes || [];
@@ -70,7 +71,7 @@ async function sendApproval({ inst, funnel, video, log, clean = null, cleanNote 
     kind: KIND,
     payload: {
       instanceId: inst.id, funnelId: funnel.id, driveId: video.id, name: video.name,
-      thumbnailUrl: thumb, videoUrl, caption: [copy.title, copy.description].filter(Boolean).join('\n\n'),
+      cleanChecked: !!(cleanChecked || clean), thumbnailUrl: thumb, videoUrl, caption: [copy.title, copy.description].filter(Boolean).join('\n\n'),
     },
   });
   // A failed clean is worth saying: the daily email and the Library show the note.
@@ -95,7 +96,7 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog, skipped 
   const at = scheduledFor.toJSDate();
   const side = sidecarsFor(files, video);
   // ✂ Clean (funnel setting): posting then uses the cleaned copy; a failure keeps the original.
-  const { clean, note } = await readyPost.cleanForRouter({ funnelId: funnel.id, driveId: video.id, name: video.name });
+  const { clean, note, failed: cleanFailed } = await readyPost.cleanForRouter({ funnelId: funnel.id, driveId: video.id, name: video.name });
   if (note) log.info({ video: video.name, cleaned: !!clean, note }, 'ready video clean');
 
   // Thumbnail + caption made by you: schedule straight away.
@@ -124,7 +125,7 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog, skipped 
   try {
     await readyPost.generateCopy({ funnelId: funnel.id, driveId: video.id, name: video.name });
     const inst = await instanceRepo.get(t.instanceId);
-    await sendApproval({ inst, funnel, video, log, clean, cleanNote: note });
+    await sendApproval({ inst, funnel, video, log, clean, cleanNote: note, cleanChecked: !!note && !cleanFailed });
     return { instance: inst, approval: true, note };
   } catch (err) {
     // Unlink it from the day: the video stays in the folder for another go.
@@ -147,6 +148,12 @@ export async function approve(approval) {
   const steps = instanceService.parseSteps(row);
   const script = art(steps, 'script');
   try {
+    // ✂ Clean once, checked: with the Lane 1 Clean switch on, the AI looks at the
+    // frames and the video is cleaned only when it finds something. Skipped when the
+    // router already checked it; a video cleaned before keeps that copy. A clean that was needed but failed posts nothing.
+    const c = p.cleanChecked ? {} : await heartbeat.during('clean', () => readyPost.cleanForRouter({ funnelId: row.funnel_id, driveId: p.driveId, name: p.name }));
+    if (c.note) log.info({ cleaned: !!c.clean, note: c.note }, 'ready video clean before posting');
+    if (c.failed) throw new Error(`✂ Clean failed, nothing posted: ${c.note}`);
     await schedule({
       funnelId: row.funnel_id, video: { id: p.driveId, name: p.name }, copy: script.copy || {},
       thumbs: art(steps, 'images').thumbs || {}, ctaLink: script.ctaLink || '', scheduledFor: row.scheduled_for,
@@ -157,7 +164,7 @@ export async function approve(approval) {
   } catch (err) {
     await stepLog.fail(row.id, 'publish');
     log.error({ err: err.message }, 'approved ready video could not be scheduled');
-    await instanceRepo.setStatus(row.id, 'failed', `Post for Me: ${err.message}`);
+    await instanceRepo.setStatus(row.id, 'failed', /^✂/.test(err.message) ? err.message : `Post for Me: ${err.message}`);
   }
   return null;
 }
@@ -180,7 +187,7 @@ export async function rework(approval, note = '') {
     await readyPost.generateCopy({ funnelId: row.funnel_id, driveId: p.driveId, name: p.name, note });
     const { funnel, resolved, providers } = await readyPost.folderFiles({ funnelId: row.funnel_id }).catch(() => ({}));
     const clean = p.videoUrl && p.videoUrl !== publicDlUrl(p.driveId) ? { url: p.videoUrl } : null;
-    await sendApproval({ inst: await instanceRepo.get(row.id), funnel, video: { id: p.driveId, name: p.name }, log, clean });
+    await sendApproval({ inst: await instanceRepo.get(row.id), funnel, video: { id: p.driveId, name: p.name }, log, clean, cleanChecked: !!p.cleanChecked });
   } catch (err) {
     log.error({ err: err.message }, 'ready video rework failed');
     await instanceRepo.setStatus(row.id, 'failed', `Rework: ${err.message}`);

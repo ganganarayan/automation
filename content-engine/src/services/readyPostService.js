@@ -1141,7 +1141,7 @@ export async function cleanForRouter({ funnelId, driveId, name = '' }) {
     }
   } catch (err) {
     log.warn({ err: err.message, driveId: id }, 'router clean failed (original video used)');
-    return { clean: null, note: [`clean failed, using the original video: ${String(err.message).slice(0, 200)}`, note].filter(Boolean).join('; ') };
+    return { clean: null, failed: true, note: [`clean failed, using the original video: ${String(err.message).slice(0, 200)}`, note].filter(Boolean).join('; ') };
   }
 }
 
