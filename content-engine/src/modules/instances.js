@@ -898,7 +898,7 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
     }
     let rmWhat={};
     // Keep the minute going while you write (it restarts on open and every 15 s of typing).
-    function rmKeep(id){ fetch('/api/v1/admin/instances/'+id+'/remake-wait',{method:'POST'}).then(r=>r.json()).then(j=>{ if(j.ok) document.querySelectorAll('[data-hold]').forEach(e=>{ e.dataset.hold=${'${HOLD_SECONDS}'}; e.textContent=${'${HOLD_SECONDS}'}; }); }).catch(()=>{}); }
+    function rmKeep(id){ fetch('/api/v1/admin/instances/'+id+'/remake-wait',{method:'POST'}).then(r=>r.json()).then(j=>{ if(j.ok) document.querySelectorAll('[data-hold]').forEach(e=>{ e.dataset.hold=${HOLD_SECONDS}; e.textContent=${HOLD_SECONDS}; }); }).catch(()=>{}); }
     function rmOpen(id, what){
       rmWhat[id]=what; const box=document.getElementById('rmbox-'+id), t=document.getElementById('rmfix-'+id); if(!box) return;
       box.style.display='block'; rmKeep(id);
