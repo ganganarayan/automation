@@ -48,7 +48,8 @@ import { copySystemPrompt, copyUserPrompt, COPY_SCHEMA, normalizeCopy, keepHidde
 import * as imageShort from './imageShortService.js';
 import { shortTitle } from '../utils/shortSpec.js';
 import { stepDownOf } from '../utils/stepDownSpec.js';
-import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbArt, thumbImagePrompt, thumbTagFor, IMAGE_PROMPT_MAX } from '../utils/thumbSpec.js';
+import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbSvgPlaced, thumbArt, thumbImagePrompt, thumbTagFor, IMAGE_PROMPT_MAX } from '../utils/thumbSpec.js';
+import { PLACE_SCHEMA, placeSystem, placeUser, placeFor } from '../utils/thumbPlaceSpec.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
 import sharp from 'sharp';
@@ -510,7 +511,7 @@ async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessTok
     }
     // The operator's headline + sub-head (typed at the transcript stage) go on the image.
     const pill = thumbTagFor({ on: resolved.thumbTagOn, tag, fallback: resolved.thumbTagDefault });
-    ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text, sub, tag: pill }));
+    ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text, sub, tag: pill, costs }));
   } catch (err) {
     thumbError = err.message;
     log.warn({ err: err.message, driveId }, 'thumbnail generation failed (first frame will be used)');
@@ -556,16 +557,19 @@ export async function generateThumbnail({ tenantId = 'default', funnelId, driveI
  * hook headline) and upload it to Post for Me. Returns { thumbs: platform ->
  * url, sizes: [{ size, label, url, platforms }] }.
  */
-async function renderThumbs({ providers, platforms, base, text, sub = '', tag = '', draw = null }) {
+async function renderThumbs({ providers, platforms, base, text, sub = '', tag = '', draw = null, costs = [] }) {
   const postformeKey = providers.resolved.postformeKey || '';
   if (!postformeKey) throw new Error('No Post for Me API key, set it under Setup → Keys and credit');
   const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
   const thumbs = {};
   const sizes = [];
-  for (const [size, spec] of Object.entries(THUMB_SIZES)) {
+  const wanted = Object.entries(THUMB_SIZES).filter(([size]) => platforms.some((k) => PLATFORM_SIZE[k] === size));
+  // Each size's picture without text, then Claude marks where the text fits on each.
+  const pictures = draw ? {} : Object.fromEntries(await Promise.all(wanted.map(async ([size, spec]) => [size, await composeBase(base, spec)])));
+  const places = draw ? {} : await placeText({ providers, pictures, text, sub, tag, costs });
+  for (const [size, spec] of wanted) {
     const users = platforms.filter((k) => PLATFORM_SIZE[k] === size);
-    if (!users.length) continue;
-    const jpg = draw ? await draw(spec) : await composeThumb(base, spec, { text, sub, tag });
+    const jpg = draw ? await draw(spec) : await composeThumb(pictures[size], spec, { text, sub, tag, place: places[size] });
     const url = await publish.uploadMedia(jpg, 'image/jpeg');
     for (const k of users) thumbs[k] = url;
     sizes.push({ size, label: spec.label, url, platforms: users });
@@ -641,18 +645,57 @@ export async function silentDriveIds({ funnel, resolved, files = [] }) {
  * One size. A full-frame size crops the picture to fill it. A narrow one puts
  * the picture on a panel under the headline, over a soft blurred copy of itself.
  */
-async function composeThumb(base, spec, { text, sub = '', tag = '' }) {
-  const overlay = { input: Buffer.from(thumbSvg({ ...spec, accent: THUMB_ACCENT, text, sub, tag })) };
+async function composeBase(base, spec) {
   const art = thumbArt(spec);
-  if (!art) return sharp(base).resize(spec.w, spec.h, { fit: 'cover' }).composite([overlay]).jpeg({ quality: 90 }).toBuffer();
+  if (!art) return sharp(base).resize(spec.w, spec.h, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
   const panel = await sharp(base).resize(art.w, art.h, { fit: 'cover' }).toBuffer();
   return sharp(base)
     .resize(spec.w, spec.h, { fit: 'cover' })
     .blur(40)
     .modulate({ brightness: 0.75 })
-    .composite([{ input: panel, top: art.top, left: 0 }, overlay])
-    .jpeg({ quality: 90 })
+    .composite([{ input: panel, top: art.top, left: 0 }])
+    .jpeg({ quality: 92 })
     .toBuffer();
+}
+
+/** The text over a size's picture: in the box Claude picked, else the fixed layout. */
+async function composeThumb(picture, spec, { text, sub = '', tag = '', place = null }) {
+  const svg = place
+    ? thumbSvgPlaced({ ...spec, accent: THUMB_ACCENT, text, sub, tag, place })
+    : thumbSvg({ ...spec, accent: THUMB_ACCENT, text, sub, tag });
+  return sharp(picture).composite([{ input: Buffer.from(svg) }]).jpeg({ quality: 90 }).toBuffer();
+}
+
+/**
+ * Claude looks at every size's finished picture once and marks where the text
+ * fits. Returns size -> checked box; a size missing (no Claude key, a failure,
+ * a box on the subject) keeps the fixed layout. Its cost goes on `costs`.
+ */
+async function placeText({ providers, pictures, text, sub = '', tag = '', costs = [] }) {
+  const claude = providers.claude;
+  const entries = Object.entries(pictures);
+  if (!claude || !entries.length || !String(text || '').trim()) return {};
+  try {
+    const items = await Promise.all(entries.map(async ([size, buf]) => {
+      const spec = THUMB_SIZES[size];
+      const small = await sharp(buf).resize({ width: 768, height: 768, fit: 'inside' }).jpeg({ quality: 80 }).toBuffer();
+      return { size, label: spec.label, w: spec.w, h: spec.h, b64: small.toString('base64') };
+    }));
+    const { data, model, usage } = await claude.generateJsonDetailed({ system: placeSystem(), user: placeUser(items, { text, sub, tag }), schema: PLACE_SCHEMA, maxTokens: 8000 });
+    costs.push({ step: 'images', ...costClaude({ ...usage, model }) });
+    const out = {};
+    for (const raw of (data && data.sizes) || []) {
+      const spec = THUMB_SIZES[raw && raw.size];
+      const place = spec ? placeFor(raw, spec) : null;
+      if (place) out[raw.size] = place;
+      else if (spec) log.warn({ size: raw.size, raw }, 'text box refused (on the subject or too small), fixed layout used');
+    }
+    log.info({ placed: Object.keys(out) }, 'thumbnail text placed from the picture');
+    return out;
+  } catch (err) {
+    log.warn({ err: err.message }, 'text placement failed, fixed layout used');
+    return {};
+  }
 }
 
 /** The platforms this funnel posts to that have a thumbnail spec (all, if unknown). */

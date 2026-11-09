@@ -55,7 +55,7 @@ export const DEFAULT_COPY_PROMPT = [
 const THUMB_PROMPT_LINE = /^ {2}"thumbPrompt":.*$/m;
 
 /** What Claude is asked for: the prompt it would write if you asked it directly, not the fixed literal-chart recipe. */
-const CLAUDE_THUMB_PROMPT_LINE = '  "thumbPrompt": the complete prompt for an image model, in English, written the way you would write it if the owner asked you directly for the best thumbnail picture for this video. Decide the subject, composition, style, colour and light yourself, following what the owner has approved before. It goes to the image model exactly as you write it, so it must stand alone. Under 3000 characters.';
+const CLAUDE_THUMB_PROMPT_LINE = '  "thumbPrompt": the complete prompt for an image model, in English, written the way you would write it if the owner asked you directly for the best thumbnail picture for this video. Decide the subject, composition, style, colour and light yourself, following what the owner has approved before. It goes to the image model exactly as you write it, so it must stand alone. The picture carries no text at all: no words, letters, numbers, captions, logos or watermarks, because the app writes the headline onto it afterwards. Compose it so one large calm empty area is left for that headline (plain background, sky, wall or soft blur, at least a third of the frame), and choose where that area goes to suit this subject: left, right, top or bottom, not the same place every time. Say in the prompt exactly where the empty area is, and keep every face and the main subject fully out of it. Under 3000 characters.';
 
 /** The output keys, for a provider that can hold the model to a schema. */
 export const COPY_SCHEMA = {

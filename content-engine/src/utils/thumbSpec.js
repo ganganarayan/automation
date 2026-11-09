@@ -198,7 +198,56 @@ export function thumbTagBox({ w, h, layout = 'top', tag = '' }) {
 
 /** The pill: solid accent, black bold capitals. */
 function thumbTagSvg({ w, h, layout, tag }) {
-  const b = thumbTagBox({ w, h, layout, tag });
+  return pillSvg(thumbTagBox({ w, h, layout, tag }));
+}
+
+/**
+ * The overlay with the text in a box picked from the picture (thumbPlaceSpec):
+ * headline, sub-head and audience pill stacked inside it, aligned as asked,
+ * light text with a dark outline or dark text with a light one. No haze: the
+ * box is already a calm part of the picture.
+ */
+export function thumbSvgPlaced({ w, h, text, sub = '', tag = '', accent = '#FFFFFF', place, layout = 'top' }) {
+  const { x0, y0, x1, y1, align = 'center', color = 'light' } = place;
+  const boxW = x1 - x0;
+  const pill = tag ? thumbTagBox({ w, h, layout, tag }) : null;
+  const pillGap = pill ? Math.round(pill.h * 0.5) : 0;
+  const boxH = y1 - y0 - (pill ? pill.h + pillGap : 0);
+  const maxSize = Math.min(w, h) * 0.13;
+  const head = fitText(text, { boxW, boxH: boxH * (sub ? 0.7 : 1), maxSize, glyph: 0.62 });
+  const size = head.size || Math.round(maxSize * 0.5);
+  const lh = Math.round(size * 1.15);
+  const subFit = fitText(sub, { boxW, boxH: boxH * 0.28, maxSize: size * 0.6, glyph: 0.56, lineH: 1.25 });
+  const subLh = Math.round(subFit.size * 1.25);
+  const subGap = subFit.lines.length ? Math.round(size * 0.2) : 0;
+  const textH = lh * head.lines.length + subGap + subLh * subFit.lines.length;
+  const block = textH + (pill ? pillGap + pill.h : 0);
+  const top = y0 + Math.max(0, (y1 - y0 - block) / 2);
+  const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
+  const x = align === 'left' ? x0 : align === 'right' ? x1 : Math.round((x0 + x1) / 2);
+  const fill = color === 'dark' ? '#111111' : '#FFFFFF';
+  const edge = color === 'dark' ? '#FFFFFF' : '#000000';
+  const subFill = color === 'dark' ? '#111111' : accent;
+  const font = 'font-family="Noto Sans, Noto Sans Devanagari, DejaVu Sans, sans-serif"';
+  const stroke = (px) => `stroke="${edge}" stroke-width="${Math.max(2, Math.round(px * 0.06))}" paint-order="stroke"`;
+  const hy0 = Math.round(top + size * 0.9);
+  const tspans = head.lines.map((l, i) => `<tspan x="${x}" y="${hy0 + i * lh}">${xmlEsc(l)}</tspan>`).join('');
+  const subY0 = hy0 + (head.lines.length - 1) * lh + subGap + subLh;
+  const subSpans = subFit.lines.map((l, i) => `<tspan x="${x}" y="${subY0 + i * subLh}">${xmlEsc(l)}</tspan>`).join('');
+  const subText = subFit.lines.length ? `
+<text text-anchor="${anchor}" ${font} font-weight="700" font-size="${subFit.size}" fill="${subFill}" ${stroke(subFit.size)}>${subSpans}</text>` : '';
+  let pillPart = '';
+  if (pill) {
+    const px = align === 'left' ? x0 : align === 'right' ? x1 - pill.w : Math.round((x0 + x1 - pill.w) / 2);
+    const py = Math.min(h - pill.h, Math.round(top + textH + pillGap));
+    pillPart = pillSvg({ ...pill, x: Math.max(0, px), y: py });
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+<text text-anchor="${anchor}" ${font} font-weight="800" font-size="${size}" fill="${fill}" ${stroke(size)}>${tspans}</text>${subText}${pillPart}</svg>`;
+}
+
+/** A pill box from thumbTagBox, drawn: solid accent, black bold capitals. */
+function pillSvg(b) {
   const font = 'font-family="Noto Sans, Noto Sans Devanagari, DejaVu Sans, sans-serif"';
   const cx = Math.round(b.x + b.w / 2);
   const baseline = Math.round(b.y + b.h / 2 + b.size * 0.357); // half the cap height, so the capitals sit centred
@@ -216,7 +265,7 @@ const OLD_THUMB_RULES = 'Thumbnail artwork, square composition. Show only what i
 export const IMAGE_PROMPT_MAX = 4000;
 
 /** All the app adds to a prompt Claude wrote: where its own headline and label go. */
-export const THUMB_LAYOUT_ONLY = 'Landscape format. The app places a headline over the top 30% of the frame afterwards and a small label at the bottom left, so keep anything important out of those two areas. Do not write the headline or a caption into the image.';
+export const THUMB_LAYOUT_ONLY = 'Landscape format. Leave one large calm empty area, where the description above puts it or else wherever suits the subject, with every face and the main subject fully outside it. Keep it truly empty: the app writes the headline and a small label there afterwards. No text, letters, numbers, captions, logos or watermarks anywhere in the image.';
 
 /**
  * Image-model prompt for the thumbnail artwork. The app draws the headline; the
