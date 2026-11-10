@@ -29,35 +29,55 @@ const API = 'https://api.cloudflare.com/client/v4';
 export const WORKER_SOURCE = `// Written by content-engine (Settings > Tenants > Wake-up timer). Do not edit here:
 // press Deploy waker in the app instead, or your change is overwritten.
 const IST_MS = 330 * 60000;
+// The last 5-minute check of an IST day is 23:55, so a later time runs then.
+const LAST_CHECK = '23:55';
+// Free plan: 50 outgoing requests per run, 3 tries each. The rest wait 5 minutes.
+const PER_RUN = 12;
+const TRIES = 3;
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(run(env));
+    ctx.waitUntil(run(env, Date.now()));
   },
   async fetch() {
     return new Response('automation waker', { status: 200 });
   },
 };
 
-async function run(env) {
-  const now = new Date(Date.now() + IST_MS).toISOString();
+async function run(env, nowMs) {
+  const now = new Date(nowMs + IST_MS).toISOString();
   const day = now.slice(0, 10);
   const hhmm = now.slice(11, 16);
   let tenants = {};
   try { tenants = JSON.parse((await env.WAKE.get('${KV_TENANTS}')) || '{}'); } catch (e) { tenants = {}; }
+  const due = [];
   for (const [id, time] of Object.entries(tenants)) {
-    if (!/^\\d\\d:\\d\\d$/.test(String(time)) || hhmm < time) continue;
-    const ranKey = 'ran:' + id + ':' + day;
-    if (await env.WAKE.get(ranKey)) continue;
-    const ok = await ping(env, id);
-    if (ok) await env.WAKE.put(ranKey, new Date().toISOString(), { expirationTtl: 3 * 86400 });
-    await env.WAKE.put('last:' + id, JSON.stringify({ at: new Date().toISOString(), ok, day }));
+    if (!/^\\d\\d:\\d\\d$/.test(String(time))) continue;
+    if (hhmm < (time > LAST_CHECK ? LAST_CHECK : time)) continue;
+    if (await env.WAKE.get('ran:' + id + ':' + day)) continue;
+    due.push(id);
+    if (due.length >= PER_RUN) break;
   }
+  // All at once: one slow tenant never holds up the others.
+  return Promise.all(due.map(async (id) => {
+    const ok = await ping(env, id);
+    const at = new Date().toISOString();
+    if (ok) {
+      await env.WAKE.put('ran:' + id + ':' + day, at, { expirationTtl: 3 * 86400 });
+      await env.WAKE.put('last:' + id, JSON.stringify({ at, ok, day }));
+    } else if (!(await env.WAKE.get('miss:' + id + ':' + day))) {
+      // One write per tenant per bad day, so a long outage cannot use up the KV writes.
+      await env.WAKE.put('miss:' + id + ':' + day, at, { expirationTtl: 3 * 86400 });
+      await env.WAKE.put('last:' + id, JSON.stringify({ at, ok, day }));
+    }
+    return { id, ok };
+  }));
 }
 
 // The app may be asleep: its first answer can take a while, so try 3 times.
 async function ping(env, id) {
-  for (let i = 0; i < 3; i += 1) {
+  const pause = Number(env.RETRY_MS || 20000);
+  for (let i = 0; i < TRIES; i += 1) {
     try {
       const r = await fetch(env.APP_URL + '/api/v1/jobs/daily?tenant=' + encodeURIComponent(id), {
         method: 'POST',
@@ -66,7 +86,7 @@ async function ping(env, id) {
       });
       if (r.ok) return true;
     } catch (e) { /* still starting: try again */ }
-    await new Promise((res) => setTimeout(res, 20000));
+    if (i < TRIES - 1) await new Promise((res) => setTimeout(res, pause));
   }
   return false;
 }

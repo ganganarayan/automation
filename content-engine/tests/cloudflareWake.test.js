@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { DateTime } from 'luxon';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { workerName, dailyTimeOf, tenantTimesMap, cfRequests, cfError, WORKER_SOURCE, WAKE_CRON } from '../src/utils/cloudflareWake.js';
 import { digestAction } from '../src/utils/digestSpec.js';
 
@@ -35,6 +38,82 @@ describe('cloudflare waker', () => {
     expect(WORKER_SOURCE).toContain("env.WAKE.get('tenants')");
     expect(WORKER_SOURCE).toContain('/^\\d\\d:\\d\\d$/');
     expect(WORKER_SOURCE).not.toContain('\u2014');
+  });
+
+  describe('the Worker itself', () => {
+    let run;
+    let calls;
+    const kv = (init = {}) => {
+      const store = new Map(Object.entries(init));
+      return { store, writes: 0, async get(k) { return store.has(k) ? store.get(k) : null; }, async put(k, v) { this.writes += 1; store.set(k, v); } };
+    };
+    // 13:30 UTC = 19:00 IST on 10-11-2026.
+    const at = (istHhmm) => Date.parse(`2026-11-10T${istHhmm}:00+05:30`);
+    const env = (wake) => ({ WAKE: wake, APP_URL: 'https://app.test', ADMIN_KEY: 'k', RETRY_MS: '1' });
+
+    beforeAll(async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'waker-'));
+      const file = join(dir, 'worker.mjs');
+      writeFileSync(file, `${WORKER_SOURCE}\nexport { run };\n`);
+      ({ run } = await import(/* @vite-ignore */ file));
+    });
+    beforeEach(() => {
+      calls = [];
+      vi.stubGlobal('fetch', async (url, init) => {
+        calls.push({ url, key: init.headers['X-Admin-Key'] });
+        const answer = globalThis.__answer;
+        if (answer === 'throw') throw new Error('down');
+        return { ok: answer < 400, status: answer };
+      });
+      globalThis.__answer = 202;
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('pings only tenants whose time has come, once a day', async () => {
+      const wake = kv({ tenants: JSON.stringify({ default: '19:00', late: '21:00' }) });
+      const out = await run(env(wake), at('19:00'));
+      expect(out).toEqual([{ id: 'default', ok: true }]);
+      expect(calls).toEqual([{ url: 'https://app.test/api/v1/jobs/daily?tenant=default', key: 'k' }]);
+      expect(wake.store.has('ran:default:2026-11-10')).toBe(true);
+      expect(await run(env(wake), at('19:05'))).toEqual([]);
+    });
+
+    it('runs a time after the last check (23:55) at 23:55', async () => {
+      const wake = kv({ tenants: JSON.stringify({ owl: '23:58' }) });
+      expect(await run(env(wake), at('23:50'))).toEqual([]);
+      expect(await run(env(wake), at('23:55'))).toEqual([{ id: 'owl', ok: true }]);
+    });
+
+    it('tries 3 times, then again at the next check, writing the miss once', async () => {
+      globalThis.__answer = 'throw';
+      const wake = kv({ tenants: JSON.stringify({ default: '19:00' }) });
+      expect(await run(env(wake), at('19:00'))).toEqual([{ id: 'default', ok: false }]);
+      expect(calls).toHaveLength(3);
+      const writes = wake.writes;
+      await run(env(wake), at('19:05'));
+      expect(wake.writes).toBe(writes);
+      globalThis.__answer = 202;
+      expect(await run(env(wake), at('19:10'))).toEqual([{ id: 'default', ok: true }]);
+    });
+
+    it('treats a refused key as a miss', async () => {
+      globalThis.__answer = 401;
+      const wake = kv({ tenants: JSON.stringify({ default: '19:00' }) });
+      expect(await run(env(wake), at('19:00'))).toEqual([{ id: 'default', ok: false }]);
+    });
+
+    it('pings at most 12 tenants a run, so it stays inside the free plan', async () => {
+      const many = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`t${i}`, '19:00']));
+      const wake = kv({ tenants: JSON.stringify(many) });
+      expect(await run(env(wake), at('19:00'))).toHaveLength(12);
+      expect(await run(env(wake), at('19:05'))).toHaveLength(8);
+    });
+
+    it('ignores a bad or missing tenants list', async () => {
+      expect(await run(env(kv({ tenants: 'nope' })), at('19:00'))).toEqual([]);
+      expect(await run(env(kv()), at('19:00'))).toEqual([]);
+      expect(await run(env(kv({ tenants: JSON.stringify({ x: '7pm' }) })), at('19:00'))).toEqual([]);
+    });
   });
 
   it('builds the Cloudflare calls with the token and the bindings', () => {
