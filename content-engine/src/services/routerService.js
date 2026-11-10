@@ -124,15 +124,24 @@ async function runOnce({ now = nowIst(), retryNone = false, funnelId = null, ten
   return results;
 }
 
+/** Which run a check is: the same tenants and funnel share one run. */
+export function runKey({ tenantIds = null, funnelId = null } = {}) {
+  const t = Array.isArray(tenantIds) && tenantIds.length ? [...new Set(tenantIds.map(String))].sort().join(',') : '*';
+  return `${t}|${funnelId ? Number(funnelId) : '*'}`;
+}
+
 /**
- * The router check (POST /jobs/router-check). One run at a time: a second
- * ping while one runs gets the same promise. Held awake by the heartbeat.
+ * The router check (POST /jobs/router-check). One run at a time per tenant
+ * (and funnel): a second ping for the same one gets the same promise, while
+ * another tenant's daily run starts its own. Held awake by the heartbeat.
  */
-let running = null;
+const running = new Map();
 export function runCheck(opts = {}) {
-  if (running) return running;
-  running = heartbeat.during('router', () => runOnce(opts)).finally(() => { running = null; });
-  return running;
+  const key = runKey(opts);
+  if (running.has(key)) return running.get(key);
+  const p = heartbeat.during('router', () => runOnce(opts)).finally(() => { running.delete(key); });
+  running.set(key, p);
+  return p;
 }
 
 /**

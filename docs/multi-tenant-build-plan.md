@@ -36,7 +36,11 @@ approval review links (an unguessable emailed token).
   switched to the record's tenant instead.
 - Tests for the cross-tenant refusals.
 
-## Phase 2: stop leaks (about 1 day)
+## Phase 2: stop leaks (🟢 on staging 10-11-2026, not tried with a real second tenant)
+
+Kept shared on purpose: the Google service account (it reads only what a tenant
+shares with it), model names, the SMTP port. A clean of the same Drive file in
+two workspaces at once: the second is told to wait.
 
 - Env fallbacks in core/tenantSettings.js only for the default tenant (Google
   service account, sheets, Drive folders, OpenAI, Gemini, json2video, SMTP, emails,

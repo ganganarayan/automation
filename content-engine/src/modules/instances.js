@@ -26,6 +26,7 @@
  *         POST /api/v1/admin/instances/ready/post  post the ticked videos
  */
 import * as instances from '../services/instanceService.js';
+import * as tenantRepo from '../repositories/tenantRepository.js';
 import * as review from '../services/instanceReviewService.js';
 import * as readyPost from '../services/readyPostService.js';
 import * as stageRunner from '../services/stageRunnerService.js';
@@ -174,7 +175,7 @@ export function register(ctx) {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
       const { driveId } = req.body || {};
       if (!driveId) return res.status(400).json({ ok: false, error: 'driveId required' });
-      res.json({ ok: true, ...readyPost.transcribeStatus({ driveId: String(driveId) }) });
+      res.json({ ok: true, ...readyPost.transcribeStatus({ driveId: String(driveId), tenantId: req.tenantId }) });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -428,7 +429,10 @@ export function register(ctx) {
     cron.schedule('*/5 * * * *', async () => {
       if (checking) return;
       checking = true;
-      try { await disapproveService.finalizeDue('default').catch(() => 0); await readyPost.refreshAllTenants(); } catch (err) { log.warn({ err: err.message }, 'scheduled post check failed'); } finally { checking = false; }
+      try {
+        for (const t of await tenantRepo.activeIds().catch(() => ['default'])) await disapproveService.finalizeDue(t).catch(() => 0);
+        await readyPost.refreshAllTenants();
+      } catch (err) { log.warn({ err: err.message }, 'scheduled post check failed'); } finally { checking = false; }
     });
   }
 

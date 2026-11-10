@@ -9,6 +9,7 @@
  * Routes: POST /api/v1/webhook/pfm-result
  */
 import cron from 'node-cron';
+import * as tenantRepo from '../repositories/tenantRepository.js';
 import * as delivery from '../services/deliveryService.js';
 import * as tenantSettings from '../core/tenantSettings.js';
 import { ZONE } from '../utils/time.js';
@@ -27,16 +28,20 @@ export function register(ctx) {
   cron.schedule(
     '30 8 * * *',
     async () => {
-      if (!(await tenantSettings.moduleEnabled('default', 'delivery'))) return;
-      delivery.sendGitaReport({ tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'gita report failed'));
+      for (const tenantId of await tenantRepo.activeIds().catch(() => ['default'])) {
+        if (!(await tenantSettings.moduleEnabled(tenantId, 'delivery'))) continue;
+        await delivery.sendGitaReport({ tenantId }).catch((e) => log.error({ err: e.message, tenantId }, 'gita report failed'));
+      }
     },
     { timezone: ZONE },
   );
   cron.schedule(
     '0 9 * * *',
     async () => {
-      if (!(await tenantSettings.moduleEnabled('default', 'delivery'))) return;
-      delivery.sendVidapulseReport({ tenantId: 'default' }).catch((e) => log.error({ err: e.message }, 'vidapulse report failed'));
+      for (const tenantId of await tenantRepo.activeIds().catch(() => ['default'])) {
+        if (!(await tenantSettings.moduleEnabled(tenantId, 'delivery'))) continue;
+        await delivery.sendVidapulseReport({ tenantId }).catch((e) => log.error({ err: e.message, tenantId }, 'vidapulse report failed'));
+      }
     },
     { timezone: ZONE },
   );

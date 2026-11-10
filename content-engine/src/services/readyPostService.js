@@ -338,11 +338,22 @@ async function transcribeBody({ tenantId = 'default', funnelId, driveId, name = 
 // 🎙 Transcribe jobs by Drive id: { state: running | done | failed, result?, error? }. The
 // result is saved on the instance by transcribeVideo, so a restart only loses the status.
 const transcribeJobs = new Map();
+// Job maps are per tenant: two workspaces never see (or reuse) each other's job.
+const jobKey = (tenantId, id) => `${tenantId || 'default'}:${id}`;
+// Which tenant a running clean belongs to (cleanJobs is keyed by Drive id).
+const cleanOwner = new Map();
+function claimClean(tenantId, id) {
+  const owner = cleanOwner.get(id);
+  const job = cleanJobs.get(id);
+  if (owner && owner !== String(tenantId) && job && job.state === 'running') throw new Error('this video is being cleaned in another workspace, try again in a few minutes');
+  cleanOwner.set(id, String(tenantId));
+}
 
 /** Start transcribing in the background (no page needs to stay open). */
 export function startTranscribe(args) {
-  const id = String(args.driveId || '');
-  if (!id) throw new Error('driveId required');
+  const driveId = String(args.driveId || '');
+  if (!driveId) throw new Error('driveId required');
+  const id = jobKey(args.tenantId, driveId);
   const job = transcribeJobs.get(id);
   if (job && job.state === 'running') return job;
   const running = { state: 'running', startedAt: Date.now() };
@@ -360,8 +371,8 @@ export function startTranscribe(args) {
 }
 
 /** Where a transcribe job stands ('none' when there is none in memory). */
-export function transcribeStatus({ driveId }) {
-  return transcribeJobs.get(String(driveId)) || { state: 'none' };
+export function transcribeStatus({ driveId, tenantId = 'default' }) {
+  return transcribeJobs.get(jobKey(tenantId, String(driveId))) || { state: 'none' };
 }
 
 /**
@@ -759,7 +770,8 @@ export async function startClean({ funnelId, driveId, zoomPct, trimEndSec, endTe
   const { funnel } = await loadFunnel(funnelId);
   const providers = await buildProviders(funnel.tenant_id);
   const job = cleanJobs.get(id);
-  if (job && job.state === 'running') return job;
+  if (job && job.state === 'running' && cleanOwner.get(id) === String(funnel.tenant_id)) return job;
+  claimClean(funnel.tenant_id, id);
   await makeReadable({ tenantId: funnel.tenant_id, providers, driveId: id, accessToken, name });
   const opts = { ...normalizeCleanOpts({ zoomPct, trimEndSec }), ...normalizeEndCard({ endText, endLink, endSec }) };
   // Subtitles from the transcript, only when it has timestamps and the video doesn't already show subtitles.
@@ -1110,7 +1122,9 @@ export async function cleanForRouter({ funnelId, driveId, name = '' }) {
     if (!a.zoomPct && !a.trimEndSec) return { clean: null, note: `${note}; nothing to clean, the original video is used` };
     const opts = { ...normalizeCleanOpts(a), ...normalizeEndCard(o) };
     let job = cleanJobs.get(id);
+    if (job && job.state === 'running' && cleanOwner.get(id) !== String(funnel.tenant_id)) throw new Error('this video is being cleaned in another workspace');
     if (!job || job.state !== 'running') {
+      claimClean(funnel.tenant_id, id);
       const where = normalizeRunner((providers.resolved.clean || {}).runner);
       if (where === 'github') {
         job = await startCleanGithub({ funnel, providers, id, opts, name, source: null, baseUrl: settings.app.publicBaseUrl });
@@ -1254,7 +1268,12 @@ export function fixStatus({ tenantId = 'default' } = {}) {
 
 /** Where a clean job stands (running / done / failed), else the saved cleaned video. */
 export async function cleanStatus({ funnelId, driveId }) {
-  const job = cleanJobs.get(String(driveId));
+  let job = cleanJobs.get(String(driveId));
+  const owner = cleanOwner.get(String(driveId));
+  if (job && owner) {
+    const { funnel: f0 } = await loadFunnel(funnelId);
+    if (String(f0.tenant_id) !== owner) job = null; // another workspace's clean: not shown here
+  }
   // A GitHub run that has gone quiet for 40 min isn't coming back.
   if (job && job.state === 'running' && job.runner === 'github' && Date.now() - (job.lastAt || job.startedAt) > 40 * 60 * 1000) {
     const failed = { state: 'failed', error: 'GitHub went quiet for 40 min, check the Actions tab, then press ✂ Clean again' };
@@ -1544,7 +1563,7 @@ export async function startPost({ tenantId = 'default', funnelId, selections, ac
   if (!clean.length) throw new Error('no videos selected');
   if (!providers.resolved.postformeKey) throw new Error('No Post for Me API key, set it once under Setup → Keys and credit');
   if (!(Array.isArray(resolved.accounts) && resolved.accounts.length)) throw new Error('No accounts ticked: tick the accounts to post to (top of this page)');
-  const busy = clean.filter((s) => (postJobs.get(s.driveId) || {}).state === 'running');
+  const busy = clean.filter((s) => (postJobs.get(jobKey(funnel.tenant_id || tenantId, s.driveId)) || {}).state === 'running');
   if (busy.length) throw new Error(`Already posting ${busy.map((s) => s.name || s.driveId).join(', ')}, wait for it to finish`);
 
   const slots = defaultSlotsIso(resolved.publishTime, clean.length);
@@ -1564,11 +1583,11 @@ export async function startPost({ tenantId = 'default', funnelId, selections, ac
   for (const item of items) {
     await instanceRepo.markPosting(item.instanceId, { scheduledFor: item.scheduledIso ? new Date(item.scheduledIso) : null });
     await stepLog.start(item.instanceId, 'publish');
-    postJobs.set(item.driveId, { state: 'running', instanceId: item.instanceId, scheduledIso: item.scheduledIso, startedAt: Date.now() });
+    postJobs.set(jobKey(funnel.tenant_id || tenantId, item.driveId), { state: 'running', instanceId: item.instanceId, scheduledIso: item.scheduledIso, startedAt: Date.now() });
   }
 
   const fail = async (item, why) => {
-    postJobs.set(item.driveId, { state: 'failed', instanceId: item.instanceId, error: why });
+    postJobs.set(jobKey(funnel.tenant_id || tenantId, item.driveId), { state: 'failed', instanceId: item.instanceId, error: why });
     await stepLog.fail(item.instanceId, 'publish');
     await instanceRepo.markPostFailed(item.instanceId, why).catch((err) => log.warn({ err: err.message, instance: item.instanceId }, 'could not save the post failure'));
   };
@@ -1593,7 +1612,7 @@ export async function startPost({ tenantId = 'default', funnelId, selections, ac
       for (const item of items) {
         const r = (out.results || []).find((x) => x.driveId === item.driveId);
         if (r && r.ok) {
-          postJobs.set(item.driveId, { state: 'done', instanceId: r.instanceId || item.instanceId, scheduledIso: r.scheduledIso });
+          postJobs.set(jobKey(funnel.tenant_id || tenantId, item.driveId), { state: 'done', instanceId: r.instanceId || item.instanceId, scheduledIso: r.scheduledIso });
           await stepLog.end(item.instanceId, 'publish');
         } else await fail(item, (r && r.error) || 'not posted');
       }
@@ -1607,8 +1626,8 @@ export async function startPost({ tenantId = 'default', funnelId, selections, ac
 }
 
 /** Where a Schedule / Post now job stands ('none' when there is none in memory). */
-export function postStatus({ driveId }) {
-  return postJobs.get(String(driveId)) || { state: 'none' };
+export function postStatus({ driveId, tenantId = 'default' }) {
+  return postJobs.get(jobKey(tenantId, String(driveId))) || { state: 'none' };
 }
 
 /**

@@ -19,6 +19,7 @@
  * internal cron only runs when SCHEDULER_MODE=internal (an always-on host).
  */
 import cron from 'node-cron';
+import * as tenantRepo from '../repositories/tenantRepository.js';
 import * as relay from '../services/linkedinRelayService.js';
 import * as wakeSchedule from '../services/wakeScheduleService.js';
 import { settings } from '../settings/index.js';
@@ -41,17 +42,20 @@ export function register(ctx) {
       const tenantIds = all ? null : await wakeSchedule.dueTenants({ job: 'relay' });
       res.status(202).json({ accepted: true, tenants: tenantIds || 'all' });
       if (tenantIds && !tenantIds.length) return log.info('poll-linkedin: no tenant due now');
-      for (const id of tenantIds || [req.tenantId]) pollFor(id);
+      // all=1: every active tenant, not only the caller's.
+      for (const id of tenantIds || await tenantRepo.activeIds().catch(() => [req.tenantId])) pollFor(id);
     } catch (err) {
       next(err);
     }
   });
 
   if (settings.schedulerInternal) {
-    cron.schedule('*/10 * * * *', () => {
-      relay.pollAndRelay({ tenantId: 'default' })
-        .then((r) => { if (r.relayed) log.info(r, 'poll-linkedin (cron) relayed'); })
-        .catch((e) => log.error({ err: e.message }, 'poll-linkedin cron failed'));
+    cron.schedule('*/10 * * * *', async () => {
+      for (const tenantId of await tenantRepo.activeIds().catch(() => ['default'])) {
+        await relay.pollAndRelay({ tenantId })
+          .then((r) => { if (r.relayed) log.info({ ...r, tenantId }, 'poll-linkedin (cron) relayed'); })
+          .catch((e) => log.error({ err: e.message, tenantId }, 'poll-linkedin cron failed'));
+      }
     }, { timezone: ZONE });
     log.info('linkedin relay cron scheduled (*/10 min)');
   }

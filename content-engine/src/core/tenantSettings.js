@@ -67,6 +67,29 @@ export function invalidate(tenantId) {
 const APP = 'content-engine';
 
 /**
+ * The env defaults a tenant may fall back on. The default tenant (the owner)
+ * gets them all; any other tenant only platform pieces: model names, the SMTP
+ * port and the Google service account (it reads only what a tenant shares with it).
+ */
+export function envFor(tenantId = OWNER_TENANT, base = settings) {
+  if (String(tenantId || OWNER_TENANT) === OWNER_TENANT) return base;
+  return {
+    google: { serviceAccount: base.google.serviceAccount },
+    sheets: {},
+    drive: {},
+    postforme: { apiKey: '', gitaAccounts: [], vidapulseAccounts: [], gitaVideoAccounts: [], accountMap: {} },
+    emails: {},
+    links: {},
+    openai: { apiKey: '', imageModel: base.openai.imageModel, textModel: base.openai.textModel },
+    gemini: { apiKey: '', imageModel: base.gemini.imageModel },
+    video: { json2videoApiKey: '' },
+    instagram: {},
+    smtp: { port: base.smtp.port },
+    modules: {},
+  };
+}
+
+/**
  * Whether a module is enabled for a tenant. A `module.content-engine.<name>`
  * tenant_config override ('true'/'false') wins; otherwise the env flag
  * (settings.modules[name]) is the default, so behavior is unchanged when no
@@ -79,7 +102,8 @@ export async function moduleEnabled(tenantId = 'default', name) {
   const v = o[`module.${APP}.${name}`];
   if (v === 'true') return true;
   if (v === 'false') return false;
-  return !!settings.modules[name];
+  // The env flags are the owner's (its own brands' jobs); another tenant turns a module on itself.
+  return !!envFor(tenantId).modules[name];
 }
 
 const parseJson = (v, fallback) => {
@@ -97,6 +121,10 @@ const parseJson = (v, fallback) => {
  */
 export async function forTenant(tenantId = 'default') {
   const o = await loadOverrides(tenantId);
+  // The owner's env values are the default tenant's only: another tenant gets
+  // its own settings or nothing (model names and the Google service account,
+  // platform infrastructure, are shared).
+  const env = envFor(tenantId);
   const pick = (key, fallback) => (o[key] !== undefined && o[key] !== null && o[key] !== '' ? o[key] : fallback);
   const pfm = await postformeFor(tenantId, o);
 
@@ -105,7 +133,7 @@ export async function forTenant(tenantId = 'default') {
     // Google Sheets/Drive identity: the service-account JSON set in the app
     // (write-only in the UI) wins; env GOOGLE_SERVICE_ACCOUNT_JSON is a fallback.
     google: {
-      serviceAccount: parseJson(pick('google_service_account_json', null), null) || settings.google.serviceAccount,
+      serviceAccount: parseJson(pick('google_service_account_json', null), null) || env.google.serviceAccount,
       // "Sign in with Google" + Drive picker (browser-side; no secret).
       oauthClientId: String(pick('google_oauth_client_id', '') || '').trim(),
       pickerApiKey: String(pick('google_picker_api_key', '') || '').trim(),
@@ -121,41 +149,41 @@ export async function forTenant(tenantId = 'default') {
       githubRef: String(pick('github_ref', '') || '').trim(),
     },
     sheets: {
-      gita: pick('gita_sheet_id', settings.sheets.gita),
-      vidapulse: pick('vidapulse_sheet_id', settings.sheets.vidapulse),
-      video: pick('video_sheet_id', settings.sheets.video),
-      factory: pick('factory_sheet_id', settings.sheets.factory),
+      gita: pick('gita_sheet_id', env.sheets.gita),
+      vidapulse: pick('vidapulse_sheet_id', env.sheets.vidapulse),
+      video: pick('video_sheet_id', env.sheets.video),
+      factory: pick('factory_sheet_id', env.sheets.factory),
     },
     drive: {
-      gitaFolder: pick('gita_drive_folder_id', settings.drive.gitaFolder),
-      stripFile: pick('strip_file_id', settings.drive.stripFile),
-      voiceoverFolder: pick('voiceover_folder_id', settings.drive.voiceoverFolder),
-      reelsFolder: pick('reels_folder_id', settings.drive.reelsFolder),
-      factoryGptFolder: pick('factory_gpt_folder_id', settings.drive.factoryGptFolder),
-      factoryGeminiFolder: pick('factory_gemini_folder_id', settings.drive.factoryGeminiFolder),
+      gitaFolder: pick('gita_drive_folder_id', env.drive.gitaFolder),
+      stripFile: pick('strip_file_id', env.drive.stripFile),
+      voiceoverFolder: pick('voiceover_folder_id', env.drive.voiceoverFolder),
+      reelsFolder: pick('reels_folder_id', env.drive.reelsFolder),
+      factoryGptFolder: pick('factory_gpt_folder_id', env.drive.factoryGptFolder),
+      factoryGeminiFolder: pick('factory_gemini_folder_id', env.drive.factoryGeminiFolder),
     },
     postforme: {
-      gitaAccounts: parseJson(pick('pfm_gita_accounts', null), settings.postforme.gitaAccounts),
-      vidapulseAccounts: parseJson(pick('pfm_vidapulse_accounts', null), settings.postforme.vidapulseAccounts),
-      gitaVideoAccounts: parseJson(pick('pfm_gita_video_accounts', null), settings.postforme.gitaVideoAccounts),
-      accountMap: parseJson(pick('pfm_account_map', null), settings.postforme.accountMap),
+      gitaAccounts: parseJson(pick('pfm_gita_accounts', null), env.postforme.gitaAccounts),
+      vidapulseAccounts: parseJson(pick('pfm_vidapulse_accounts', null), env.postforme.vidapulseAccounts),
+      gitaVideoAccounts: parseJson(pick('pfm_gita_video_accounts', null), env.postforme.gitaVideoAccounts),
+      accountMap: parseJson(pick('pfm_account_map', null), env.postforme.accountMap),
     },
     emails: {
       // One address for every approval / go-live email a funnel has no own address for.
       notify: pick('notify_email', ''),
-      approvalGita: pick('approval_email_gita', settings.emails.approvalGita),
-      approvalVidapulse: pick('approval_email_vidapulse', settings.emails.approvalVidapulse),
-      report: pick('report_email', settings.emails.report),
+      approvalGita: pick('approval_email_gita', env.emails.approvalGita),
+      approvalVidapulse: pick('approval_email_vidapulse', env.emails.approvalVidapulse),
+      report: pick('report_email', env.emails.report),
     },
     links: {
-      gitaAssessment: pick('gita_assessment_link', settings.links.gitaAssessment),
-      gitaSimpleAssessment: pick('gita_simple_assessment_link', settings.links.gitaSimpleAssessment),
+      gitaAssessment: pick('gita_assessment_link', env.links.gitaAssessment),
+      gitaSimpleAssessment: pick('gita_simple_assessment_link', env.links.gitaSimpleAssessment),
     },
     // Tenant-scoped credentials (BYO). Env is only a platform-provided default.
     openai: {
-      apiKey: pick('openai_api_key', settings.openai.apiKey),
-      imageModel: pick('image_model', settings.openai.imageModel),
-      textModel: pick('text_model', settings.openai.textModel),
+      apiKey: pick('openai_api_key', env.openai.apiKey),
+      imageModel: pick('image_model', env.openai.imageModel),
+      textModel: pick('text_model', env.openai.textModel),
     },
     // The Ready video copy writer. No key = the OpenAI text model, as before.
     claude: {
@@ -163,8 +191,8 @@ export async function forTenant(tenantId = 'default') {
       model: pick('claude_model', ''),
     },
     gemini: {
-      apiKey: pick('gemini_api_key', settings.gemini.apiKey),
-      imageModel: pick('gemini_image_model', settings.gemini.imageModel),
+      apiKey: pick('gemini_api_key', env.gemini.apiKey),
+      imageModel: pick('gemini_image_model', env.gemini.imageModel),
     },
     // Post for Me: the tenant's own key, else the owner's shared one (see postformeFor).
     postformeKey: pfm.key,
@@ -217,28 +245,28 @@ export async function forTenant(tenantId = 'default') {
       glossary: pick('transcript_glossary', ''),
     },
     video: {
-      json2videoApiKey: pick('json2video_api_key', settings.video.json2videoApiKey),
+      json2videoApiKey: pick('json2video_api_key', env.video.json2videoApiKey),
     },
     instagram: {
-      automationUrl: pick('ig_automation_url', settings.instagram.automationUrl),
-      contactEmail: pick('ig_contact_email', settings.instagram.contactEmail),
-      commentWebhookUrl: pick('ig_comment_webhook_url', settings.instagram.commentWebhookUrl),
+      automationUrl: pick('ig_automation_url', env.instagram.automationUrl),
+      contactEmail: pick('ig_contact_email', env.instagram.contactEmail),
+      commentWebhookUrl: pick('ig_comment_webhook_url', env.instagram.commentWebhookUrl),
     },
     // Email/SMTP is tenant-scoped (each tenant sends from their own mailbox);
     // env is only a fallback default.
     smtp: {
-      host: pick('smtp_host', settings.smtp.host),
-      port: Number(pick('smtp_port', settings.smtp.port)) || settings.smtp.port,
-      user: pick('smtp_user', settings.smtp.user),
-      pass: pick('smtp_pass', settings.smtp.pass),
-      from: pick('smtp_from', settings.smtp.from),
+      host: pick('smtp_host', env.smtp.host),
+      port: Number(pick('smtp_port', env.smtp.port)) || env.smtp.port,
+      user: pick('smtp_user', env.smtp.user),
+      pass: pick('smtp_pass', env.smtp.pass),
+      from: pick('smtp_from', env.smtp.from),
     },
     // How email goes out. Railway blocks outbound SMTP, so the default is an
     // HTTP email API; From falls back to the SMTP From/user already entered.
     mail: {
       provider: String(pick('mail_provider', DEFAULT_MAIL_PROVIDER)).trim(),
       apiKey: String(pick('mail_api_key', '') || '').trim(),
-      from: String(pick('mail_from', pick('smtp_from', settings.smtp.from) || pick('smtp_user', settings.smtp.user)) || '').trim(),
+      from: String(pick('mail_from', pick('smtp_from', env.smtp.from) || pick('smtp_user', env.smtp.user)) || '').trim(),
       // Gmail: the account connected under Settings, Google, if it allowed sending.
       gmailEmail: String(pick('google_drive_email', '') || '').trim(),
       gmailReady: !!pick('google_drive_refresh_token', '') && String(pick('google_drive_scopes', '')).includes('gmail.send'),

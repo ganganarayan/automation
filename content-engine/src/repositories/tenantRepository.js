@@ -16,6 +16,12 @@ export async function isActive(tenantId) {
   return rows.length > 0;
 }
 
+/** Every active tenant's id (background jobs loop over these). */
+export async function activeIds() {
+  const { rows } = await query("SELECT id FROM tenants WHERE status = 'active' ORDER BY (id = $1) DESC, created_at ASC", ['default']);
+  return rows.map((r) => String(r.id));
+}
+
 /** Fetch a tenant row or null. */
 export async function findById(tenantId) {
   const { rows } = await query('SELECT * FROM tenants WHERE id = $1', [tenantId]);
@@ -61,4 +67,4 @@ export async function setExpiry(tenantId, expiresAt) {
   if (!rowCount) throw new Error('tenant not found');
 }
 
-export default { isActive, findById, list, create, listWithSubscription, setExpiry };
+export default { isActive, activeIds, findById, list, create, listWithSubscription, setExpiry };
