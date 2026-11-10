@@ -77,9 +77,9 @@ export function keyFindings(keyOwners = {}, plan = 'custom') {
   const byo = String(plan) === 'agency';
   return PAID.map((p) => {
     const who = keyOwners[p] || 'none';
-    if (byo && who === 'platform') return { group: 'Keys', name: p, status: 'fail', detail: 'Agency plan but uses the owner\'s key (owner pays)' };
-    if (who === 'none') return { group: 'Keys', name: p, status: 'skip', detail: byo ? 'no key of its own (Agency brings its own)' : 'no key anywhere' };
-    return { group: 'Keys', name: p, status: 'ok', detail: who === 'tenant' ? 'its own key' : 'owner\'s platform key (on your bill)' };
+    if (byo && who === 'platform') return { group: 'Phase 4 billing', name: `key: ${p}`, status: 'fail', detail: 'Agency plan but uses the owner\'s key (owner pays)' };
+    if (who === 'none') return { group: 'Phase 4 billing', name: `key: ${p}`, status: 'skip', detail: byo ? 'no key of its own (Agency brings its own)' : 'no key anywhere' };
+    return { group: 'Phase 4 billing', name: `key: ${p}`, status: 'ok', detail: who === 'tenant' ? 'its own key' : 'owner\'s platform key (on your bill)' };
   });
 }
 
@@ -89,14 +89,39 @@ export function accountFindings(accounts = [], tenantId, { ownerCount = null } =
   const foreign = list.filter((a) => tenantOfExternalId(a && a.external_id) !== String(tenantId));
   const out = [];
   if (foreign.length) {
-    out.push({ group: 'Isolation', name: 'Post for Me accounts', status: 'fail', detail: `sees ${foreign.length} account(s) that are not its own: ${foreign.slice(0, 3).map((a) => a.platform || a.id).join(', ')}` });
+    out.push({ group: 'Phase 1 doors', name: 'Post for Me accounts', status: 'fail', detail: `sees ${foreign.length} account(s) that are not its own: ${foreign.slice(0, 3).map((a) => a.platform || a.id).join(', ')}` });
   } else {
-    out.push({ group: 'Isolation', name: 'Post for Me accounts', status: 'ok', detail: list.length ? `sees only its own ${list.length} account(s): ${list.map((a) => a.platform).filter(Boolean).join(', ')}` : 'sees no accounts (none connected yet), so it cannot post to yours' });
+    out.push({ group: 'Phase 1 doors', name: 'Post for Me accounts', status: 'ok', detail: list.length ? `sees only its own ${list.length} account(s): ${list.map((a) => a.platform).filter(Boolean).join(', ')}` : 'sees no accounts (none connected yet), so it cannot post to yours' });
   }
   if (ownerCount !== null) {
-    out.push({ group: 'Isolation', name: 'Owner accounts hidden', status: ownerCount > 0 && !foreign.length ? 'ok' : (ownerCount > 0 ? 'fail' : 'warn'), detail: ownerCount > 0 ? `the owner has ${ownerCount} account(s) on the shared key; none show here` : 'the owner has no accounts on the shared key, so hiding them was not tested' });
+    out.push({ group: 'Phase 1 doors', name: 'Owner Post for Me accounts hidden', status: ownerCount > 0 && !foreign.length ? 'ok' : (ownerCount > 0 ? 'fail' : 'warn'), detail: ownerCount > 0 ? `the owner has ${ownerCount} account(s) on the shared key; none show here` : 'the owner has no accounts on the shared key, so hiding them was not tested' });
   }
   return out;
+}
+
+/**
+ * Meta webhook routing for the owner's ids: each must route to the owner. An id
+ * another tenant also claims routes nowhere new (null = stays the owner's) but is
+ * worth a look; one routed to another tenant is a fail.
+ */
+export function metaFindings(ownerIds = [], owners = new Map(), ownerTenant = 'default') {
+  const ids = (ownerIds || []).map(String).filter(Boolean);
+  if (!ids.length) return { group: 'Phase 5 shared', name: 'Meta webhook routing', status: 'skip', detail: 'the owner claims no Page or IG id in Comment capture' };
+  const stolen = ids.filter((id) => owners.has(id) && owners.get(id) !== null && owners.get(id) !== ownerTenant);
+  const shared = ids.filter((id) => owners.has(id) && owners.get(id) === null);
+  if (stolen.length) return { group: 'Phase 5 shared', name: 'Meta webhook routing', status: 'fail', detail: `${stolen.length} of your ids would go to another tenant: ${stolen.slice(0, 3).join(', ')}` };
+  if (shared.length) return { group: 'Phase 5 shared', name: 'Meta webhook routing', status: 'warn', detail: `${shared.length} of your ids are also claimed by another tenant (they stay yours): ${shared.slice(0, 3).join(', ')}` };
+  return { group: 'Phase 5 shared', name: 'Meta webhook routing', status: 'ok', detail: `all ${ids.length} of your Page / IG ids route to you` };
+}
+
+/** The key history's last entry must match who pays now (paid providers only). */
+export function keyHistoryFinding(hist = [], keyOwners = {}) {
+  const last = (Array.isArray(hist) && hist.length ? hist[hist.length - 1] : null);
+  if (!last || !last.owners) return { group: 'Phase 4 billing', name: 'Key history', status: 'fail', detail: 'no key history written for this tenant' };
+  const off = PAID.filter((p) => (last.owners[p] || 'none') !== (keyOwners[p] || 'none'));
+  return off.length
+    ? { group: 'Phase 4 billing', name: 'Key history', status: 'fail', detail: `last entry differs from today for ${off.join(', ')}` }
+    : { group: 'Phase 4 billing', name: 'Key history', status: 'ok', detail: `${hist.length} entr${hist.length === 1 ? 'y' : 'ies'}, the last matches who pays today` };
 }
 
 /** 'fail' if any failed, 'warn' if any warned, else 'ok'. */
@@ -106,4 +131,4 @@ export function verdict(checks = []) {
   return 'ok';
 }
 
-export default { QA_PREFIX, isQaTenant, qaTenantId, OWNER_ONLY, leakedSettings, keyFindings, accountFindings, verdict };
+export default { QA_PREFIX, isQaTenant, qaTenantId, OWNER_ONLY, leakedSettings, keyFindings, accountFindings, metaFindings, keyHistoryFinding, verdict };

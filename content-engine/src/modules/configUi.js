@@ -1130,10 +1130,10 @@ function newTenantBox() {
 
 /** Owner only: QA workspaces (no sign-in) and the in-app check that runs on this machine. */
 function qaBox(tenantList) {
-  const qa = (tenantList || []).filter((t) => isQaTenant(t.id));
+  const qa = (tenantList || []).filter((t) => isQaTenant(t.id) && t.id !== 'qa-expired');
   const opts = qa.map((t) => '<option value="' + esc(t.id) + '">' + esc(t.id) + ' (' + esc(PLANS[t.plan || 'custom'] ? PLANS[t.plan || 'custom'].label : t.plan) + ')</option>').join('');
   return `<fieldset><legend>QA check</legend>
-    <p class="hint">Tests the app on this server, as a QA workspace: ffmpeg, fonts, database, that it sees none of your settings, funnels or Post for Me accounts, its keys and plan limits. "With paid calls" also asks Claude and OpenAI for real (about 10 US cents) and turns the picture into a video. Nothing is posted or emailed. A QA workspace has no sign-in: open it as <b>/t/&lt;id&gt;/api/v1/admin/settings</b>. Set its expiry to a past date to switch it off.</p>
+    <p class="hint">Tests the app on this server, as a QA workspace, one group per multi-tenant phase: <b>1 doors</b> (sessions, your funnel, run, rule, lead and Drive ids, users, Post for Me accounts), <b>2 leaks</b> (your settings), <b>3 lifecycle</b> (every plan limit; an expired workspace, qa-expired, made once for this), <b>4 billing</b> (who pays per key, key history, balances, cost report), <b>5 shared</b> (Meta routing, Google ticket, Clean runner, comparison list), plus ffmpeg, fonts and the database. "With paid calls" also asks Claude and OpenAI for real (about 10 US cents) and turns the picture into a video. Nothing is posted or emailed. A QA workspace has no sign-in: open it as <b>/t/&lt;id&gt;/api/v1/admin/settings</b>. Set its expiry to a past date to switch it off.</p>
     <div class="row" style="gap:.4rem;align-items:center;flex-wrap:wrap">
       <input id="qa-id" placeholder="qa-starter" style="min-width:10rem">
       <select id="qa-plan">${PLAN_IDS.map((p) => '<option value="' + p + '"' + (p === 'starter' ? ' selected' : '') + '>' + esc(PLANS[p].label) + '</option>').join('')}</select>

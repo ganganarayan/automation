@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isQaTenant, qaTenantId, leakedSettings, keyFindings, accountFindings, verdict } from '../src/utils/qaSpec.js';
+import { isQaTenant, qaTenantId, leakedSettings, keyFindings, accountFindings, metaFindings, keyHistoryFinding, verdict } from '../src/utils/qaSpec.js';
 
 describe('QA workspace ids', () => {
   it('only qa-* is a QA workspace', () => {
@@ -38,12 +38,12 @@ describe('leakedSettings', () => {
 describe('keyFindings', () => {
   it('Agency on the owner\'s key fails', () => {
     const f = keyFindings({ openai: 'platform', anthropic: 'tenant' }, 'agency');
-    expect(f.find((c) => c.name === 'openai').status).toBe('fail');
-    expect(f.find((c) => c.name === 'anthropic').status).toBe('ok');
-    expect(f.find((c) => c.name === 'kling').status).toBe('skip');
+    expect(f.find((c) => c.name === 'key: openai').status).toBe('fail');
+    expect(f.find((c) => c.name === 'key: anthropic').status).toBe('ok');
+    expect(f.find((c) => c.name === 'key: kling').status).toBe('skip');
   });
   it('Starter may use the platform key', () => {
-    expect(keyFindings({ openai: 'platform' }, 'starter').find((c) => c.name === 'openai').status).toBe('ok');
+    expect(keyFindings({ openai: 'platform' }, 'starter').find((c) => c.name === 'key: openai').status).toBe('ok');
   });
 });
 
@@ -67,5 +67,33 @@ describe('verdict', () => {
     expect(verdict([{ status: 'ok' }, { status: 'skip' }])).toBe('ok');
     expect(verdict([{ status: 'ok' }, { status: 'warn' }])).toBe('warn');
     expect(verdict([{ status: 'warn' }, { status: 'fail' }])).toBe('fail');
+  });
+});
+
+describe('metaFindings', () => {
+  it('your ids routed to you is fine', () => {
+    expect(metaFindings(['1', '2'], new Map([['1', 'default'], ['2', 'default']])).status).toBe('ok');
+  });
+  it('an id routed to another tenant fails', () => {
+    expect(metaFindings(['1'], new Map([['1', 'qa-a']])).status).toBe('fail');
+  });
+  it('an id two tenants claim stays yours but is flagged', () => {
+    expect(metaFindings(['1'], new Map([['1', null]])).status).toBe('warn');
+  });
+  it('no ids to check is a skip', () => {
+    expect(metaFindings([], new Map()).status).toBe('skip');
+  });
+});
+
+describe('keyHistoryFinding', () => {
+  it('last entry matching today is fine', () => {
+    expect(keyHistoryFinding([{ owners: { openai: 'tenant' } }, { owners: { openai: 'platform' } }], { openai: 'platform' }).status).toBe('ok');
+  });
+  it('no history or a stale last entry fails', () => {
+    expect(keyHistoryFinding([], { openai: 'platform' }).status).toBe('fail');
+    expect(keyHistoryFinding([{ owners: { openai: 'tenant' } }], { openai: 'platform' }).status).toBe('fail');
+  });
+  it('google and github are not paid keys', () => {
+    expect(keyHistoryFinding([{ owners: { openai: 'platform' } }], { openai: 'platform', google: 'platform' }).status).toBe('ok');
   });
 });

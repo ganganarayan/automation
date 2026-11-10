@@ -9,7 +9,7 @@
  *               - createQaTenant({ id, plan }): a qa-* workspace with no sign-in
  *                 (the super admin works in it through /t/<id>/...)
  *               - run(tenantId, { paid }): { tenant, plan, verdict, checks, spentUsd }
- * Dependencies: tenantSettings, providerFactory, planService, repositories, utils/qaSpec,
+ * Dependencies: tenantSettings, providerFactory, planService, qaPhases (one group per phase), utils/qaSpec,
  *               utils/pricing, middleware/tenantGuard (the real record decision).
  *
  * Nothing here posts, emails or changes a funnel. Paid calls go to the usage ledger
@@ -25,15 +25,12 @@ import { ping } from '../core/db.js';
 import { buildProviders } from './providerFactory.js';
 import * as planService from './planService.js';
 import * as tenantRepo from '../repositories/tenantRepository.js';
-import * as tenantConfig from '../repositories/tenantConfigRepository.js';
-import * as funnelsRepo from '../repositories/funnelsRepository.js';
-import * as ownership from '../repositories/ownershipRepository.js';
 import * as usage from '../repositories/usageRepository.js';
-import { recordDecision } from '../middleware/tenantGuard.js';
-import { limitsFor, PLAN_IDS } from '../utils/planSpec.js';
+import * as phases from './qaPhases.js';
+import { PLAN_IDS } from '../utils/planSpec.js';
 import { costClaude, costText, costImages } from '../utils/pricing.js';
 import { probeMp4DurationSeconds } from '../utils/videoSpec.js';
-import { isQaTenant, qaTenantId, leakedSettings, keyFindings, accountFindings, verdict } from '../utils/qaSpec.js';
+import { isQaTenant, qaTenantId, verdict } from '../utils/qaSpec.js';
 
 const exec = promisify(execFile);
 const ffmpegBin = () => process.env.FFMPEG_PATH || 'ffmpeg';
@@ -83,69 +80,6 @@ async function machineChecks() {
     out.push(check('Machine', 'Text on pictures', share > 0.01 ? 'ok' : 'fail', `${(share * 100).toFixed(1)}% of the test card is ink`));
   } catch (err) { out.push(check('Machine', 'Text on pictures', 'fail', errText(err))); }
   return out;
-}
-
-// ---- the tenant's walls -------------------------------------------------------
-
-async function isolationChecks(tenantId, mine, owner) {
-  const out = [];
-  const overrides = await tenantConfig.getAll(tenantId).catch(() => ({}));
-  const leaks = leakedSettings(mine, owner);
-  out.push(check('Isolation', 'Owner settings', leaks.length ? 'fail' : 'ok', leaks.length ? `owner values show here: ${leaks.join(', ')}` : `none of yours show here (${Object.keys(overrides).length} own setting(s))`));
-
-  const funnels = await funnelsRepo.listByTenant(tenantId);
-  const stray = funnels.filter((f) => String(f.tenant_id) !== String(tenantId));
-  out.push(check('Isolation', 'Funnel list', stray.length ? 'fail' : 'ok', stray.length ? `${stray.length} funnel(s) of another tenant listed` : `${funnels.length} funnel(s), all its own`));
-
-  const ownerFunnels = await funnelsRepo.listByTenant('default').catch(() => []);
-  if (!ownerFunnels.length) {
-    out.push(check('Isolation', 'Owner funnel by id', 'warn', 'the owner has no funnel to try'));
-  } else {
-    const id = ownerFunnels[0].id;
-    const recordTenant = await ownership.tenantOf('funnel', id);
-    const asUser = recordDecision({ recordTenant, tenantId, operator: false });
-    out.push(check('Isolation', 'Owner funnel by id', asUser === 'deny' ? 'ok' : 'fail', asUser === 'deny' ? 'a QA user asking for your funnel id gets "not found"' : `a QA user would get "${asUser}"`));
-  }
-
-  // Post for Me: what this tenant sees, and how many the owner has on the same key.
-  try {
-    const p = await buildProviders(tenantId);
-    if (!p.resolved.postformeKey) {
-      out.push(check('Isolation', 'Post for Me accounts', 'warn', 'no Post for Me key at all (yours is not set either)'));
-    } else {
-      const seen = await timed(() => p.publish.listAccounts());
-      let ownerCount = null;
-      try { ownerCount = ((await timed(async () => (await buildProviders('default')).publish.listAccounts())).data || []).length; } catch { ownerCount = null; }
-      out.push(...accountFindings(seen.data || [], tenantId, { ownerCount }));
-      out.push(check('Isolation', 'Post for Me key', 'ok', p.resolved.postformeShared ? 'uses your shared key, scoped to its own accounts' : 'its own key'));
-    }
-  } catch (err) { out.push(check('Isolation', 'Post for Me accounts', 'fail', errText(err))); }
-  return out;
-}
-
-// ---- plan and keys ------------------------------------------------------------
-
-async function planChecks(tenantId) {
-  const out = [];
-  planService.invalidate(tenantId);
-  const info = await planService.tenantInfo(tenantId);
-  out.push(check('Plan', 'Workspace live', info.live ? 'ok' : 'warn', info.live ? `${limitsFor(info.plan).label}, live` : `not live: ${info.reason}`));
-  const lim = limitsFor(info.plan);
-  const n = await funnelsRepo.countByTenant(tenantId);
-  if (lim.funnels === null) {
-    out.push(check('Plan', 'Funnel limit', 'ok', 'no limit on this plan'));
-  } else {
-    const atLimit = await planService.limitReason(tenantId, 'funnels', { used: lim.funnels, adding: 1 });
-    const now = await planService.limitReason(tenantId, 'funnels', { used: n, adding: 1 });
-    out.push(check('Plan', 'Funnel limit', atLimit ? 'ok' : 'fail', atLimit ? `one past ${lim.funnels} is refused: "${atLimit}"${now ? ' (already full now)' : ''}` : `funnel ${lim.funnels + 1} would be allowed`));
-  }
-  if (lim.aiVideos === 0) {
-    const r = await planService.limitReason(tenantId, 'aiVideos', { used: 0, adding: 1 });
-    out.push(check('Plan', 'AI videos', r ? 'ok' : 'fail', r ? `refused: "${r}"` : 'an AI video would be allowed on a plan with none'));
-  }
-  const mu = await planService.monthUsage(tenantId).catch(() => null);
-  if (mu) out.push(check('Plan', 'This month', 'ok', `${mu.posts} post(s), ${mu.aiVideos} AI video day(s) counted`));
-  return { out, plan: info.plan };
 }
 
 async function getJson(url, headers) {
@@ -246,24 +180,27 @@ async function paidChecks(tenantId, p) {
  */
 export async function run(tenantId, { paid = false } = {}) {
   const id = String(tenantId || '');
-  if (!isQaTenant(id)) throw new Error('the QA check only runs on a qa-* workspace');
+  if (!isQaTenant(id) || id === phases.EXPIRED_ID) throw new Error('the QA check runs on a qa-* workspace (not qa-expired, the fixture)');
   if (!(await tenantRepo.findById(id))) throw new Error('no such QA workspace');
   tenantSettings.invalidate();
 
   const checks = [];
   checks.push(...(await machineChecks()));
   const [mine, owner] = await Promise.all([tenantSettings.forTenant(id), tenantSettings.forTenant('default')]);
-  checks.push(...(await isolationChecks(id, mine, owner)));
-  const { out: planOut, plan } = await planChecks(id);
-  checks.push(...planOut);
-  checks.push(...keyFindings(mine.keyOwners, plan));
+  const p = await buildProviders(id);
+  checks.push(...(await phases.doorChecks(id, p)));
+  checks.push(...(await phases.leakChecks(id, mine, owner)));
+  const { out: lifeOut, plan } = await phases.lifecycleChecks(id);
+  checks.push(...lifeOut);
+  checks.push(...(await phases.billingChecks(id, mine, plan)));
+  checks.push(...(await phases.sharedChecks(id, mine, owner)));
   checks.push(...(await keyPings(mine)));
   let spent = [];
   if (paid) {
-    const p = await buildProviders(id);
     const res = await paidChecks(id, p);
     checks.push(...res.out);
     spent = res.spent;
+    checks.push(await phases.ledgerCheck(id, spent));
   }
   const spentUsd = Math.round(spent.reduce((t, n) => t + (Number(n) || 0), 0) * 1e4) / 1e4;
   return { tenant: id, plan, verdict: verdict(checks), checks, spentUsd, at: new Date().toISOString() };
