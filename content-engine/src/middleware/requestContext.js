@@ -34,6 +34,8 @@ export function tenantResolver(req, _res, next) {
     req.url = m[2] || '/';
   }
   req.tenantId = (tenant || 'default').toString();
+  // Asked for explicitly: a signed-in user may only ask for its own (middleware/tenantGuard).
+  req.tenantAsked = tenant ? String(tenant) : '';
   next();
 }
 

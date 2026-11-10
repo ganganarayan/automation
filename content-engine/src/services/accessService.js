@@ -79,7 +79,7 @@ export async function currentSession(req) {
       try {
         const row = await auth.findSession(tokenHash);
         if (row) {
-          session = { email: row.email, role: row.role, mustChange: row.must_change, tokenHash };
+          session = { email: row.email, role: row.role, tenantId: row.tenant_id || 'default', mustChange: row.must_change, tokenHash };
           auth.touchSession(tokenHash).catch(() => {});
         }
         req._sessionError = false;
@@ -108,6 +108,19 @@ export async function keyOk(req) {
   // Machine / curl access: the same header the /jobs routes accept.
   const header = req.headers?.['x-admin-key'];
   return !!(header && settings.auth.adminKey && safeEqual(header, settings.auth.adminKey));
+}
+
+/** The machine admin key (curl, jobs): the platform operator, any tenant. */
+export function adminKeyOk(req) {
+  const header = req.headers?.['x-admin-key'];
+  return !!(header && settings.auth.adminKey && safeEqual(header, settings.auth.adminKey));
+}
+
+/** True only for the super admin (or the machine admin key): owner-only actions. */
+export async function superOk(req) {
+  const session = await currentSession(req);
+  if (session) return !session.mustChange && session.role === 'super_admin';
+  return adminKeyOk(req);
 }
 
 /** 'ok' | 'change' (signed in, must choose a password) | 'login'. */
@@ -229,5 +242,5 @@ export async function signOut(req, res) {
 }
 
 export default {
-  requiredKey, resetEnabled, currentSession, canApprove, keyOk, gateState, signIn, changePassword, resetWithCode, signOut, ACCESS_KEY_STORE,
+  requiredKey, resetEnabled, currentSession, canApprove, keyOk, superOk, adminKeyOk, gateState, signIn, changePassword, resetWithCode, signOut, ACCESS_KEY_STORE,
 };

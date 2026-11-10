@@ -15,12 +15,17 @@ import { query } from '../core/db.js';
 export const SUPER_ADMIN_EMAIL = 'ganganarayan.rns@gmail.com';
 export const ROLES = ['user', 'admin', 'super_admin'];
 
-/** List all users (super admin first, then newest). */
-export async function list() {
+/**
+ * List users (super admin first, then newest). With a tenantId, only that
+ * tenant's users (a tenant admin never sees another tenant's people).
+ */
+export async function list({ tenantId = null } = {}) {
   const { rows } = await query(
-    `SELECT email, role, plan_ends_at, last_login_at, created_at
+    `SELECT email, role, tenant_id, plan_ends_at, last_login_at, created_at
        FROM users
+      WHERE ($1::text IS NULL OR tenant_id = $1)
       ORDER BY (role = 'super_admin') DESC, created_at DESC`,
+    [tenantId],
   );
   return rows;
 }

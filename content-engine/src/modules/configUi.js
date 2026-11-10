@@ -55,7 +55,7 @@ import { listElevenLabsVoices } from '../providers/ttsProvider.js';
 import { settings } from '../settings/index.js';
 import { listReadyVideos } from '../services/readyPostService.js';
 import { parseDriveFolderId } from '../utils/readyPostSpec.js';
-import { keyOk, gateState, currentSession } from '../services/accessService.js';
+import { keyOk, superOk, gateState, currentSession } from '../services/accessService.js';
 import * as wakeSchedule from '../services/wakeScheduleService.js';
 import * as cloudflareWake from '../services/cloudflareWakeService.js';
 import { DAILY_KEY, dailyTimeOf } from '../utils/cloudflareWake.js';
@@ -74,10 +74,11 @@ export function register(ctx) {
         const back = encodeURIComponent(req.originalUrl || '/api/v1/admin/settings');
         return res.redirect(state === 'change' ? `/api/v1/admin/password?next=${back}` : `/api/v1/admin/login?next=${back}`);
       }
-      const tenantId = (req.query.tenant || 'default').toString();
+      const tenantId = (req.query.tenant || req.tenantId || 'default').toString();
+      const session0 = await currentSession(req);
       const [configMap, userList, funnelList, session] = await Promise.all([
         configService.load(tenantId).catch(() => ({})),
-        users.list().catch(() => []),
+        users.list({ tenantId: (session0 && session0.role === 'super_admin') ? null : tenantId }).catch(() => []),
         funnels.listByTenant(tenantId).catch(() => []),
         currentSession(req),
       ]);
@@ -118,7 +119,7 @@ export function register(ctx) {
         return res.status(401).json({ error: 'unauthorized' });
       }
       const body = req.body || {};
-      const tenantId = (body.tenant || 'default').toString();
+      const tenantId = (body.tenant || req.tenantId || 'default').toString();
       const submitted = { settings: body.set || {}, modules: body.mod || {} };
       const before = await configService.load(tenantId).catch(() => ({}));
       const result = await configService.save(tenantId, body.app, submitted);
@@ -141,14 +142,14 @@ export function register(ctx) {
   // --- Funnels (multi-account content scope) ---
   // Absolute redirect target (relative paths resolve against the POST route,
   // which produced a /admin/funnels/settings 404).
-  const backToFunnels = (body) =>
-    `/api/v1/admin/settings?${new URLSearchParams({ tenant: body.tenant || 'default' })}#funnels`;
+  const backToFunnels = (body, req) =>
+    `/api/v1/admin/settings?${new URLSearchParams({ tenant: body.tenant || (req && req.tenantId) || 'default' })}#funnels`;
 
   // Asked for by the page once the Funnels panel opens: it reads Drive and the sheets.
   router.get('/admin/funnels/stock', async (req, res, next) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
-      res.json({ ok: true, funnels: await stockForTenant((req.query.tenant || 'default').toString()) });
+      res.json({ ok: true, funnels: await stockForTenant((req.query.tenant || req.tenantId || 'default').toString()) });
     } catch (err) {
       next(err);
     }
@@ -189,8 +190,8 @@ export function register(ctx) {
       if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
       const body = req.body || {};
       const name = (body.name || '').toString().trim();
-      if (name) await funnels.create({ tenantId: body.tenant || 'default', name });
-      res.redirect(backToFunnels(body));
+      if (name) await funnels.create({ tenantId: body.tenant || req.tenantId || 'default', name });
+      res.redirect(backToFunnels(body, req));
     } catch (err) {
       next(err);
     }
@@ -218,7 +219,7 @@ export function register(ctx) {
           }
         }
       }
-      res.redirect(backToFunnels(body));
+      res.redirect(backToFunnels(body, req));
     } catch (err) {
       next(err);
     }
@@ -229,7 +230,7 @@ export function register(ctx) {
       if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
       const body = req.body || {};
       await funnels.setActive(Number(body.funnel_id), body.active === 'true');
-      res.redirect(backToFunnels(body));
+      res.redirect(backToFunnels(body, req));
     } catch (err) {
       next(err);
     }
@@ -240,7 +241,7 @@ export function register(ctx) {
       if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
       const body = req.body || {};
       await funnels.remove(Number(body.funnel_id));
-      res.redirect(backToFunnels(body));
+      res.redirect(backToFunnels(body, req));
     } catch (err) {
       next(err);
     }
@@ -426,7 +427,7 @@ export function register(ctx) {
   // --- Users: inline auto-save (JSON) ---
   router.post('/admin/users/role', async (req, res, next) => {
     try {
-      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
+      if (!(await superOk(req))) return res.status(403).json({ error: 'only the owner can change roles' });
       await users.setRole(req.body.email, req.body.role);
       res.json({ ok: true });
     } catch (err) {
@@ -436,7 +437,7 @@ export function register(ctx) {
 
   router.post('/admin/users/plan', async (req, res, next) => {
     try {
-      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
+      if (!(await superOk(req))) return res.status(403).json({ error: 'only the owner can change plans' });
       const forever = req.body.forever === true || req.body.forever === 'true';
       const endsAt = forever || !req.body.date ? null : new Date(req.body.date);
       await users.setPlanEnd(req.body.email, endsAt);
@@ -566,7 +567,7 @@ export function register(ctx) {
 
   router.get('/admin/users/billing', async (req, res, next) => {
     try {
-      if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
+      if (!(await superOk(req))) return res.status(403).json({ error: 'only the owner can see billing' });
       res.json({ rows: await users.billingFor(req.query.email) });
     } catch (err) {
       next(err);

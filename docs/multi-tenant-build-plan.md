@@ -19,7 +19,11 @@ The tenant came from the X-Tenant header or a /t/{id}/ path prefix
 (middleware/requestContext.js), never from the signed-in user. Users had no tenant.
 keyOk only checks the role. So any admin could act as any tenant.
 
-## Phase 1: lock the doors (in progress)
+## Phase 1: lock the doors (🟢 on staging 10-11-2026, not tried with a real second tenant)
+
+Code: middleware/tenantGuard.js, repositories/ownershipRepository.js, migration 023.
+Not covered yet: Drive file ids in bodies (checked by Drive access, not tenant),
+approval review links (an unguessable emailed token).
 
 - users.tenant_id (migration 023); a tenant's owner_email moves to that tenant.
 - The session sets req.tenantId. Only the super admin (or the machine admin key)

@@ -17,6 +17,7 @@ import { logger } from './core/logger.js';
 import { ping } from './core/db.js';
 import { createRegistry } from './core/moduleRegistry.js';
 import { requestId, tenantResolver, requestLogger } from './middleware/requestContext.js';
+import { bindTenant, guardRecords, guardParamId } from './middleware/tenantGuard.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 import * as tenantSettings from './core/tenantSettings.js';
 import * as publicPages from './utils/publicPages.js';
@@ -62,6 +63,8 @@ export function createApp() {
     verify: (req, _res, buf) => { req.rawBody = buf; },
   }));
   app.use(express.urlencoded({ extended: true }));
+  // The signed-in user's tenant wins over any header, path or ?tenant= (tenantGuard).
+  app.use(bindTenant);
 
   // Public pages (no sign-in): the bare domain is a home page whose Sign in
   // button opens the app; /privacy and /terms are the links Google's OAuth
@@ -93,6 +96,9 @@ export function createApp() {
   // Providers are built per-tenant on demand (see services/providerFactory.js)
   // so tenant-configured credentials take effect. Nothing is bound at boot.
   const router = express.Router();
+  // No tenant reads or changes another tenant's funnel, instance, rule or lead.
+  router.use(guardRecords);
+  router.param('id', guardParamId);
 
   // Approval review routes are core (several modules depend on them).
   approvalService.register(router);

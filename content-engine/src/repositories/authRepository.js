@@ -31,7 +31,7 @@ export async function createSession({ tokenHash, email, mustChange, ttlMs }) {
 /** A live session joined with its user, or null (expired rows are ignored). */
 export async function findSession(tokenHash) {
   const { rows } = await query(
-    `SELECT s.token_hash, s.email, s.must_change, s.last_seen_at, u.role
+    `SELECT s.token_hash, s.email, s.must_change, s.last_seen_at, u.role, u.tenant_id
        FROM auth_sessions s JOIN users u ON u.email = s.email
       WHERE s.token_hash = $1 AND s.expires_at > now()`,
     [tokenHash],
