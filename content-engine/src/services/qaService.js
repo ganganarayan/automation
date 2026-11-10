@@ -84,7 +84,20 @@ async function machineChecks() {
 
 async function getJson(url, headers) {
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT) });
-  return res.status;
+  const text = await res.text().catch(() => '');
+  return { status: res.status, text };
+}
+
+/** A short reason from a provider's error body (never the key). */
+function reasonOf(text) {
+  try {
+    const j = JSON.parse(text);
+    const d = j.detail || j.error || j;
+    const s = typeof d === 'string' ? d : (d.status || d.message || d.type || JSON.stringify(d));
+    return String(s).slice(0, 140);
+  } catch {
+    return String(text || '').slice(0, 140);
+  }
 }
 
 /** Free calls that prove a key is accepted (list models / read the account). */
@@ -99,8 +112,15 @@ async function keyPings(r) {
   for (const [name, key, call] of tries) {
     if (!key) continue;
     try {
-      const status = await call();
-      out.push(check('Keys live', name, status === 200 ? 'ok' : (status === 401 || status === 403 ? 'fail' : 'warn'), status === 200 ? 'key accepted' : `answered ${status}`));
+      const { status, text } = await call();
+      const why = reasonOf(text);
+      // ElevenLabs keys can be scoped: one without the account permission may still speak.
+      if (name === 'elevenlabs' && (status === 401 || status === 403)) {
+        const v = await getJson('https://api.elevenlabs.io/v1/voices', { 'xi-api-key': key });
+        out.push(check('Keys live', name, v.status === 200 ? 'warn' : 'fail', v.status === 200 ? `key works (reads voices) but not the account, so its balance shows unknown: ${why}` : `account ${status}: ${why}; voices ${v.status}: ${reasonOf(v.text)}`));
+        continue;
+      }
+      out.push(check('Keys live', name, status === 200 ? 'ok' : (status === 401 || status === 403 ? 'fail' : 'warn'), status === 200 ? 'key accepted' : `answered ${status}: ${why}`));
     } catch (err) { out.push(check('Keys live', name, 'warn', errText(err))); }
   }
   return out;

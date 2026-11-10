@@ -219,6 +219,9 @@ export async function forTenant(tenantId = 'default') {
   keyOwners.github = cleanShared ? (gh('github_actions_token') ? 'platform' : 'none') : (isOwner ? 'platform' : 'tenant');
   // Whose key paid, over time: a new entry each time a tenant's key owners change,
   // so the cost report splits old spend by the key in use on the day.
+  // Resolve every paid key first: keyOwners fills in as key() runs, and the history
+  // written below must hold who pays for each provider, not only Google and GitHub.
+  for (const k of Object.keys(PROVIDER_KEYS)) key(k);
   const keyHistory = parseJson(o.key_history || null, []);
   const hist = Array.isArray(keyHistory) ? keyHistory : [];
   // Only after a good read: a failed one looks empty and would erase the history.

@@ -98,6 +98,17 @@ describe('env fallbacks are the owner\'s only', () => {
     expect(writes.some(([t, k]) => t === 'acme' && k === 'key_history')).toBe(true);
   });
 
+  it('the key history records who pays for each paid provider', async () => {
+    writes.length = 0;
+    ts.invalidate('acme');
+    await ts.forTenant('acme');
+    const w = writes.filter(([t, k]) => t === 'acme' && k === 'key_history').pop();
+    const last = JSON.parse(w[2]).pop();
+    expect(last.owners).toHaveProperty('openai');
+    expect(last.owners).toHaveProperty('anthropic');
+    expect(last.owners).toHaveProperty('elevenlabs');
+  });
+
   it('a tenant on the shared service account is marked for the Drive guard', async () => {
     expect((await ts.forTenant('acme')).google.serviceAccountShared).toBe(true);
     expect((await ts.forTenant('default')).google.serviceAccountShared).toBe(false);
