@@ -64,6 +64,8 @@ import * as wakeSchedule from '../services/wakeScheduleService.js';
 import * as cloudflareWake from '../services/cloudflareWakeService.js';
 import { DAILY_KEY, dailyTimeOf } from '../utils/cloudflareWake.js';
 import { usageBox } from '../utils/pfmUsageView.js';
+import { costBox } from '../utils/costUsageView.js';
+import * as usageRepo from '../repositories/usageRepository.js';
 import * as instanceUsage from '../repositories/instanceRepository.js';
 import { stockForTenant } from '../services/funnelStockService.js';
 import { REFILL_BELOW } from '../utils/routerSpec.js';
@@ -93,14 +95,17 @@ export function register(ctx) {
       const postUsage = superAdmin ? await instanceUsage.postUsage({ months: 3 }).catch(() => null) : null;
       // Who posts on a Post for Me key of its own (so is not on the owner's bill).
       const ownKeyIds = [];
+      const keyOwners = {};
       if (superAdmin) {
         for (const t of tenantList) {
           const r = await tenantSettings.forTenant(t.id).catch(() => null);
           if (r && r.postformeKey && !r.postformeShared) ownKeyIds.push(String(t.id));
+          if (r) keyOwners[String(t.id)] = { ...r.keyOwners };
         }
       }
+      const aiCosts = superAdmin ? await usageRepo.monthCosts({ months: 3 }).catch(() => null) : null;
       res.type('html').send(
-        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', session, key: '', saved: req.query.saved, superAdmin, tenantList, postUsage, ownKeyIds }),
+        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', session, key: '', saved: req.query.saved, superAdmin, tenantList, postUsage, ownKeyIds, aiCosts, keyOwners }),
       );
     } catch (err) {
       next(err);
@@ -705,7 +710,7 @@ function creditPanel() {
   </fieldset>`;
 }
 
-function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, session = null, key, saved, superAdmin = false, tenantList = [], postUsage = null, ownKeyIds = [] }) {
+function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, session = null, key, saved, superAdmin = false, tenantList = [], postUsage = null, ownKeyIds = [], aiCosts = null, keyOwners = {} }) {
   const menu = navHtml({ key, tabs: true, superAdmin, session });
 
   // Said once, on the two panels with plain config fields (not under every panel).
@@ -811,7 +816,7 @@ ${NAV_CSS}
     ${saved ? `<div class="flash">Saved <b>${esc(saved)}</b>.</div>` : ''}
     <div id="flash-error" class="flash err" style="display:none"></div>
 
-    ${superAdmin ? tenantsPanel({ tenantList, postUsage, ownKeyIds }) : ''}
+    ${superAdmin ? tenantsPanel({ tenantList, postUsage, ownKeyIds, aiCosts, keyOwners }) : ''}
     ${usersPanel({ userList, me })}
     ${funnelsPanel({ funnelList, funnelConfigs, tenantId, key })}
     ${appSections}
@@ -1003,7 +1008,7 @@ ${NAV_CSS}
 </script>`;
 }
 
-function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [] }) {
+function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [], aiCosts = null, keyOwners = {} }) {
   const rows = (tenantList || [])
     .map((t, i) => {
       // The date input wants YYYY-MM-DD; the expiry is the end of that IST day.
@@ -1033,6 +1038,7 @@ function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [] }) {
         <tbody>${rows || '<tr><td colspan="6" class="hint">No tenants yet.</td></tr>'}</tbody></table>
     </fieldset>
     ${newTenantBox()}
+    ${costBox(tenantList, aiCosts, new Date(), keyOwners)}
     ${usageBox(tenantList, postUsage, new Date(), ownKeyIds)}
     ${wakerBox()}
   </section>`;

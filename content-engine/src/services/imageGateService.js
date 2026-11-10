@@ -28,6 +28,7 @@ import {
   selectKept,
 } from '../utils/imageGateSpec.js';
 import { fitImage } from '../providers/imageFit.js';
+import { costImages } from '../utils/pricing.js';
 
 export const KIND = 'image_gate';
 
@@ -41,6 +42,11 @@ async function loadFunnel(funnelId) {
 /** Generate one image and upload it to the funnel's Drive folder. */
 async function makeImage(providers, folderId, size, prompt, name, imageSize = '') {
   const buf = await fitImage(await providers.llm.generateImage({ prompt, size }), imageSize);
+  // A picture outside any run: its cost goes to the usage ledger (the tenant's bill).
+  const r = providers.resolved || {};
+  const c = costImages({ count: 1, size });
+  // Loaded on use: the repository pulls in the database (and the env check).
+  import('../repositories/usageRepository.js').then((usage) => usage.record({ tenantId: r.tenantId || 'default', provider: c.provider, model: c.model, unit: c.unit, quantity: c.quantity, costUsd: c.costUsd, source: 'image gate', keyOwner: (r.keyOwners || {}).openai === 'tenant' ? 'tenant' : 'platform' })).catch(() => {});
   const up = await providers.storage.uploadPng(folderId, name, buf);
   return { id: up.id, url: up.downloadUrl, thumb: up.thumbnailUrl, prompt, keep: true };
 }

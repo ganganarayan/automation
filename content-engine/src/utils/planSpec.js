@@ -19,6 +19,9 @@ export const PLANS = {
 
 export const PLAN_IDS = Object.keys(PLANS);
 
+/** Rupees to the dollar for the cost report (docs/pricing-plan.md). */
+export const USD_INR = 88;
+
 export function limitsFor(plan) {
   return PLANS[String(plan || '').toLowerCase()] || PLANS.custom;
 }
@@ -63,4 +66,4 @@ export function validTenantId(id) {
   return /^[a-z0-9][a-z0-9-]{1,30}$/.test(String(id || '')) && !String(id).includes(':');
 }
 
-export default { PLANS, PLAN_IDS, limitsFor, planLabel, overLimit, tenantLive, validTenantId };
+export default { USD_INR, PLANS, PLAN_IDS, limitsFor, planLabel, overLimit, tenantLive, validTenantId };

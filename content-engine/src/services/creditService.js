@@ -206,14 +206,16 @@ export async function balances(tenantId = 'default') {
   const providers = await buildProviders(tenantId);
   const r = providers.resolved || {};
   const a = r.animation || {};
+  // A tenant on the owner's (platform) key never sees the owner's balance.
+  const mine = (p) => String(tenantId) === 'default' || (r.keyOwners || {})[p] === 'tenant';
   const set = {
-    openai: !!r.openai?.apiKey,
-    anthropic: !!r.claude?.apiKey,
-    hailuo: !!(a.hailuoApiKey && a.hailuoGroupId),
-    gemini: !!r.gemini?.apiKey,
-    kling: !!(a.klingAccessKey && a.klingSecretKey),
-    runway: !!a.runwayApiKey,
-    elevenlabs: !!r.tts?.elevenlabsApiKey,
+    openai: !!r.openai?.apiKey && mine('openai'),
+    anthropic: !!r.claude?.apiKey && mine('anthropic'),
+    hailuo: !!(a.hailuoApiKey && a.hailuoGroupId) && mine('hailuo'),
+    gemini: !!r.gemini?.apiKey && mine('gemini'),
+    kling: !!(a.klingAccessKey && a.klingSecretKey) && mine('kling'),
+    runway: !!a.runwayApiKey && mine('runway'),
+    elevenlabs: !!r.tts?.elevenlabsApiKey && mine('elevenlabs'),
   };
   const [kling, runway, voice] = await Promise.all([
     set.kling ? safe(klingBalance(a.klingAccessKey, a.klingSecretKey)) : null,

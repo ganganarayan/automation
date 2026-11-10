@@ -58,7 +58,50 @@ export async function postformeFor(tenantId, o) {
   return { key, scope, shared: !!scope && key === ownerKey };
 }
 
+// The paid provider keys. A tenant's own key wins; without one it uses the
+// owner's (the platform key, on the owner's bill), except on a plan that
+// brings its own keys (Agency). The env value is the owner's last fallback.
+const PROVIDER_KEYS = {
+  openai_api_key: { provider: 'openai', env: () => settings.openai.apiKey },
+  anthropic_api_key: { provider: 'anthropic', env: () => '' },
+  gemini_api_key: { provider: 'gemini', env: () => settings.gemini.apiKey },
+  kling_access_key: { provider: 'kling', env: () => '' },
+  kling_secret_key: { provider: 'kling', env: () => '' },
+  runway_api_key: { provider: 'runway', env: () => '' },
+  hailuo_api_key: { provider: 'hailuo', env: () => '' },
+  hailuo_group_id: { provider: 'hailuo', env: () => '' },
+  elevenlabs_api_key: { provider: 'elevenlabs', env: () => '' },
+  heygen_api_key: { provider: 'heygen', env: () => '' },
+  transcript_api_key: { provider: 'transcript', env: () => '' },
+  json2video_api_key: { provider: 'json2video', env: () => settings.video.json2videoApiKey },
+};
+export const BYO_PLANS = ['agency'];
+
+const planCache = new Map();
+async function planOf(tenantId) {
+  const hit = planCache.get(tenantId);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.plan;
+  let plan = 'custom';
+  try { plan = ((await tenantRepo.findById(tenantId)) || {}).plan || 'custom'; } catch { /* keep custom */ }
+  planCache.set(tenantId, { at: Date.now(), plan });
+  return plan;
+}
+
+/**
+ * One provider key for a tenant: [value, owner] where owner is 'tenant' (its
+ * own), 'platform' (the owner's) or 'none'. Pure, for tests.
+ */
+export function providerKey(key, { own = {}, owner = {}, isOwner = false, byo = false, envValue = '' }) {
+  const mine = String(own[key] ?? '').trim();
+  if (mine) return [mine, isOwner ? 'platform' : 'tenant'];
+  if (isOwner) return [envValue || '', envValue ? 'platform' : 'none'];
+  if (byo) return ['', 'none'];
+  const plat = String(owner[key] ?? '').trim() || String(envValue || '').trim();
+  return [plat, plat ? 'platform' : 'none'];
+}
+
 export function invalidate(tenantId) {
+  planCache.clear();
   tenantIds = null;
   if (tenantId) cache.delete(tenantId);
   else cache.clear();
@@ -127,6 +170,16 @@ export async function forTenant(tenantId = 'default') {
   const env = envFor(tenantId);
   const pick = (key, fallback) => (o[key] !== undefined && o[key] !== null && o[key] !== '' ? o[key] : fallback);
   const pfm = await postformeFor(tenantId, o);
+  const isOwner = String(tenantId || OWNER_TENANT) === OWNER_TENANT;
+  const ownerO = isOwner ? o : await loadOverrides(OWNER_TENANT);
+  const byo = isOwner ? false : BYO_PLANS.includes(await planOf(String(tenantId)));
+  const keyOwners = {};
+  const key = (k) => {
+    const [v, who] = providerKey(k, { own: o, owner: ownerO, isOwner, byo, envValue: PROVIDER_KEYS[k].env() });
+    const p = PROVIDER_KEYS[k].provider;
+    if (!keyOwners[p] || keyOwners[p] === 'none') keyOwners[p] = who;
+    return v;
+  };
 
   return {
     tenantId,
@@ -181,37 +234,39 @@ export async function forTenant(tenantId = 'default') {
     },
     // Tenant-scoped credentials (BYO). Env is only a platform-provided default.
     openai: {
-      apiKey: pick('openai_api_key', env.openai.apiKey),
+      apiKey: key('openai_api_key'),
       imageModel: pick('image_model', env.openai.imageModel),
       textModel: pick('text_model', env.openai.textModel),
     },
     // The Ready video copy writer. No key = the OpenAI text model, as before.
     claude: {
-      apiKey: String(pick('anthropic_api_key', '') || '').trim(),
+      apiKey: String(key('anthropic_api_key') || '').trim(),
       model: pick('claude_model', ''),
     },
     gemini: {
-      apiKey: pick('gemini_api_key', env.gemini.apiKey),
+      apiKey: key('gemini_api_key'),
       imageModel: pick('gemini_image_model', env.gemini.imageModel),
     },
     // Post for Me: the tenant's own key, else the owner's shared one (see postformeFor).
     postformeKey: pfm.key,
     postformeScope: pfm.scope,
     postformeShared: pfm.shared,
+    // Per provider: 'tenant' (its own key), 'platform' (the owner's) or 'none'.
+    get keyOwners() { return keyOwners; },
     // Central provider credentials (API Keys page). Funnels pick the provider;
     // the key is always taken from here, never from funnel_config.
     animation: {
-      klingAccessKey: pick('kling_access_key', ''),
-      klingSecretKey: pick('kling_secret_key', ''),
-      runwayApiKey: pick('runway_api_key', ''),
-      hailuoApiKey: pick('hailuo_api_key', ''),
-      hailuoGroupId: pick('hailuo_group_id', ''),
+      klingAccessKey: key('kling_access_key'),
+      klingSecretKey: key('kling_secret_key'),
+      runwayApiKey: key('runway_api_key'),
+      hailuoApiKey: key('hailuo_api_key'),
+      hailuoGroupId: key('hailuo_group_id'),
     },
     tts: {
-      elevenlabsApiKey: pick('elevenlabs_api_key', ''),
-      heygenApiKey: pick('heygen_api_key', ''),
+      elevenlabsApiKey: key('elevenlabs_api_key'),
+      heygenApiKey: key('heygen_api_key'),
     },
-    transcriptKey: pick('transcript_api_key', ''),
+    transcriptKey: key('transcript_api_key'),
     // Comparison videos. Blank = the built-in Assess360 list.
     comparison: {
       list: pick('comparison_list', ''),
@@ -245,7 +300,7 @@ export async function forTenant(tenantId = 'default') {
       glossary: pick('transcript_glossary', ''),
     },
     video: {
-      json2videoApiKey: pick('json2video_api_key', env.video.json2videoApiKey),
+      json2videoApiKey: key('json2video_api_key'),
     },
     instagram: {
       automationUrl: pick('ig_automation_url', env.instagram.automationUrl),

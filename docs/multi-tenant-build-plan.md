@@ -64,7 +64,19 @@ Not enforced yet: the users limit (there is no add-user flow besides New tenant)
 - Plan limits from the pricing plan (funnels, channels per funnel, posts a month,
   AI videos a month, users).
 
-## Phase 4: billing (about 2 to 3 days)
+## Phase 4: billing (🟢 on staging 10-11-2026, not tried with a real second tenant)
+
+Code: migration 025 (usage_ledger), repositories/usageRepository.js, utils/costUsageView.js,
+tenantSettings providerKey and keyOwners. Keys: a tenant's own key wins; without one it
+uses the owner's key (the platform key, on the owner's bill); an Agency tenant gets no
+platform key and must bring its own. Credit balances show only for the tenant's own keys.
+The Tenants panel has an "AI cost per tenant" box: on-bill cost for three months, this
+month in rupees (88 to the dollar), plan price and margin, own-key spend shown apart.
+Costs come from run steps (also deleted and remade runs) plus the ledger. Only the image
+gate writes to the ledger so far; other paid calls outside a run are not counted yet.
+The split uses each tenant's current keys, not the key in use on the day.
+
+Planned:
 
 - A usage ledger written for every paid provider call (OpenAI, Claude, Kling, Runway,
   MiniMax, ElevenLabs, Gemini, transcript), including calls outside an instance.

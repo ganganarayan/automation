@@ -15,8 +15,13 @@ const fakeSettings = {
   modules: { delivery: true },
 };
 vi.mock('../src/settings/index.js', () => ({ settings: fakeSettings, default: fakeSettings }));
-vi.mock('../src/repositories/tenantConfigRepository.js', () => ({ getAll: async () => ({}), get: async () => '', set: async () => {} }));
-vi.mock('../src/repositories/tenantRepository.js', () => ({ list: async () => [{ id: 'default' }, { id: 'acme' }] }));
+const overrides = { default: {}, acme: {}, own: { openai_api_key: 'OWN_OPENAI' }, big: {} };
+const plans = { acme: 'growth', own: 'growth', big: 'agency' };
+vi.mock('../src/repositories/tenantConfigRepository.js', () => ({ getAll: async (t) => ({ ...(overrides[t] || {}) }), get: async () => '', set: async () => {} }));
+vi.mock('../src/repositories/tenantRepository.js', () => ({
+  list: async () => [{ id: 'default' }, { id: 'acme' }, { id: 'own' }, { id: 'big' }],
+  findById: async (id) => ({ id, plan: plans[id] || 'custom' }),
+}));
 
 const ts = await import('../src/core/tenantSettings.js');
 
@@ -28,12 +33,35 @@ describe('env fallbacks are the owner\'s only', () => {
     expect(r.smtp.pass).toBe('secret');
   });
 
-  it('another tenant gets none of the owner\'s keys, sheets, folders, emails or links', async () => {
+  it('another tenant gets none of the owner\'s sheets, folders, emails, links or mail login', async () => {
     const r = await ts.forTenant('acme');
     const flat = JSON.stringify(r);
-    for (const leak of ['OWNER_SHEET', 'OWNER_FOLDER', 'OWNER_OPENAI', 'OWNER_GEMINI', 'OWNER_J2V', 'owner@x.com', 'https://owner/', 'smtp.owner', 'secret', 'acc1']) {
+    for (const leak of ['OWNER_SHEET', 'OWNER_FOLDER', 'owner@x.com', 'https://owner/', 'smtp.owner', 'secret', 'acc1']) {
       expect(flat, leak).not.toContain(leak);
     }
+  });
+
+  it('paid AI keys: own key first, else the platform key (owner pays), none on Agency', async () => {
+    const acme = await ts.forTenant('acme');
+    expect(acme.openai.apiKey).toBe('OWNER_OPENAI');
+    expect(acme.keyOwners.openai).toBe('platform');
+    const own = await ts.forTenant('own');
+    expect(own.openai.apiKey).toBe('OWN_OPENAI');
+    expect(own.keyOwners.openai).toBe('tenant');
+    expect(own.keyOwners.gemini).toBe('platform');
+    const big = await ts.forTenant('big');
+    expect(big.openai.apiKey).toBe('');
+    expect(big.keyOwners.openai).toBe('none');
+    expect(JSON.stringify(big)).not.toContain('OWNER_OPENAI');
+  });
+
+  it('providerKey rules', () => {
+    expect(ts.providerKey('k', { own: { k: ' mine ' }, owner: { k: 'o' } })).toEqual(['mine', 'tenant']);
+    expect(ts.providerKey('k', { own: {}, owner: { k: 'o' }, envValue: 'e' })).toEqual(['o', 'platform']);
+    expect(ts.providerKey('k', { own: {}, owner: {}, envValue: 'e' })).toEqual(['e', 'platform']);
+    expect(ts.providerKey('k', { own: {}, owner: { k: 'o' }, byo: true })).toEqual(['', 'none']);
+    expect(ts.providerKey('k', { own: { k: 'x' }, isOwner: true })).toEqual(['x', 'platform']);
+    expect(ts.providerKey('k', { own: {}, isOwner: true })).toEqual(['', 'none']);
   });
 
   it('platform pieces are shared: model names, SMTP port, the service account', async () => {
