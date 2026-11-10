@@ -21,6 +21,7 @@ import * as captureConfig from '../services/captureConfig.js';
 import { captureSenders } from '../services/captureSenders.js';
 import * as leadVisits from '../services/leadVisitService.js';
 import { verifyMetaSignature, parseCommentEvents, parseMessageEvents } from '../utils/captureSpec.js';
+import { splitByTenant } from '../utils/metaRoute.js';
 import { keyOk, currentSession } from '../services/accessService.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst } from '../utils/time.js';
@@ -127,17 +128,24 @@ export function register(ctx) {
     res.sendStatus(200); // ack immediately
 
     try {
-      const events = parseCommentEvents(req.body);
-      for (const event of events) {
-        await jobRunner.enqueueJob({ tenantId: req.tenantId, type: JOB_TYPE, payload: { event } });
-      }
-      // Replies to our DMs drive the follow gate (and open the 24h window).
-      const replies = parseMessageEvents(req.body);
-      for (const event of replies) {
-        await jobRunner.enqueueJob({ tenantId: req.tenantId, type: REPLY_JOB, payload: { event } });
-      }
-      if (events.length || replies.length) {
-        req.log?.info?.({ comments: events.length, replies: replies.length }, 'capture: events queued');
+      // The owner's app on the plain URL serves every tenant: each entry goes to
+      // the tenant that claims its Page / IG id. A tenant's own app (/t/{id}) keeps all.
+      const bodies = req.tenantId === 'default'
+        ? splitByTenant(req.body, await captureConfig.accountOwners(), 'default')
+        : { [req.tenantId]: req.body };
+      for (const [tenantId, body] of Object.entries(bodies)) {
+        const events = parseCommentEvents(body);
+        for (const event of events) {
+          await jobRunner.enqueueJob({ tenantId, type: JOB_TYPE, payload: { event } });
+        }
+        // Replies to our DMs drive the follow gate (and open the 24h window).
+        const replies = parseMessageEvents(body);
+        for (const event of replies) {
+          await jobRunner.enqueueJob({ tenantId, type: REPLY_JOB, payload: { event } });
+        }
+        if (events.length || replies.length) {
+          req.log?.info?.({ tenantId, comments: events.length, replies: replies.length }, 'capture: events queued');
+        }
       }
     } catch (err) {
       req.log?.error?.({ err: err.message }, 'capture: failed to queue comment events');

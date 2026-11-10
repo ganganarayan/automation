@@ -631,7 +631,7 @@ async function comparisonState({ funnel, videos, drafts }) {
     const d = drafts[v.id] || {};
     byVideo[v.id] = { choice: d.comparison || '', active: comparisonFor({ settings, name: v.name, transcript: d.transcript, choice: d.comparison }) };
   }
-  return { names: parseComparisons(settings.list || DEFAULT_COMPARISONS).map((c) => c.competitor), byVideo };
+  return { names: parseComparisons(settings.list || (settings.builtIn === false ? '' : DEFAULT_COMPARISONS)).map((c) => c.competitor), byVideo };
 }
 
 /** The video page's comparison choice: blank = detect, off = normal video, or a competitor. */

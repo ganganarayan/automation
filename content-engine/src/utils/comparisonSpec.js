@@ -91,8 +91,9 @@ export function findCompetitor(text, list, { brand = '', speech = false } = {}) 
  */
 export function comparisonFor({ settings = {}, name = '', transcript = '', choice = '' } = {}) {
   if (choice === COMPARISON_OFF) return null;
-  const list = parseComparisons(settings.list || DEFAULT_COMPARISONS);
-  const brand = settings.brand || DEFAULT_COMPARISON_BRAND;
+  // The built-in Assess360 list is the owner's only (builtIn false for other tenants).
+  const list = parseComparisons(settings.list || (settings.builtIn === false ? '' : DEFAULT_COMPARISONS));
+  const brand = settings.brand || (settings.builtIn === false ? '' : DEFAULT_COMPARISON_BRAND);
   const hit = choice
     ? list.find((c) => compact(c.competitor) === compact(choice))
     : findCompetitor(stripCc(name), list, { brand }) || findCompetitor(transcript, list, { brand, speech: true });

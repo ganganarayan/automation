@@ -139,9 +139,9 @@ export const CONFIG_MANIFEST = {
         // built-in default (shown pre-filled).
         title: 'Comparison videos',
         fields: [
-          { key: 'comparison_brand', label: 'Your product name', default: DEFAULT_COMPARISON_BRAND },
+          { key: 'comparison_brand', label: 'Your product name', default: DEFAULT_COMPARISON_BRAND, ownerDefault: true },
           { key: 'comparison_logo', label: 'Your logo (image link or a public Drive link; blank = the name is typed)' },
-          { key: 'comparison_list', label: 'Facts per competitor', type: 'textarea', default: DEFAULT_COMPARISONS, help: 'One block per competitor: its name and the date checked, then one line per fact as label | yours | theirs, using yes or no. A video is matched from its file name or transcript, or pick it on the video page. The thumbnail shows the first differences, so keep the strongest on top.' },
+          { key: 'comparison_list', label: 'Facts per competitor', type: 'textarea', default: DEFAULT_COMPARISONS, ownerDefault: true, help: 'One block per competitor: its name and the date checked, then one line per fact as label | yours | theirs, using yes or no. A video is matched from its file name or transcript, or pick it on the video page. The thumbnail shows the first differences, so keep the strongest on top.' },
         ],
       },
       {

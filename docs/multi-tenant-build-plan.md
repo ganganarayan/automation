@@ -83,7 +83,25 @@ Planned:
 - A monthly report per tenant, with the markup.
 - Per provider: the owner's platform key (metered) or the tenant's own key.
 
-## Phase 5: shared integrations
+## Phase 5: shared integrations (🟢 on staging 10-11-2026, not tried with a real second tenant)
+
+Code: utils/metaRoute.js, captureConfig.accountOwners, tenantSettings (google, clean, comparison).
+- Meta: the owner's app on the plain webhook URL serves every tenant. Each entry goes to
+  the live tenant whose account ids or page tokens (Comment capture) claim its Page / IG id;
+  an unclaimed id, or one two tenants claim, stays the owner's. A tenant with its own Meta
+  app keeps using /t/{id}/... with its own secret.
+- Google: a tenant without its own OAuth client id and secret uses the owner's whole set
+  (also the picker key and project number). The state ticket already carries the tenant;
+  the callback now refuses a ticket for another workspace. The owner's Google consent
+  screen must be published (or list the tenant's Google account as a test user).
+- Clean: the GitHub runner is the platform's. A tenant without its own token uses the
+  owner's token, repo and ref; the job ticket carries the tenant. The wake schedule
+  variable stays the owner's only.
+- Owner content: the built-in Assess360 comparison list and brand are the owner's only, also
+  as form defaults. The super admin email stays in code on purpose: a setting could be
+  edited to take over the platform. Gita links were already owner-only (phase 2).
+
+Planned:
 
 - Meta capture webhook routed to a tenant by page or IG account id.
 - One shared Google OAuth client, the tenant carried in the OAuth state.

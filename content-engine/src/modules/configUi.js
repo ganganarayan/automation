@@ -1424,7 +1424,7 @@ function flowSection(app, tenantId, configMap, key, extra = '') {
     const fields = (b.fieldKeys || [])
       .map((fk) => {
         const field = fieldByKey(app, fk);
-        return field ? fieldRow(field, configMap) : '';
+        return field ? fieldRow(field, configMap, tenantId) : '';
       })
       .join('');
     return `<div class="flowbox">
@@ -1459,7 +1459,7 @@ function flowSection(app, tenantId, configMap, key, extra = '') {
 function appSection(app, tenantId, configMap, key, extra = '') {
   const m = CONFIG_MANIFEST[app];
   const groups = m.groups
-    .map((g) => `<fieldset><legend>${esc(g.title)}</legend>${g.fields.map((f) => fieldRow(f, configMap)).join('')}</fieldset>`)
+    .map((g) => `<fieldset><legend>${esc(g.title)}</legend>${g.fields.map((f) => fieldRow(f, configMap, tenantId)).join('')}</fieldset>`)
     .join('');
 
   const mods = m.modules
@@ -1568,7 +1568,9 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();</script>`;
 }
 
-function fieldRow(field, configMap) {
+function fieldRow(field, configMap, tenantId = 'default') {
+  // The owner's own content (the Assess360 facts) is no default for another tenant.
+  if (field.ownerDefault && String(tenantId || 'default') !== 'default') field = { ...field, default: '' };
   const current = configMap[field.key];
   const has = current !== undefined && current !== null && current !== '';
   if (field.type === 'time') {

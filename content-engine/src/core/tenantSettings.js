@@ -180,6 +180,18 @@ export async function forTenant(tenantId = 'default') {
     if (!keyOwners[p] || keyOwners[p] === 'none') keyOwners[p] = who;
     return v;
   };
+  // Shared platform pieces: a tenant without its own Google OAuth client uses the
+  // owner's (the state ticket carries the tenant), and without its own GitHub
+  // token the owner's Clean runner (the job ticket carries the tenant). Each is
+  // taken as a set, never mixed with the tenant's own half.
+  const ownSet = (keys) => keys.some((k) => String(o[k] ?? '').trim());
+  const googleShared = !isOwner && !ownSet(['google_oauth_client_id', 'google_oauth_client_secret']);
+  const cleanShared = !isOwner && !ownSet(['github_actions_token']);
+  const from = (shared) => (k, d = '') => String((shared ? (ownerO[k] ?? '') : pick(k, d)) || d || '').trim();
+  const g = from(googleShared);
+  const gh = from(cleanShared);
+  keyOwners.google = googleShared ? (g('google_oauth_client_id') ? 'platform' : 'none') : (isOwner ? 'platform' : 'tenant');
+  keyOwners.github = cleanShared ? (gh('github_actions_token') ? 'platform' : 'none') : (isOwner ? 'platform' : 'tenant');
 
   return {
     tenantId,
@@ -188,18 +200,20 @@ export async function forTenant(tenantId = 'default') {
     google: {
       serviceAccount: parseJson(pick('google_service_account_json', null), null) || env.google.serviceAccount,
       // "Sign in with Google" + Drive picker (browser-side; no secret).
-      oauthClientId: String(pick('google_oauth_client_id', '') || '').trim(),
-      pickerApiKey: String(pick('google_picker_api_key', '') || '').trim(),
-      projectNumber: String(pick('google_project_number', '') || '').trim(),
+      oauthClientId: g('google_oauth_client_id'),
+      pickerApiKey: g('google_picker_api_key'),
+      projectNumber: g('google_project_number'),
       // The one-time "Connect Google Drive" (server side) needs the secret too.
-      oauthClientSecret: String(pick('google_oauth_client_secret', '') || '').trim(),
+      oauthClientSecret: g('google_oauth_client_secret'),
+      oauthShared: googleShared,
     },
     // ✂ Clean: where it runs, and the GitHub Actions runner's settings.
     clean: {
       runner: String(pick('clean_runner', 'railway') || 'railway').trim(),
-      githubToken: String(pick('github_actions_token', '') || '').trim(),
-      githubRepo: String(pick('github_repo', '') || '').trim(),
-      githubRef: String(pick('github_ref', '') || '').trim(),
+      githubToken: gh('github_actions_token'),
+      githubRepo: gh('github_repo'),
+      githubRef: gh('github_ref'),
+      shared: cleanShared,
     },
     sheets: {
       gita: pick('gita_sheet_id', env.sheets.gita),
@@ -267,8 +281,10 @@ export async function forTenant(tenantId = 'default') {
       heygenApiKey: key('heygen_api_key'),
     },
     transcriptKey: key('transcript_api_key'),
-    // Comparison videos. Blank = the built-in Assess360 list.
+    // Comparison videos. Blank = the built-in Assess360 list, for the owner only
+    // (it is the owner's product); another tenant writes its own.
     comparison: {
+      builtIn: isOwner,
       list: pick('comparison_list', ''),
       brand: pick('comparison_brand', ''),
       logo: pick('comparison_logo', ''),

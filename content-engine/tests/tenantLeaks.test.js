@@ -15,7 +15,12 @@ const fakeSettings = {
   modules: { delivery: true },
 };
 vi.mock('../src/settings/index.js', () => ({ settings: fakeSettings, default: fakeSettings }));
-const overrides = { default: {}, acme: {}, own: { openai_api_key: 'OWN_OPENAI' }, big: {} };
+const overrides = {
+  default: { google_oauth_client_id: 'OWNER_GID', google_oauth_client_secret: 'OWNER_GSEC', github_actions_token: 'OWNER_GH', github_repo: 'owner/repo' },
+  acme: {},
+  own: { openai_api_key: 'OWN_OPENAI', google_oauth_client_id: 'OWN_GID', github_actions_token: 'OWN_GH' },
+  big: {},
+};
 const plans = { acme: 'growth', own: 'growth', big: 'agency' };
 vi.mock('../src/repositories/tenantConfigRepository.js', () => ({ getAll: async (t) => ({ ...(overrides[t] || {}) }), get: async () => '', set: async () => {} }));
 vi.mock('../src/repositories/tenantRepository.js', () => ({
@@ -53,6 +58,21 @@ describe('env fallbacks are the owner\'s only', () => {
     expect(big.openai.apiKey).toBe('');
     expect(big.keyOwners.openai).toBe('none');
     expect(JSON.stringify(big)).not.toContain('OWNER_OPENAI');
+  });
+
+  it('shared Google client and Clean runner: the owner set as a whole, or the tenant own', async () => {
+    const acme = await ts.forTenant('acme');
+    expect(acme.google).toMatchObject({ oauthClientId: 'OWNER_GID', oauthClientSecret: 'OWNER_GSEC', oauthShared: true });
+    expect(acme.clean).toMatchObject({ githubToken: 'OWNER_GH', githubRepo: 'owner/repo', shared: true });
+    expect(acme.keyOwners).toMatchObject({ google: 'platform', github: 'platform' });
+    const own = await ts.forTenant('own');
+    expect(own.google).toMatchObject({ oauthClientId: 'OWN_GID', oauthClientSecret: '', oauthShared: false });
+    expect(own.clean).toMatchObject({ githubToken: 'OWN_GH', githubRepo: '', shared: false });
+    expect(own.keyOwners).toMatchObject({ google: 'tenant', github: 'tenant' });
+    const owner = await ts.forTenant('default');
+    expect(owner.google.oauthShared).toBe(false);
+    expect(owner.comparison.builtIn).toBe(true);
+    expect(acme.comparison.builtIn).toBe(false);
   });
 
   it('providerKey rules', () => {

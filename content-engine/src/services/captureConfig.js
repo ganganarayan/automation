@@ -9,6 +9,7 @@
  */
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { parseWordList } from '../utils/captureSpec.js';
+import { idOwners, claimedIds } from '../utils/metaRoute.js';
 
 function json(value, fallback) {
   if (!value) return fallback;
@@ -41,4 +42,24 @@ export function tokenFor(captureCfg, id) {
   return captureCfg.pageTokens[String(id)] || '';
 }
 
-export default { forTenant, tokenFor };
+/**
+ * Which live tenant owns each Page / IG account id (cached a minute), for the
+ * owner's shared Meta webhook. Fails to an empty map: everything stays the owner's.
+ */
+let ownersHit = null;
+export async function accountOwners() {
+  if (ownersHit && Date.now() - ownersHit.at < 60 * 1000) return ownersHit.map;
+  let map = new Map();
+  try {
+    const tenantRepo = await import('../repositories/tenantRepository.js');
+    const list = [];
+    for (const tenantId of await tenantRepo.activeIds()) list.push({ tenantId, ids: claimedIds(await forTenant(tenantId)) });
+    map = idOwners(list);
+  } catch { /* keep empty */ }
+  ownersHit = { at: Date.now(), map };
+  return map;
+}
+
+export function forgetOwners() { ownersHit = null; }
+
+export default { forTenant, tokenFor, accountOwners, forgetOwners };

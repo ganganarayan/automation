@@ -69,6 +69,9 @@ export function register(ctx) {
       const peek = peekTicket(String(req.query.state || '')) || {};
       const tenantId = await driveConnect.stateTenant(String(req.query.state || ''), peek.t);
       if (!tenantId) return res.status(400).type('html').send(notePage('Drive not connected', 'That link expired or did not start here. Press Connect Google Drive again.'));
+      // With the owner's shared Google client every tenant comes back here: the
+      // ticket must be the signed-in tenant's (the operator may finish any).
+      if (!req.tenantOperator && String(tenantId) !== String(req.tenantId || 'default')) return res.status(403).type('html').send(notePage('Drive not connected', 'That connect link belongs to another workspace. Press Connect Google Drive again from your own Settings.'));
       const { email } = await driveConnect.finishConnect({ tenantId, baseUrl: baseUrlOf(req), code: String(req.query.code || '') });
       log.info({ tenantId, email }, 'google drive connected');
       res.redirect(`/api/v1/admin/settings?${new URLSearchParams({ tenant: tenantId, saved: 'content-engine' })}#content-engine`);
