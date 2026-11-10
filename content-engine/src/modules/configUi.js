@@ -463,8 +463,15 @@ export function register(ctx) {
     try {
       const session = await currentSession(req);
       const isSuper = await superOk(req);
-      if (!isSuper && !(session && session.role === 'admin')) return res.status(403).json({ ok: false, error: 'only a workspace admin can add users' });
-      const tenantId = String(req.tenantId || 'default');
+      if (!isSuper && !(session && session.role === 'admin' && !session.mustChange)) return res.status(403).json({ ok: false, error: 'only a workspace admin who has set their own password can add users' });
+      // The super admin adds to the workspace the page shows (?tenant= is not
+      // in the request's tenant); anyone else always adds to their own.
+      let tenantId = String(req.tenantId || 'default');
+      if (isSuper && req.body?.tenant) {
+        const asked = String(req.body.tenant).trim();
+        if (!(await tenantRepo.findById(asked))) throw new Error('No such workspace');
+        tenantId = asked;
+      }
       const email = String(req.body?.email || '').trim().toLowerCase();
       const role = req.body?.role === 'admin' ? 'admin' : 'user';
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('That email is not valid');
@@ -473,7 +480,7 @@ export function register(ctx) {
       if (why) return res.status(402).json({ ok: false, error: why });
       const tempPassword = randomBytes(9).toString('base64url');
       await users.createForTenant({ email, tenantId, role, passwordHash: await hashPassword(tempPassword) });
-      res.json({ ok: true, email, role, tempPassword });
+      res.json({ ok: true, email, role, tenant: tenantId, tempPassword });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -867,7 +874,7 @@ ${NAV_CSS}
     <div id="flash-error" class="flash err" style="display:none"></div>
 
     ${superAdmin ? tenantsPanel({ tenantList, postUsage, ownKeyIds, aiCosts, keyOwners, keyHistories }) : ''}
-    ${usersPanel({ userList, me })}
+    ${usersPanel({ userList, me, tenantId })}
     ${funnelsPanel({ funnelList, funnelConfigs, tenantId, key })}
     ${appSections}
   </main>
@@ -1207,7 +1214,7 @@ function wakerBox() {
   </fieldset>`;
 }
 
-function usersPanel({ userList, me }) {
+function usersPanel({ userList, me, tenantId = 'default' }) {
   const rows = (userList || [])
     .map((u, i) => {
       const isSuper = u.email === users.SUPER_ADMIN_EMAIL;
@@ -1244,7 +1251,7 @@ function usersPanel({ userList, me }) {
         async function addUser(){
           const st=document.getElementById('nu-st'); st.textContent='Adding…';
           try{
-            const r=await fetch('/api/v1/admin/users/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('nu-email').value,role:document.getElementById('nu-role').value})});
+            const r=await fetch('/api/v1/admin/users/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenant:'${escJs(tenantId)}',email:document.getElementById('nu-email').value,role:document.getElementById('nu-role').value})});
             const j=await r.json();
             if(!j.ok){ st.textContent='🔴 '+(j.error||'Could not add'); return; }
             st.textContent='🟢 Added '+j.email+' ('+j.role+'). One-time password: '+j.tempPassword+' . Send it to them now; it is not shown again.';

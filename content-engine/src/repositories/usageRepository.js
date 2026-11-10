@@ -29,7 +29,7 @@ export async function record({ tenantId = 'default', provider, model = null, uni
 // One cost entry of a run's steps: its own time when it has one, else the run's.
 const stepCosts = (t) => `
   SELECT ${t}.tenant_id,
-         CASE WHEN e->>'at' ~ '^\d{4}-\d{2}-\d{2}' THEN (e->>'at')::timestamptz ELSE ${t}.created_at END AS at,
+         CASE WHEN e->>'at' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN (e->>'at')::timestamptz ELSE ${t}.created_at END AS at,
          COALESCE(NULLIF(e->>'provider', ''), 'unknown') AS provider,
          CASE WHEN jsonb_typeof(e->'costUsd') = 'number' THEN (e->>'costUsd')::numeric ELSE 0 END AS usd,
          NULLIF(e->>'keyOwner', '') AS key_owner

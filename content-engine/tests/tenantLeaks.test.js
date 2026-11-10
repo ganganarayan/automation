@@ -22,10 +22,15 @@ const overrides = {
   big: {},
 };
 const plans = { acme: 'growth', own: 'growth', big: 'agency' };
-vi.mock('../src/repositories/tenantConfigRepository.js', () => ({ getAll: async (t) => ({ ...(overrides[t] || {}) }), get: async () => '', set: async () => {} }));
+const writes = [];
+vi.mock('../src/repositories/tenantConfigRepository.js', () => ({
+  getAll: async (t) => { if (t === 'flaky') throw new Error('db down'); return { ...(overrides[t] || {}) }; },
+  get: async () => '',
+  set: async (t, k, v) => { writes.push([t, k, v]); },
+}));
 vi.mock('../src/repositories/tenantRepository.js', () => ({
   list: async () => [{ id: 'default' }, { id: 'acme' }, { id: 'own' }, { id: 'big' }],
-  findById: async (id) => ({ id, plan: plans[id] || 'custom' }),
+  findById: async (id) => (id === 'ghost' ? null : { id, plan: plans[id] || 'custom' }),
 }));
 
 const ts = await import('../src/core/tenantSettings.js');
@@ -81,6 +86,16 @@ describe('env fallbacks are the owner\'s only', () => {
     expect(first).toEqual([{ from: now.toISOString(), owners: { openai: 'platform' } }]);
     expect(ts.keyHistoryNext(first, { openai: 'platform' }, now)).toBe(null);
     expect(ts.keyHistoryNext(first, { openai: 'tenant' }, now)).toHaveLength(2);
+  });
+
+  it('key history is never written after a failed read or for an unknown tenant', async () => {
+    writes.length = 0;
+    await ts.forTenant('flaky');
+    await ts.forTenant('ghost');
+    expect(writes.filter(([t, k]) => k === 'key_history' && (t === 'flaky' || t === 'ghost'))).toEqual([]);
+    ts.invalidate('acme');
+    await ts.forTenant('acme');
+    expect(writes.some(([t, k]) => t === 'acme' && k === 'key_history')).toBe(true);
   });
 
   it('a tenant on the shared service account is marked for the Drive guard', async () => {

@@ -45,7 +45,7 @@ export async function driveFolderTenants(folderId) {
     `SELECT DISTINCT f.tenant_id FROM funnel_config c JOIN funnels f ON f.id = c.funnel_id
       WHERE c.key IN ('drive_folder_id', 'direct_drive_folder') AND position($1 in c.value) > 0
      UNION
-     SELECT DISTINCT tenant_id FROM funnel_sources WHERE ref = $1`,
+     SELECT DISTINCT tenant_id FROM funnel_sources WHERE position($1 in ref) > 0`,
     [id],
   );
   return rows.map((r) => String(r.tenant_id));

@@ -15,6 +15,8 @@ import { scopeFor, OWNER_TENANT } from '../utils/pfmScope.js';
 
 const CACHE_TTL_MS = 60_000;
 const cache = new Map();
+// Override maps that came from a failed read (the {} fallback): never written back.
+const failedReads = new WeakSet();
 
 async function loadOverrides(tenantId) {
   const hit = cache.get(tenantId);
@@ -23,7 +25,9 @@ async function loadOverrides(tenantId) {
   try {
     map = await tenantConfig.getAll(tenantId);
   } catch {
-    return {}; // fail safe: fall back to env defaults, retry next call
+    const empty = {};
+    failedReads.add(empty);
+    return empty; // fail safe: fall back to env defaults, retry next call
   }
   cache.set(tenantId, { at: Date.now(), map });
   return map;
@@ -82,9 +86,19 @@ async function planOf(tenantId) {
   const hit = planCache.get(tenantId);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.plan;
   let plan = 'custom';
-  try { plan = ((await tenantRepo.findById(tenantId)) || {}).plan || 'custom'; } catch { /* keep custom */ }
-  planCache.set(tenantId, { at: Date.now(), plan });
+  let exists = false;
+  try {
+    const row = await tenantRepo.findById(tenantId);
+    exists = !!row;
+    plan = (row || {}).plan || 'custom';
+  } catch { /* keep custom */ }
+  planCache.set(tenantId, { at: Date.now(), plan, exists });
   return plan;
+}
+
+/** True once planOf found a tenants row (no write for an id that has none). */
+function tenantKnown(tenantId) {
+  return !!(planCache.get(tenantId) || {}).exists;
 }
 
 /**
@@ -207,7 +221,8 @@ export async function forTenant(tenantId = 'default') {
   // so the cost report splits old spend by the key in use on the day.
   const keyHistory = parseJson(o.key_history || null, []);
   const hist = Array.isArray(keyHistory) ? keyHistory : [];
-  if (!isOwner) {
+  // Only after a good read: a failed one looks empty and would erase the history.
+  if (!isOwner && !failedReads.has(o) && tenantKnown(String(tenantId))) {
     const next = keyHistoryNext(hist, keyOwners, new Date());
     if (next) tenantConfig.set(String(tenantId), 'key_history', JSON.stringify(next)).then(() => cache.delete(String(tenantId))).catch(() => {});
   }

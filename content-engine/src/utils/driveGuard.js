@@ -10,6 +10,7 @@
  */
 
 export const NOT_YOURS = 'That Drive file is not in one of your funnel folders.';
+export const NOT_YOURS_FOLDER = 'That folder belongs to another workspace.';
 
 /** True when any parent is one of the folders. */
 export function inFolders(parents = [], folders = []) {
@@ -19,9 +20,10 @@ export function inFolders(parents = [], folders = []) {
 
 /**
  * The same Drive provider, but download / shareAnyone / renameFile first check
- * the file's parents against folders() (an async list, read once).
+ * the file's parents against folders() (an async list, read once), and
+ * listFiles asks listOk(folderId) first when it is given.
  */
-export function guardDrive(drive, folders) {
+export function guardDrive(drive, folders, { listOk = null } = {}) {
   let list = null;
   const ok = new Set();
   async function check(fileId) {
@@ -41,7 +43,15 @@ export function guardDrive(drive, folders) {
     async download(id) { await check(id); return drive.download(id); },
     async shareAnyone(id) { await check(id); return drive.shareAnyone(id); },
     async renameFile(id, name) { await check(id); return drive.renameFile(id, name); },
+    async listFiles(folderId) {
+      if (listOk && !(await listOk(folderId))) {
+        const err = new Error(NOT_YOURS_FOLDER);
+        err.status = 404;
+        throw err;
+      }
+      return drive.listFiles(folderId);
+    },
   };
 }
 
-export default { inFolders, guardDrive, NOT_YOURS };
+export default { inFolders, guardDrive, NOT_YOURS, NOT_YOURS_FOLDER };

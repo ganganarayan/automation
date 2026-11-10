@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { inFolders, guardDrive, NOT_YOURS } from '../src/utils/driveGuard.js';
+import { inFolders, guardDrive, NOT_YOURS, NOT_YOURS_FOLDER } from '../src/utils/driveGuard.js';
 import { costSplit, ownerOn } from '../src/utils/costUsageView.js';
 import { ownerOf } from '../src/services/usageMeter.js';
 
@@ -28,8 +28,11 @@ describe('Drive guard on the shared service account', () => {
     await expect(g.renameFile('theirs', 'x')).rejects.toThrow(NOT_YOURS);
     expect(calls).not.toContain('theirs');
   });
-  it('other methods pass through', () => {
-    expect(typeof g.listFiles).toBe('function');
+  it('listing asks listOk first when given', async () => {
+    const lg = guardDrive(drive, async () => ['F1'], { listOk: async (f) => f !== 'OWNER' });
+    await expect(lg.listFiles('OWNER')).rejects.toThrow(NOT_YOURS_FOLDER);
+    expect(await lg.listFiles('F1')).toEqual([]);
+    expect(await g.listFiles('anything')).toEqual([]);
   });
 });
 

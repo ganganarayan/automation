@@ -38,7 +38,8 @@ import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { createTranscriptProvider } from '../providers/transcriptProvider.js';
 import { createFfmpegProvider } from '../providers/ffmpegProvider.js';
 import { createGoogleDriveProvider } from '../providers/storageProvider.js';
-import { guardDrive } from '../utils/driveGuard.js';
+import { guardDrive, NOT_YOURS_FOLDER } from '../utils/driveGuard.js';
+import * as tenantSettings from '../core/tenantSettings.js';
 import { driveFolderTenants } from '../repositories/ownershipRepository.js';
 import { createPublicDriveProvider, publicDlUrl } from '../providers/publicDriveProvider.js';
 import * as captureRules from './captureRules.js';
@@ -121,7 +122,10 @@ function driveFor(providers, accessToken) {
   const g = providers.resolved.google || {};
   if (!g.serviceAccount) return createPublicDriveProvider(log);
   // The platform's shared service account: only files in this tenant's folders.
-  if (g.serviceAccountShared) return guardDrive(providers.storage, () => tenantFolders(providers.resolved));
+  if (g.serviceAccountShared) {
+    const tenantId = providers.resolved.tenantId || 'default';
+    return guardDrive(providers.storage, () => tenantFolders(providers.resolved), { listOk: async (f) => !(await foreignFolder(f, tenantId)) });
+  }
   return providers.storage;
 }
 
@@ -133,7 +137,30 @@ async function tenantFolders(resolved) {
     out.push(cfg.direct_drive_folder, cfg.drive_folder_id);
     for (const src of await sourcesRepo.listByFunnel(f.id).catch(() => [])) if (String(src.type || '').includes('drive')) out.push(src.ref);
   }
-  return out.map((x) => parseDriveFolderId(String(x || '')) || String(x || '').trim()).filter(Boolean);
+  const ids = [...new Set(out.map(folderIdOf).filter(Boolean))];
+  // A folder typed into a funnel field is still refused when it is someone else's.
+  const mine = [];
+  for (const id of ids) if (!(await foreignFolder(id, resolved.tenantId || 'default'))) mine.push(id);
+  return mine;
+}
+
+const folderIdOf = (x) => parseDriveFolderId(String(x || '')) || String(x || '').trim();
+
+/**
+ * True when a folder is another workspace's: another tenant's funnel uses it,
+ * or it is one of the owner's own Drive folders (Settings or env). Fails closed.
+ */
+async function foreignFolder(folder, tenantId = 'default') {
+  const id = folderIdOf(folder);
+  if (!id || String(tenantId) === 'default') return false;
+  try {
+    const users = await driveFolderTenants(id);
+    if (users.some((t) => t !== String(tenantId))) return true;
+    const ownerDrive = { ...settings.drive, ...((await tenantSettings.forTenant('default')).drive || {}) };
+    return Object.values(ownerDrive).map(folderIdOf).filter(Boolean).includes(id);
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -159,12 +186,9 @@ export async function listReadyVideos({ tenantId = 'default', funnelId, folder: 
     return { ...base, folder: '', picked: true, videos: picked, drafts, comparison: await comparisonState({ funnel, videos: picked, drafts }) };
   }
   if (!folder) return { ...base, videos: [] };
-  // On the platform's shared service account a pasted folder another tenant
-  // already uses is refused (that account can open it, this tenant may not).
-  if (override && g.serviceAccountShared) {
-    const users = await driveFolderTenants(parseDriveFolderId(override) || override).catch(() => []);
-    if (users.some((t) => t !== String(funnel.tenant_id))) return { ...base, videos: [], listError: 'That folder belongs to another workspace.' };
-  }
+  // On the platform's shared service account a folder that is another
+  // workspace's (pasted or typed into the funnel) is refused.
+  if (g.serviceAccountShared && (await foreignFolder(folder, funnel.tenant_id))) return { ...base, videos: [], listError: NOT_YOURS_FOLDER };
   let files;
   try {
     files = await driveFor(providers, '').listFiles(folder);
