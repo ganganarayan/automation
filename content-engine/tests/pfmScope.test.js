@@ -197,6 +197,6 @@ describe('usage per tenant', () => {
     expect(html).toContain('10-2026');
     expect(html).toContain('$2.50'); // acme: 10 of 40
     expect(html).toContain('own Post for Me key');
-    expect(html).not.toContain('2014');
+    expect(html).not.toContain(String.fromCharCode(0x2014));
   });
 });
