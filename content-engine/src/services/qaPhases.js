@@ -242,4 +242,45 @@ export async function sharedChecks(tenantId, mine, owner) {
   return out;
 }
 
-export default { EXPIRED_ID, doorChecks, leakChecks, lifecycleChecks, billingChecks, ledgerCheck, sharedChecks };
+// ---- the real front door: HTTP through every middleware, as a stranger ------------
+
+/**
+ * Loopback requests to this server with no cookie and no key: admin pages, a QA
+ * workspace's pages, the QA check itself and a job route must all turn it away.
+ * Nothing here can change anything: every request is refused before any work.
+ */
+export async function httpChecks(tenantId, port) {
+  const G = 'HTTP front door';
+  const base = `http://127.0.0.1:${port}`;
+  const hit = async (method, path, headers = {}) => {
+    const res = await fetch(base + path, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: method === 'POST' ? '{}' : undefined, redirect: 'manual', signal: AbortSignal.timeout(15_000) });
+    return { status: res.status, to: res.headers.get('location') || '' };
+  };
+  const turnedAway = (r) => r.status === 401 || r.status === 403 || ((r.status === 302 || r.status === 303) && /login/.test(r.to));
+  const cases = [
+    ['Your settings page', 'GET', '/api/v1/admin/settings', {}],
+    ['QA settings by path', 'GET', `/t/${tenantId}/api/v1/admin/settings`, {}],
+    ['QA settings by header', 'GET', '/api/v1/admin/settings', { 'X-Tenant': tenantId }],
+    ['Make a funnel', 'POST', `/t/${tenantId}/api/v1/admin/funnels`, {}],
+    ['Run the QA check', 'POST', '/api/v1/admin/qa/run', {}],
+    ['Make a tenant', 'POST', '/api/v1/admin/tenants/new', {}],
+    ['Wake the router', 'POST', '/api/v1/jobs/router-check', {}],
+    ['Wrong machine key', 'POST', '/api/v1/jobs/router-check', { 'X-Admin-Key': 'qa-wrong-key' }],
+  ];
+  const out = [];
+  for (const [name, method, path, headers] of cases) {
+    try {
+      const r = await hit(method, path, headers);
+      out.push(check(G, `Stranger: ${name}`, turnedAway(r) ? 'ok' : 'fail', turnedAway(r) ? `turned away (${r.status}${r.to ? ' to sign-in' : ''})` : `got ${r.status} ${r.to}`));
+    } catch (err) { out.push(check(G, `Stranger: ${name}`, 'warn', errText(err))); }
+  }
+  for (const path of ['/health', '/ready', '/api/version']) {
+    try {
+      const r = await hit('GET', path);
+      out.push(check(G, `Open: ${path}`, r.status === 200 ? 'ok' : 'fail', `answered ${r.status}`));
+    } catch (err) { out.push(check(G, `Open: ${path}`, 'fail', errText(err))); }
+  }
+  return out;
+}
+
+export default { EXPIRED_ID, doorChecks, leakChecks, lifecycleChecks, billingChecks, ledgerCheck, sharedChecks, httpChecks };

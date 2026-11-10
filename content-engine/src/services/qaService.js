@@ -21,6 +21,7 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as tenantSettings from '../core/tenantSettings.js';
+import { settings } from '../settings/index.js';
 import { ping } from '../core/db.js';
 import { buildProviders } from './providerFactory.js';
 import * as planService from './planService.js';
@@ -214,6 +215,7 @@ export async function run(tenantId, { paid = false } = {}) {
   checks.push(...lifeOut);
   checks.push(...(await phases.billingChecks(id, mine, plan)));
   checks.push(...(await phases.sharedChecks(id, mine, owner)));
+  checks.push(...(await phases.httpChecks(id, settings.port)));
   checks.push(...(await keyPings(mine)));
   let spent = [];
   if (paid) {
