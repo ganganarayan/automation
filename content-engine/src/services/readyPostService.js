@@ -576,7 +576,7 @@ export async function generateThumbnail({ tenantId = 'default', funnelId, driveI
 async function renderThumbs({ providers, platforms, base, text, sub = '', tag = '', draw = null, costs = [] }) {
   const postformeKey = providers.resolved.postformeKey || '';
   if (!postformeKey) throw new Error('No Post for Me API key, set it under Setup → Keys and credit');
-  const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
+  const publish = createPostForMeProvider({ apiKey: postformeKey, scope: providers.resolved.postformeScope }, log);
   const thumbs = {};
   const sizes = [];
   const wanted = Object.entries(THUMB_SIZES).filter(([size]) => platforms.some((k) => PLATFORM_SIZE[k] === size));
@@ -888,7 +888,7 @@ async function runClean({ funnel, providers, driveId, opts, name, source, onPhas
       onProgress: (sec) => onPhase({ pct: progressPct(sec, outSec), doneSec: Math.round(sec) }),
     });
     onPhase({ phase: 'uploading', pct: 100 });
-    const url = await createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log).uploadFile(outPath, 'video/mp4');
+    const url = await createPostForMeProvider({ apiKey: providers.resolved.postformeKey, scope: providers.resolved.postformeScope }, log).uploadFile(outPath, 'video/mp4');
     const clean = { url, ...opts, durationSec: Math.round((keepSec || total) + (opts.endSec || 0)), at: new Date().toISOString() };
     await saveClean(funnel, driveId, clean, { name, source });
     log.info({ driveId, ...opts, seconds: Math.round((Date.now() - t0) / 1000) }, 'video cleaned + uploaded');
@@ -1178,7 +1178,7 @@ async function fixOne(row, opts) {
   if (at.getTime() - Date.now() < FIX_MARGIN_MS) return { outcome: 'failed', title, error: 'it goes out in under 5 minutes, left as it is' };
 
   const providers = await buildProviders(row.tenant_id);
-  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '', scope: providers.resolved.postformeScope }, log);
   const req = pub.request && pub.request.mediaUrl ? pub.request : requestFromPost(await publish.getPost(refs[0]).catch(() => null));
   if (!req || !req.mediaUrl) return { outcome: 'failed', title, error: 'could not read the post from Post for Me' };
   const plan = cleanFixPlan({ mediaUrl: req.mediaUrl, clean: video.clean, opts });
@@ -1416,7 +1416,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
   if (!postformeKey) throw new Error('No Post for Me API key, set it once under Setup → Keys and credit');
   const accounts = Array.isArray(resolved.accounts) ? resolved.accounts : [];
   if (!accounts.length) throw new Error('No accounts ticked: tick the accounts to post to (top of this page)');
-  const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
+  const publish = createPostForMeProvider({ apiKey: postformeKey, scope: providers.resolved.postformeScope }, log);
 
   // YouTube needs a title. When any selected account is a YouTube one and the
   // funnel has a direct_yt_title, pass it as a per-platform configuration (the
@@ -1634,7 +1634,7 @@ export async function refreshScheduled({ tenantId = 'default' } = {}) {
   if (!rows.length) return 0;
   const providers = await buildProviders(tenantId);
   if (!providers.resolved.postformeKey) return 0;
-  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log);
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey, scope: providers.resolved.postformeScope }, log);
   // The webhook is what wakes a sleeping app when a post goes live.
   await firstComment.ensureWebhook(tenantId, publish).catch(() => false);
   let changed = 0;
@@ -1728,7 +1728,7 @@ async function fillMissingLinks({ tenantId = 'default' } = {}) {
   if (!rows.length) return;
   const providers = await buildProviders(tenantId);
   if (!providers.resolved.postformeKey) return;
-  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log);
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey, scope: providers.resolved.postformeScope }, log);
   for (const row of rows) {
     try {
       const refs = (Array.isArray(row.post_refs) ? row.post_refs : JSON.parse(row.post_refs || '[]')).filter(Boolean);
@@ -1779,7 +1779,7 @@ export async function retryFailed({ instanceId, auto = false }) {
   const failed = (pub.channels || []).filter((c) => c.state === 'failed');
   if (!failed.length) throw new Error('no failed channels to retry');
   const providers = await buildProviders(row.tenant_id);
-  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '', scope: providers.resolved.postformeScope }, log);
   const oldRefs = Array.isArray(row.post_refs) ? row.post_refs : JSON.parse(row.post_refs || '[]');
   // Posts made before requests were saved: read the original back from Post for Me.
   let req = pub.request && pub.request.mediaUrl ? pub.request : null;
@@ -1894,7 +1894,7 @@ export async function unscheduleInstance({ instanceId }) {
   const refs = (Array.isArray(row.post_refs) ? row.post_refs : JSON.parse(row.post_refs || '[]')).filter(Boolean);
   if (row.status === 'scheduled' && refs.length) {
     const providers = await buildProviders(row.tenant_id);
-    const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+    const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '', scope: providers.resolved.postformeScope }, log);
     for (const ref of refs) {
       const post = await publish.getPost(ref).catch(() => null);
       if (post && ['processing', 'processed'].includes(post.status)) throw new Error('Post for Me is already publishing this post, it can no longer be edited');

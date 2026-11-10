@@ -71,7 +71,7 @@ export const CONFIG_MANIFEST = {
       {
         title: 'Publishing & video',
         fields: [
-          { key: 'postforme_api_key', label: 'Post for Me API key', type: 'secret', help: 'One key for every funnel. Each funnel still picks which connected accounts it posts to.' },
+          { key: 'postforme_api_key', label: 'Post for Me API key', type: 'secret', help: 'One key for every funnel. Leave it blank to post through the shared Post for Me account; connect accounts with Connect an account on a funnel. Each funnel still picks which connected accounts it posts to.' },
           { key: 'json2video_api_key', label: 'JSON2Video API key', type: 'secret' },
         ],
       },

@@ -355,7 +355,7 @@ export async function postInstance({ instanceId, captionOverride = '' }) {
 
   const accountIds = Array.isArray(resolved.accounts) ? resolved.accounts : [];
   const postformeKey = providers.resolved.postformeKey || '';
-  const publish = createPostForMeProvider({ apiKey: postformeKey }, log);
+  const publish = createPostForMeProvider({ apiKey: postformeKey, scope: providers.resolved.postformeScope }, log);
 
   // A GitHub-assembled reel is already public (and not the service account's to share).
   await providers.storage.shareAnyone(videoId).catch((err) => log.warn({ err: err.message, videoId }, 'share failed (assumed already public)'));

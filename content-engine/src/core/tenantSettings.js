@@ -10,6 +10,8 @@
 import { settings } from '../settings/index.js';
 import { DEFAULT_MAIL_PROVIDER } from '../utils/mailApis.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
+import * as tenantRepo from '../repositories/tenantRepository.js';
+import { scopeFor, OWNER_TENANT } from '../utils/pfmScope.js';
 
 const CACHE_TTL_MS = 60_000;
 const cache = new Map();
@@ -27,7 +29,37 @@ async function loadOverrides(tenantId) {
   return map;
 }
 
+// Every tenant id but the owner's, for the shared Post for Me key (null = unknown: fail closed).
+let tenantIds = null;
+async function otherTenantIds() {
+  if (tenantIds && Date.now() - tenantIds.at < CACHE_TTL_MS) return tenantIds.ids;
+  try {
+    const ids = (await tenantRepo.list()).map((t) => String(t.id)).filter((id) => id !== OWNER_TENANT);
+    tenantIds = { at: Date.now(), ids };
+    return ids;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The Post for Me key a tenant posts with and its scope. A tenant with a key of
+ * its own uses it (scope null, the whole account is its own). Otherwise it uses
+ * the owner's shared key (set on the default tenant by the super admin) and only
+ * ever sees accounts connected with its own external_id.
+ */
+export async function postformeFor(tenantId, o) {
+  const id = String(tenantId || OWNER_TENANT);
+  const ownKey = String((o && o.postforme_api_key) || '').trim();
+  const ownerO = id === OWNER_TENANT ? o : await loadOverrides(OWNER_TENANT);
+  const ownerKey = String((ownerO && ownerO.postforme_api_key) || settings.postforme.apiKey || '').trim();
+  const key = id === OWNER_TENANT ? ownerKey : (ownKey || ownerKey);
+  const scope = key ? scopeFor({ tenantId: id, ownKey: id === OWNER_TENANT ? '' : ownKey, ownerKey, ownerTenant: OWNER_TENANT, otherTenants: id === OWNER_TENANT ? await otherTenantIds() : null }) : null;
+  return { key, scope, shared: !!scope && key === ownerKey };
+}
+
 export function invalidate(tenantId) {
+  tenantIds = null;
   if (tenantId) cache.delete(tenantId);
   else cache.clear();
 }
@@ -66,6 +98,7 @@ const parseJson = (v, fallback) => {
 export async function forTenant(tenantId = 'default') {
   const o = await loadOverrides(tenantId);
   const pick = (key, fallback) => (o[key] !== undefined && o[key] !== null && o[key] !== '' ? o[key] : fallback);
+  const pfm = await postformeFor(tenantId, o);
 
   return {
     tenantId,
@@ -133,7 +166,10 @@ export async function forTenant(tenantId = 'default') {
       apiKey: pick('gemini_api_key', settings.gemini.apiKey),
       imageModel: pick('gemini_image_model', settings.gemini.imageModel),
     },
-    postformeKey: pick('postforme_api_key', settings.postforme.apiKey),
+    // Post for Me: the tenant's own key, else the owner's shared one (see postformeFor).
+    postformeKey: pfm.key,
+    postformeScope: pfm.scope,
+    postformeShared: pfm.shared,
     // Central provider credentials (API Keys page). Funnels pick the provider;
     // the key is always taken from here, never from funnel_config.
     animation: {

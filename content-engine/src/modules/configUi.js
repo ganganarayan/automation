@@ -59,6 +59,8 @@ import { keyOk, gateState, currentSession } from '../services/accessService.js';
 import * as wakeSchedule from '../services/wakeScheduleService.js';
 import * as cloudflareWake from '../services/cloudflareWakeService.js';
 import { DAILY_KEY, dailyTimeOf } from '../utils/cloudflareWake.js';
+import { usageBox } from '../utils/pfmUsageView.js';
+import * as instanceUsage from '../repositories/instanceRepository.js';
 import { stockForTenant } from '../services/funnelStockService.js';
 import { REFILL_BELOW } from '../utils/routerSpec.js';
 
@@ -83,8 +85,17 @@ export function register(ctx) {
       for (const f of funnelList) funnelConfigs[f.id] = await funnels.getConfig(f.id).catch(() => ({}));
       const superAdmin = !!(session && session.role === 'super_admin');
       const tenantList = superAdmin ? await tenantRepo.listWithSubscription().catch(() => []) : [];
+      const postUsage = superAdmin ? await instanceUsage.postUsage({ months: 3 }).catch(() => null) : null;
+      // Who posts on a Post for Me key of its own (so is not on the owner's bill).
+      const ownKeyIds = [];
+      if (superAdmin) {
+        for (const t of tenantList) {
+          const r = await tenantSettings.forTenant(t.id).catch(() => null);
+          if (r && r.postformeKey && !r.postformeShared) ownKeyIds.push(String(t.id));
+        }
+      }
       res.type('html').send(
-        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', session, key: '', saved: req.query.saved, superAdmin, tenantList }),
+        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', session, key: '', saved: req.query.saved, superAdmin, tenantList, postUsage, ownKeyIds }),
       );
     } catch (err) {
       next(err);
@@ -270,16 +281,33 @@ export function register(ctx) {
   router.post('/admin/funnels/fetch-accounts', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      let apiKey = (req.body?.api_key || '').toString().trim();
-      if (!apiKey) {
-        // The Post for Me key is central now (Keys and credit), not per funnel.
-        const t = await tenantSettings.forTenant(req.tenantId);
-        apiKey = t.postformeKey || '';
-      }
-      if (!apiKey) return res.json({ ok: false, error: 'No Post for Me API key, set it once under Keys and credit, then come back and Fetch.' });
-      const provider = createPostForMeProvider({ apiKey }, log);
+      const typed = (req.body?.api_key || '').toString().trim();
+      // The Post for Me key is central (Keys and credit), else the owner's shared one.
+      const t = typed
+        ? await tenantSettings.postformeFor(req.tenantId, { postforme_api_key: typed })
+        : await tenantSettings.forTenant(req.tenantId).then((r) => ({ key: r.postformeKey, scope: r.postformeScope }));
+      if (!t.key) return res.json({ ok: false, error: 'No Post for Me API key, set it once under Keys and credit, then come back and Fetch.' });
+      const provider = createPostForMeProvider({ apiKey: t.key, scope: t.scope }, log);
       const data = await provider.listAccounts();
-      return res.json({ ok: true, accounts: normalizeAccounts(data) });
+      return res.json({ ok: true, accounts: normalizeAccounts(data), shared: !!t.scope && !t.scope.owner });
+    } catch (err) {
+      return res.json({ ok: false, error: err.message });
+    }
+  });
+
+  // A link that connects a social account to this workspace. On the owner's
+  // shared Post for Me key it carries this tenant's external_id, so the account
+  // shows up for this tenant only.
+  router.post('/admin/funnels/connect-url', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const platform = String(req.body?.platform || '').trim().toLowerCase();
+      if (!PFM_PLATFORMS.includes(platform)) return res.json({ ok: false, error: 'Pick a platform' });
+      const t = await tenantSettings.forTenant(req.tenantId);
+      if (!t.postformeKey) return res.json({ ok: false, error: 'No Post for Me key yet. The owner sets the shared one, or set your own under Keys and credit.' });
+      const provider = createPostForMeProvider({ apiKey: t.postformeKey, scope: t.postformeScope }, log);
+      const out = await provider.authUrl({ platform });
+      return res.json({ ok: true, url: out.url });
     } catch (err) {
       return res.json({ ok: false, error: err.message });
     }
@@ -621,7 +649,7 @@ function creditPanel() {
   </fieldset>`;
 }
 
-function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, session = null, key, saved, superAdmin = false, tenantList = [] }) {
+function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, session = null, key, saved, superAdmin = false, tenantList = [], postUsage = null, ownKeyIds = [] }) {
   const menu = navHtml({ key, tabs: true, superAdmin, session });
 
   // Said once, on the two panels with plain config fields (not under every panel).
@@ -727,7 +755,7 @@ ${NAV_CSS}
     ${saved ? `<div class="flash">Saved <b>${esc(saved)}</b>.</div>` : ''}
     <div id="flash-error" class="flash err" style="display:none"></div>
 
-    ${superAdmin ? tenantsPanel({ tenantList }) : ''}
+    ${superAdmin ? tenantsPanel({ tenantList, postUsage, ownKeyIds }) : ''}
     ${usersPanel({ userList, me })}
     ${funnelsPanel({ funnelList, funnelConfigs, tenantId, key })}
     ${appSections}
@@ -919,7 +947,7 @@ ${NAV_CSS}
 </script>`;
 }
 
-function tenantsPanel({ tenantList }) {
+function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [] }) {
   const rows = (tenantList || [])
     .map((t, i) => {
       // The date input wants YYYY-MM-DD; the expiry is the end of that IST day.
@@ -947,6 +975,7 @@ function tenantsPanel({ tenantList }) {
       <table><thead><tr><th>Tenant</th><th>Email</th><th>Phone</th><th>Subscribed</th><th>Expires</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="5" class="hint">No tenants yet.</td></tr>'}</tbody></table>
     </fieldset>
+    ${usageBox(tenantList, postUsage, new Date(), ownKeyIds)}
     ${wakerBox()}
   </section>`;
 }
@@ -1697,11 +1726,35 @@ function pfmAccountsRow(cfg, fid) {
       <button type="button" class="act" onclick="fetchPfm('${fid}')">↻ Fetch accounts from Post for Me</button>
       <span id="pfmstatus-${fid}" class="hint"></span>
     </div>
+    <div class="row" style="gap:.4rem;align-items:center;margin-top:.4rem">
+      <select id="pfmplat-${fid}">${PFM_PLATFORMS.map((p) => `<option value="${p}">${esc(PFM_PLATFORM_LABELS[p] || p)}</option>`).join('')}</select>
+      <button type="button" class="act" onclick="connectPfm('${fid}')">🔗 Connect an account</button>
+      <span id="pfmconn-${fid}" class="hint"></span>
+    </div>
+    <script>
+      window.connectPfm = window.connectPfm || async function(fid){
+        const st=document.getElementById('pfmconn-'+fid);
+        const platform=(document.getElementById('pfmplat-'+fid)||{}).value||'';
+        st.textContent='Getting the link…'; st.style.color='';
+        try{
+          const h={'Content-Type':'application/json'}; if(typeof KEY!=='undefined'&&KEY) h['X-Admin-Key']=KEY;
+          const r=await fetch('/api/v1/admin/funnels/connect-url',{method:'POST',headers:h,body:JSON.stringify({platform})});
+          const j=await r.json();
+          if(!j.ok||!j.url){ st.textContent='🔴 '+(j.error||'failed'); st.style.color='#ff9a9a'; return; }
+          window.open(j.url,'_blank','noopener');
+          st.textContent='🟢 Sign in on the new tab, then press Fetch accounts.'; st.style.color='#5bd08a';
+        }catch(e){ st.textContent='🔴 '+(e.message||'failed'); st.style.color='#ff9a9a'; }
+      };
+    </script>
     <div id="pfmlist-${fid}" class="acctlist">${pre || '<span class="hint">No accounts yet: click Fetch (uses the Post for Me key from Keys and credit) and tick the accounts.</span>'}</div>
     <input type="hidden" id="pfmaccts-${fid}" name="set[postforme_accounts]" value="${esc(JSON.stringify(ids))}">
     <input type="hidden" id="pfmmap-${fid}" name="set[account_map]" value="${esc(JSON.stringify(map))}">
     <p class="hint">One click: no JSON. Tick the accounts this funnel posts to.</p></div>`;
 }
+
+// The platforms a connect link can be made for (Post for Me's platform names).
+const PFM_PLATFORMS = ['facebook', 'instagram', 'youtube', 'tiktok', 'tiktok_business', 'linkedin', 'x', 'threads', 'pinterest', 'bluesky'];
+const PFM_PLATFORM_LABELS = { facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', tiktok: 'TikTok', tiktok_business: 'TikTok Business', linkedin: 'LinkedIn', x: 'X', threads: 'Threads', pinterest: 'Pinterest', bluesky: 'Bluesky' };
 
 // Flatten Post for Me's list response into { id, platform, name } rows.
 function normalizeAccounts(data) {

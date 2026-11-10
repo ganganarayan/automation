@@ -105,7 +105,7 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog, skipped 
     const copy = copyFromCaption(text);
     if (!copy.description) throw new Error(`${side.caption.name} is empty`);
     const img = await drive.download(side.thumb.id);
-    const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+    const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '', scope: providers.resolved.postformeScope }, log);
     const url = await publish.uploadMedia(img, /\.png$/i.test(side.thumb.name) ? 'image/png' : 'image/jpeg');
     const instanceId = await schedule({ funnelId: funnel.id, video, copy, thumbs: thumbsForAll(url, Object.keys(PLATFORM_SIZE)), scheduledFor: at });
     log.info({ video: video.name, instance: instanceId }, 'ready video scheduled with its own thumbnail + caption');

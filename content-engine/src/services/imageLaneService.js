@@ -385,7 +385,7 @@ async function makeOnRailway(ctx) {
     if (voiceCfg.error) throw new Error(voiceCfg.error);
     const voice = await imageShort.makeVoice({ tts: voiceCfg.tts, text: script.captionFull || script.captionShort || '', log });
     chars = voice.chars;
-    const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+    const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '', scope: providers.resolved.postformeScope }, log);
     const images = Object.fromEntries(Object.keys(IMAGE_VIDEO_SIZES).map((s) => [s, sized[s] || sized.feed]));
     const volCfg = await funnels.getConfig(f.id).catch(() => ({}));
     const made2 = await imageShort.renderVideos({
@@ -720,7 +720,7 @@ export async function approve(approval) {
   const postAt = postAtFor(row.scheduled_for); // D2: null = it's late, post now
   const configs = buildPlatformConfigs(full, short);
   const req = { caption: short || full, mediaUrl: (img.image || {}).url || p.mediaUrl, ...(configs ? { platformConfigurations: configs } : {}) };
-  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '', scope: providers.resolved.postformeScope }, log);
   const ytConfig = { title: shortTitle(row.title, short || full), caption: full || short };
   // Default: every channel gets a video of the picture with music and the
   // caption read in the funnel's voice. No voice = nothing is posted.

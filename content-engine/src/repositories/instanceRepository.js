@@ -539,8 +539,39 @@ export async function festivalRows(tenantId = 'default', limit = 200) {
   return rows;
 }
 
+/**
+ * Successful Post for Me posts per tenant per IST month, from the app's own
+ * records: one per channel a post went live on (state 'ok' in the publish step,
+ * a later take-down still counts). Deleted runs that had posted count by their
+ * creation month. Returns [{ tenant_id, month: 'YYYY-MM', posts }].
+ */
+export async function postUsage({ months = 3 } = {}) {
+  const n = Math.max(1, Math.min(24, Number(months) || 3));
+  const okChannels = (t) => `(
+    SELECT count(*)::int FROM jsonb_array_elements(CASE WHEN jsonb_typeof(${t}.steps) = 'array' THEN ${t}.steps ELSE '[]'::jsonb END) s,
+      jsonb_array_elements(CASE WHEN jsonb_typeof(s->'artifacts'->'channels') = 'array' THEN s->'artifacts'->'channels' ELSE '[]'::jsonb END) c
+    WHERE s->>'key' = 'publish' AND c->>'state' = 'ok')`;
+  const { rows } = await query(
+    `WITH runs AS (
+       SELECT i.tenant_id, i.posted_at AS at, ${okChannels('i')} AS posts
+         FROM instances i WHERE i.posted_at IS NOT NULL
+       UNION ALL
+       SELECT d.tenant_id, d.created_at AS at, ${okChannels('d')} AS posts
+         FROM deleted_instances d WHERE d.status IN ('posted', 'partial')
+     )
+     SELECT tenant_id, to_char((at AT TIME ZONE 'UTC') + interval '330 minutes', 'YYYY-MM') AS month, sum(posts)::int AS posts
+       FROM runs
+      WHERE at >= ((date_trunc('month', (now() AT TIME ZONE 'UTC') + interval '330 minutes') - make_interval(months => $1::int - 1) - interval '330 minutes') AT TIME ZONE 'UTC')
+      GROUP BY 1, 2
+     HAVING sum(posts) > 0
+      ORDER BY 2 DESC, 1`,
+    [n],
+  );
+  return rows;
+}
+
 export default {
-  festivalRows,
+  festivalRows, postUsage,
   create, get, list, logRows, saveSteps, setStatus, transition, setMeta, setSource, bumpRound, lockAsPosted, markScheduled, markPartial, moveFunnel, unschedule, scheduledDue, retryDue, setPostStatus, markPosting, markPostFailed, remove,
   existsForFunnelOnDate, videoOnDate, postedDriveIds, draftsByDriveIds, liveOnDate, openSheetRefs, recentForFunnel,
   routerHeldDriveIds, releaseSlot, supersede, missingLinks, saveLinks, logAttempt,

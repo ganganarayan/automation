@@ -20,10 +20,11 @@ import { timingSafeEqual } from 'node:crypto';
 import * as repo from '../repositories/firstCommentsRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { buildProviders } from './providerFactory.js';
-import { createPostForMeProvider } from '../providers/publishProvider.js';
+import { createPostForMeProvider, NotYourAccountError } from '../providers/publishProvider.js';
 import { createFirstCommentSenders, commentPlatform, dmOnly } from './firstCommentSenders.js';
 import * as captureConfig from './captureConfig.js';
 import { postOutcome } from '../utils/laneSpec.js';
+import { hookTenant, webhookMayAct } from '../utils/pfmScope.js';
 import { settings } from '../settings/index.js';
 import { childLogger } from '../core/logger.js';
 
@@ -82,10 +83,13 @@ async function commentOn(publish, row, r, attempts) {
   const accountId = r && r.social_account_id;
   // A failed channel gets no comment; its retry is a new post with its own job.
   if (!r || !r.success || !accountId) return null;
+  // The shared key: another tenant's channel is never claimed or commented.
+  const account0 = publish.scope ? await publish.getAccount(accountId).catch((e) => (e instanceof NotYourAccountError ? null : undefined)) : undefined;
+  if (account0 === null) return null;
   if (!(await repo.claim(row.id, accountId))) return null;
   let platform = '';
   try {
-    const account = await publish.getAccount(accountId);
+    const account = account0 || await publish.getAccount(accountId);
     platform = (account && account.platform) || '';
     if (dmOnly(platform)) {
       await repo.mark(row.id, accountId, { state: 'skipped', platform, error: 'Instagram sends the link by comment-to-DM' });
@@ -119,7 +123,7 @@ export async function runDue({ tenantId = 'default' } = {}) {
   if (!rows.length) return 0;
   const providers = await buildProviders(tenantId);
   if (!providers.resolved.postformeKey) return 0;
-  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey }, log);
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey, scope: providers.resolved.postformeScope }, log);
   await ensureWebhook(tenantId, publish);
   let sent = 0;
   for (const row of rows) {
@@ -167,6 +171,9 @@ export function webhookUrl(tenantId = 'default', base = settings.app.publicBaseU
  * app's URL changes). Its secret is kept in tenant_config to verify each call.
  */
 export async function ensureWebhook(tenantId, publish) {
+  // On the owner's shared key one webhook (the owner's) serves every tenant: a
+  // webhook per tenant would get every tenant's events.
+  tenantId = hookTenant(tenantId, publish && publish.scope);
   const url = webhookUrl(tenantId);
   if (!url) return false;
   try {
@@ -200,12 +207,17 @@ export async function onWebhook({ tenantId = 'default', event }) {
   if (!r.post_id || !r.success) return false;
   const row = await repo.getByPost(r.post_id);
   if (!row || row.status !== 'pending') return false;
-  const providers = await buildProviders(tenantId);
-  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '' }, log);
+  // Act as the job's own tenant, with its own scope (its accounts, its tokens).
+  const providers = await buildProviders(row.tenant_id || 'default');
+  if (!webhookMayAct({ hookTenantId: tenantId, rowTenantId: row.tenant_id, rowScope: providers.resolved.postformeScope })) {
+    log.warn({ hook: tenantId, row: row.tenant_id, post: r.post_id }, 'webhook for another tenant ignored');
+    return false;
+  }
+  const publish = createPostForMeProvider({ apiKey: providers.resolved.postformeKey || '', scope: providers.resolved.postformeScope }, log);
   const state = await commentOn(publish, row, r, 1);
   // The timer closes the job (and retries a retryable failure) on its next pass.
   await repo.finish(row.id, { status: 'pending', attempts: row.attempts || 0, nextAt: later(1) });
   return state === 'ok';
 }
 
-export default { queue, runDue, commentText, webhookUrl, ensureWebhook, verifyWebhook, onWebhook };
+export default { queue, runDue, commentText, webhookUrl, ensureWebhook, verifyWebhook, onWebhook, hookTenant, webhookMayAct };

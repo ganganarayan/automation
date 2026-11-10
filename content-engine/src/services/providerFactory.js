@@ -61,7 +61,7 @@ export async function buildProviders(tenantId = 'default') {
     llm: withImageRules(createLlmProvider({ openai: r.openai, gemini: r.gemini, globalSystem: r.prompts.global }, log), parseLessons(r.lessons && r.lessons.image)),
     // Only with a key in Settings; the Ready video copy falls back to llm without one.
     claude: r.claude.apiKey ? createClaudeProvider({ apiKey: r.claude.apiKey, model: r.claude.model, context: r.prompts.claudeContext, globalSystem: r.prompts.global }, log) : null,
-    publish: createPostForMeProvider({ apiKey: r.postformeKey }, log),
+    publish: createPostForMeProvider({ apiKey: r.postformeKey, scope: r.postformeScope }, log),
     video: createJson2VideoProvider(r.video, log),
 
     // Tenant-scoped: each tenant sends approval/status email through the
