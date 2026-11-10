@@ -69,6 +69,8 @@ import * as usageRepo from '../repositories/usageRepository.js';
 import * as instanceUsage from '../repositories/instanceRepository.js';
 import { stockForTenant } from '../services/funnelStockService.js';
 import { REFILL_BELOW } from '../utils/routerSpec.js';
+import * as qaService from '../services/qaService.js';
+import { isQaTenant } from '../utils/qaSpec.js';
 
 export function register(ctx) {
   const { router, log } = ctx;
@@ -501,6 +503,30 @@ export function register(ctx) {
       tenantSettings.invalidate();
       planService.invalidate();
       res.json({ ok: true, tenant: tenant.id, email, tempPassword, expires: expiresAt ? formatIst(expiresAt, { withTime: false }) : '' });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Super admin only: a qa-* workspace with no sign-in, for the QA check.
+  router.post('/admin/qa/tenant', async (req, res) => {
+    try {
+      if (!(await superOk(req))) return res.status(403).json({ ok: false, error: 'super admin only' });
+      const t = await qaService.createQaTenant({ id: req.body?.id, plan: req.body?.plan });
+      res.json({ ok: true, tenant: t.id, plan: t.plan });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Super admin only: run the QA check on a qa-* workspace (paid = a few cents of real calls).
+  router.post('/admin/qa/run', async (req, res) => {
+    try {
+      if (!(await superOk(req))) return res.status(403).json({ ok: false, error: 'super admin only' });
+      const tenant = String(req.body?.qa || '');
+      const report = await qaService.run(tenant, { paid: req.body?.paid === true || req.body?.paid === 'true' });
+      log.info({ tenant, verdict: report.verdict, spentUsd: report.spentUsd }, 'qa check');
+      res.json({ ok: true, ...report });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -1038,6 +1064,7 @@ function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [], aiCosts = 
         <tbody>${rows || '<tr><td colspan="6" class="hint">No tenants yet.</td></tr>'}</tbody></table>
     </fieldset>
     ${newTenantBox()}
+    ${qaBox(tenantList)}
     ${costBox(tenantList, aiCosts, new Date(), keyOwners)}
     ${usageBox(tenantList, postUsage, new Date(), ownKeyIds)}
     ${wakerBox()}
@@ -1072,6 +1099,53 @@ function newTenantBox() {
       async function savePlan(i, tenant, plan){
         try{ const r=await fetch('/api/v1/admin/tenants/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenant,plan})}); const j=await r.json(); if(!j.ok) throw new Error(j.error||'failed'); const f=document.getElementById('flag-p'+i); if(f){f.classList.add('show'); setTimeout(()=>f.classList.remove('show'),1500);} }
         catch(e){ alert('Could not change the plan: '+e.message); }
+      }
+    </script>
+  </fieldset>`;
+}
+
+/** Owner only: QA workspaces (no sign-in) and the in-app check that runs on this machine. */
+function qaBox(tenantList) {
+  const qa = (tenantList || []).filter((t) => isQaTenant(t.id));
+  const opts = qa.map((t) => '<option value="' + esc(t.id) + '">' + esc(t.id) + ' (' + esc(PLANS[t.plan || 'custom'] ? PLANS[t.plan || 'custom'].label : t.plan) + ')</option>').join('');
+  return `<fieldset><legend>QA check</legend>
+    <p class="hint">Tests the app on this server, as a QA workspace: ffmpeg, fonts, database, that it sees none of your settings, funnels or Post for Me accounts, its keys and plan limits. "With paid calls" also asks Claude and OpenAI for real (about 10 US cents) and turns the picture into a video. Nothing is posted or emailed. A QA workspace has no sign-in: open it as <b>/t/&lt;id&gt;/api/v1/admin/settings</b>. Set its expiry to a past date to switch it off.</p>
+    <div class="row" style="gap:.4rem;align-items:center;flex-wrap:wrap">
+      <input id="qa-id" placeholder="qa-starter" style="min-width:10rem">
+      <select id="qa-plan">${PLAN_IDS.map((p) => '<option value="' + p + '"' + (p === 'starter' ? ' selected' : '') + '>' + esc(PLANS[p].label) + '</option>').join('')}</select>
+      <button type="button" class="act" onclick="qaMake()">➕ Make QA workspace</button>
+    </div>
+    <div class="row" style="gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.4rem">
+      <select id="qa-pick">${opts || '<option value="">no QA workspace yet</option>'}</select>
+      <button type="button" class="act" onclick="qaRun(false)">▶ Run free checks</button>
+      <button type="button" class="act" onclick="qaRun(true)">💲 Run with paid calls</button>
+    </div>
+    <p id="qa-st" class="hint"></p>
+    <table id="qa-table" style="display:none"><thead><tr><th></th><th>Area</th><th>Check</th><th>Result</th></tr></thead><tbody id="qa-rows"></tbody></table>
+    <script>
+      async function qaPost(path, body){ const r=await fetch('/api/v1/admin/qa/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); return r.json(); }
+      async function qaMake(){
+        const st=document.getElementById('qa-st'); st.textContent='Making...';
+        try{ const j=await qaPost('tenant',{id:document.getElementById('qa-id').value.trim(),plan:document.getElementById('qa-plan').value});
+          if(!j.ok){ st.textContent='🔴 '+(j.error||'failed'); return; }
+          const sel=document.getElementById('qa-pick'); const o=document.createElement('option'); o.value=j.tenant; o.textContent=j.tenant+' ('+j.plan+')';
+          if(!sel.value) sel.innerHTML=''; sel.appendChild(o); sel.value=j.tenant; st.textContent='🟢 Made '+j.tenant+'. Run a check next.';
+        }catch(e){ st.textContent='🔴 '+e.message; }
+      }
+      async function qaRun(paid){
+        const st=document.getElementById('qa-st'); const qa=document.getElementById('qa-pick').value;
+        if(!qa){ st.textContent='🟡 Make a QA workspace first'; return; }
+        if(paid && !confirm('Spend about 10 US cents on real Claude and OpenAI calls for '+qa+'?')) return;
+        st.textContent='Checking '+qa+(paid?' with paid calls (up to a minute)':'')+'...';
+        try{ const j=await qaPost('run',{qa,paid});
+          if(!j.ok){ st.textContent='🔴 '+(j.error||'failed'); return; }
+          const dot={ok:'🟢',warn:'🟡',fail:'🔴',skip:'⚪'};
+          const e=(s)=>String(s==null?'':s).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+          document.getElementById('qa-rows').innerHTML=j.checks.map(c=>'<tr><td>'+dot[c.status]+'</td><td>'+e(c.group)+'</td><td>'+e(c.name)+'</td><td>'+e(c.detail)+'</td></tr>').join('');
+          document.getElementById('qa-table').style.display='';
+          const n=(s)=>j.checks.filter(c=>c.status===s).length;
+          st.textContent=dot[j.verdict]+' '+j.tenant+': '+n('ok')+' passed, '+n('warn')+' to look at, '+n('fail')+' failed'+(paid?', spent $'+j.spentUsd:'')+'.';
+        }catch(e){ st.textContent='🔴 '+e.message; }
       }
     </script>
   </fieldset>`;
