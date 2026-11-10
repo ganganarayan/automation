@@ -50,7 +50,12 @@ two workspaces at once: the second is told to wait.
 - Crons that only run default (delivery reports, LinkedIn relay, disapprove
   finalize) loop over every active tenant.
 
-## Phase 3: lifecycle (about 1 to 2 days)
+## Phase 3: lifecycle (🟢 on staging 10-11-2026, not tried with a real second tenant)
+
+Code: utils/planSpec.js, services/planService.js, migration 024 (tenants.plan,
+default custom = no limits). Limits are checked when a funnel is made, when accounts
+are ticked, when the router lines up a post or an AI video, and on Schedule/Post.
+Not enforced yet: the users limit (there is no add-user flow besides New tenant).
 
 - Enforce tenant status and expires_at on pages and on scheduled jobs
   (funnels.listActive, the waker's due tenants). An expired tenant gets a read-only page.

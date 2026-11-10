@@ -18,8 +18,17 @@
  */
 import { currentSession, adminKeyOk } from '../services/accessService.js';
 import * as ownership from '../repositories/ownershipRepository.js';
+import { tenantInfo } from '../services/planService.js';
 
 const OWNER = 'default';
+
+/** DD-MM-YYYY in IST (fixed +05:30), for the expired message. */
+export function istDate(at) {
+  const d = new Date(new Date(at).getTime() + 330 * 60000);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getUTCDate())}-${p(d.getUTCMonth() + 1)}-${d.getUTCFullYear()}`;
+}
 
 /** Body and query fields that name a record, and which table they point at. */
 export const RECORD_FIELDS = [
@@ -58,6 +67,21 @@ export function recordDecision({ recordTenant, tenantId, operator }) {
   return operator ? 'switch' : 'deny';
 }
 
+/** Sign-in pages stay open to an expired workspace (to sign out or change a password). */
+const ALWAYS_OPEN = /^\/admin\/(login|logout|password|signout|reset)(\/|$)/;
+
+/**
+ * An expired or suspended workspace may still look (GET) but not act: every
+ * other admin request is refused. 'ok' | 'refuse'.
+ */
+export function liveGate({ method = 'GET', path = '', live = true }) {
+  if (live) return 'ok';
+  const p = String(path || '');
+  if (!p.startsWith('/api/v1/admin/') && !p.startsWith('/admin/')) return 'ok';
+  if (ALWAYS_OPEN.test(p.replace(/^\/api\/v1/, ''))) return 'ok';
+  return String(method).toUpperCase() === 'GET' || String(method).toUpperCase() === 'HEAD' ? 'ok' : 'refuse';
+}
+
 /** The record ids a request names in its query and body: [[kind, id]]. */
 export function namedRecords(req) {
   const out = [];
@@ -92,6 +116,14 @@ export async function bindTenant(req, res, next) {
     if (d.refuse) return refuse(req, res, 403);
     req.tenantId = d.tenantId;
     req.tenantOperator = d.superAdmin || (!session && adminKeyOk(req));
+    // An expired or suspended workspace can look but not act.
+    if (session && !d.superAdmin) {
+      const info = await tenantInfo(d.tenantId).catch(() => ({ live: true }));
+      if (liveGate({ method: req.method, path: req.path, live: info.live }) === 'refuse') {
+        const when = info.expiresAt && info.reason === 'expired' ? ` on ${istDate(info.expiresAt)}` : '';
+        return res.status(402).json({ ok: false, error: `Your plan ended${when} (${info.reason}). You can still look around; ask the owner to renew to make changes.` });
+      }
+    }
     // Routes that read ?tenant= / body.tenant see the session's tenant too.
     if (session && !d.superAdmin) {
       if (req.query && 'tenant' in req.query) req.query.tenant = d.tenantId;
@@ -141,4 +173,4 @@ export async function guardParamId(req, res, next, id) {
   }
 }
 
-export default { bindTenant, guardRecords, guardParamId, decide, recordDecision, namedRecords, paramKind };
+export default { liveGate, bindTenant, guardRecords, guardParamId, decide, recordDecision, namedRecords, paramKind };

@@ -38,6 +38,7 @@ import * as heartbeat from '../core/heartbeat.js';
 import { routerTarget, runsOn, laneForInstance, existingReason, rerunAction, pickNextVideo, nudgeNeeded, NUDGE_TEXT } from '../utils/routerSpec.js';
 import { nowIst, formatIst, todayKeyIst } from '../utils/time.js';
 import { childLogger } from '../core/logger.js';
+import * as planService from './planService.js';
 
 const baseLog = childLogger({ module: 'router' });
 
@@ -66,6 +67,10 @@ export async function decideFunnel({ funnel, now = nowIst(), retryNone = false, 
   const existing = await instanceRepo.liveOnDate(funnel.id, postDate, funnel.tenant_id);
   if (existing) return record(laneForInstance(existing), existingReason(existing), existing.id);
 
+  // The plan: no post past its monthly posts (or an expired workspace).
+  const postBlock = await planService.limitReason(funnel.tenant_id, 'posts').catch(() => '');
+  if (postBlock) return record('none', `plan: ${postBlock}`);
+
   // Claim the day first so a parallel run can't double it, then try each lane.
   const day = await routerDays.claim({ ...base, lane: 'ready_video', reason: 'preparing' });
   if (!day) return { ...out, skipped: true, reason: 'decided by a parallel run' };
@@ -89,8 +94,10 @@ export async function decideFunnel({ funnel, now = nowIst(), retryNone = false, 
   } catch (err) {
     note('ready video', err);
   }
-  // Lane 2: a researched AI video (two approvals).
+  // Lane 2: a researched AI video (two approvals), within the plan's AI videos.
   try {
+    const aiBlock = await planService.limitReason(funnel.tenant_id, 'aiVideos').catch(() => '');
+    if (aiBlock) throw new Error(`plan: ${aiBlock}`);
     const inst = await aiLane.prepare({ funnelRow: funnel, scheduledFor, postDate, log: flog });
     return done('ai_video', 'AI video: script sent for approval', inst.id);
   } catch (err) {

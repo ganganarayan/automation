@@ -24,6 +24,7 @@
  *               utils/{readyPostSpec,reviewSpec,time}, logger.
  */
 import * as funnels from '../repositories/funnelsRepository.js';
+import * as planService from './planService.js';
 import * as instanceService from '../services/instanceService.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
 import * as stepLog from './stepLogService.js';
@@ -1561,6 +1562,10 @@ export async function startPost({ tenantId = 'default', funnelId, selections, ac
   const providers = await buildProviders(funnel.tenant_id || tenantId);
   const clean = normalizeSelections(selections);
   if (!clean.length) throw new Error('no videos selected');
+  // The plan: posts this month, and channels per funnel.
+  const planBlock = await planService.limitReason(funnel.tenant_id || tenantId, 'posts', { adding: clean.length })
+    || (Array.isArray(pickedAccounts) ? await planService.limitReason(funnel.tenant_id || tenantId, 'channels', { used: 0, adding: pickedAccounts.length }) : '');
+  if (planBlock) throw new Error(planBlock);
   if (!providers.resolved.postformeKey) throw new Error('No Post for Me API key, set it once under Setup → Keys and credit');
   if (!(Array.isArray(resolved.accounts) && resolved.accounts.length)) throw new Error('No accounts ticked: tick the accounts to post to (top of this page)');
   const busy = clean.filter((s) => (postJobs.get(jobKey(funnel.tenant_id || tenantId, s.driveId)) || {}).state === 'running');

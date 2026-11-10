@@ -34,9 +34,10 @@ const RAN_KEYS = ['router', 'nudge', 'relay'].map(ranKey);
 
 /** Every tenant's config map (the wake keys and last-run slots), with its id. */
 async function tenantConfigs() {
-  const list = await tenantRepo.list().catch(() => [{ id: 'default' }]);
+  // Live tenants only: an expired or suspended one is not woken.
+  const ids = await tenantRepo.activeIds().catch(() => ['default']);
   const out = [];
-  for (const t of list.length ? list : [{ id: 'default' }]) {
+  for (const t of (ids.length ? ids : ['default']).map((id) => ({ id }))) {
     const all = await tenantConfig.getAll(t.id).catch(() => ({}));
     out.push({ tenantId: t.id, cfg: Object.fromEntries([...WAKE_KEYS, ...RAN_KEYS].map((k) => [k, all[k]])) });
   }

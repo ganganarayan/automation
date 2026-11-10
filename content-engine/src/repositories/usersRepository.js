@@ -47,6 +47,30 @@ export async function ensure({ email, role = 'user' }) {
   return rows[0] || findByEmail(normalized);
 }
 
+/**
+ * A tenant's first user (super admin's New tenant form): an admin of that
+ * tenant who must choose a new password at first sign-in. Refuses an email
+ * that already has an account.
+ */
+export async function createForTenant({ email, tenantId, role = 'admin', passwordHash }) {
+  const normalized = String(email).trim().toLowerCase();
+  const { rows } = await query(
+    `INSERT INTO users (email, role, tenant_id, password_hash, must_change_password)
+     VALUES ($1, $2, $3, $4, true)
+     ON CONFLICT (email) DO NOTHING
+     RETURNING email, role, tenant_id`,
+    [normalized, role, tenantId, passwordHash],
+  );
+  if (!rows[0]) throw new Error('that email already has an account');
+  return rows[0];
+}
+
+/** How many users a tenant has. */
+export async function countForTenant(tenantId) {
+  const { rows } = await query('SELECT count(*)::int AS n FROM users WHERE tenant_id = $1', [tenantId]);
+  return rows[0].n;
+}
+
 /** Change a user's role. The super admin cannot be demoted. */
 export async function setRole(email, role) {
   const normalized = String(email).trim().toLowerCase();

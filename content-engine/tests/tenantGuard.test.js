@@ -7,12 +7,14 @@ vi.mock('../src/services/accessService.js', () => ({
   currentSession: async () => session,
   adminKeyOk: () => machine,
 }));
+let liveInfo = { live: true, reason: '', expiresAt: null };
+vi.mock('../src/services/planService.js', () => ({ tenantInfo: async () => liveInfo }));
 vi.mock('../src/repositories/ownershipRepository.js', () => ({
   validId: (kind, id) => (kind === 'instance' ? /^[0-9a-f-]{36}$/.test(String(id)) : /^\d+$/.test(String(id))),
   tenantOf: async (kind, id) => owners[`${kind}:${id}`] || null,
 }));
 
-const { decide, recordDecision, namedRecords, paramKind, bindTenant, guardRecords, guardParamId } = await import('../src/middleware/tenantGuard.js');
+const { liveGate, decide, recordDecision, namedRecords, paramKind, bindTenant, guardRecords, guardParamId } = await import('../src/middleware/tenantGuard.js');
 
 const INST = '11111111-2222-3333-4444-555555555555';
 
@@ -35,6 +37,7 @@ async function run(mw, req, ...extra) {
 }
 
 beforeEach(() => {
+  liveInfo = { live: true, reason: '', expiresAt: null };
   session = null;
   machine = false;
   for (const k of Object.keys(owners)) delete owners[k];
@@ -137,5 +140,29 @@ describe('record guards', () => {
   });
   it('an unknown id is left to the route (its own not found)', async () => {
     expect((await run(guardParamId, fakeReq({ path: '/admin/funnels/99/setup', tenantId: 'acme' }), '99')).passed).toBe(true);
+  });
+});
+
+describe('an expired workspace can look but not act', () => {
+  it('liveGate: GET ok, POST refused, sign-in pages open, non-admin paths untouched', () => {
+    expect(liveGate({ method: 'GET', path: '/api/v1/admin/settings', live: false })).toBe('ok');
+    expect(liveGate({ method: 'POST', path: '/api/v1/admin/funnels', live: false })).toBe('refuse');
+    expect(liveGate({ method: 'POST', path: '/api/v1/admin/logout', live: false })).toBe('ok');
+    expect(liveGate({ method: 'POST', path: '/api/v1/admin/password', live: false })).toBe('ok');
+    expect(liveGate({ method: 'POST', path: '/api/v1/webhook/postforme/acme', live: false })).toBe('ok');
+    expect(liveGate({ method: 'POST', path: '/api/v1/admin/funnels', live: true })).toBe('ok');
+  });
+  it('bindTenant answers 402 with the end date for an expired tenant admin', async () => {
+    session = { role: 'admin', tenantId: 'acme' };
+    liveInfo = { live: false, reason: 'expired', expiresAt: '2026-10-31T18:29:59Z' };
+    const { passed, res } = await run(bindTenant, fakeReq({ path: '/api/v1/admin/funnels' }));
+    expect(passed).toBe(false);
+    expect(res.statusCode).toBe(402);
+    expect(res.body.error).toContain('31-10-2026');
+  });
+  it('the super admin is never gated', async () => {
+    session = { role: 'super_admin', tenantId: 'default' };
+    liveInfo = { live: false, reason: 'expired', expiresAt: null };
+    expect((await run(bindTenant, fakeReq({ path: '/api/v1/admin/funnels' }))).passed).toBe(true);
   });
 });

@@ -18,7 +18,11 @@ export async function isActive(tenantId) {
 
 /** Every active tenant's id (background jobs loop over these). */
 export async function activeIds() {
-  const { rows } = await query("SELECT id FROM tenants WHERE status = 'active' ORDER BY (id = $1) DESC, created_at ASC", ['default']);
+  // Live only: active and not past its expiry (an expired tenant's jobs stop).
+  const { rows } = await query(
+    "SELECT id FROM tenants WHERE status = 'active' AND (expires_at IS NULL OR expires_at > now()) ORDER BY (id = $1) DESC, created_at ASC",
+    ['default'],
+  );
   return rows.map((r) => String(r.id));
 }
 
@@ -54,7 +58,7 @@ export async function create({ id, name }) {
 /** Every tenant with its subscription details (the super admin's Tenants list). */
 export async function listWithSubscription() {
   const { rows } = await query(
-    `SELECT id, name, status, owner_email, phone, COALESCE(subscribed_at, created_at) AS subscribed_at, expires_at
+    `SELECT id, name, status, plan, owner_email, phone, COALESCE(subscribed_at, created_at) AS subscribed_at, expires_at
        FROM tenants ORDER BY (id = $1) DESC, created_at ASC`,
     ['default'],
   );
@@ -67,4 +71,23 @@ export async function setExpiry(tenantId, expiresAt) {
   if (!rowCount) throw new Error('tenant not found');
 }
 
-export default { isActive, activeIds, findById, list, create, listWithSubscription, setExpiry };
+/** A new tenant with its details (super admin). Fails if the id is taken. */
+export async function createNew({ id, name, ownerEmail, phone = '', plan = 'custom', expiresAt = null }) {
+  const { rows } = await query(
+    `INSERT INTO tenants (id, name, status, owner_email, phone, plan, subscribed_at, expires_at)
+     VALUES ($1, $2, 'active', $3, $4, $5, now(), $6)
+     ON CONFLICT (id) DO NOTHING
+     RETURNING id, name, status, plan, owner_email, phone, subscribed_at, expires_at`,
+    [id, name || id, String(ownerEmail || '').trim().toLowerCase(), phone || null, plan, expiresAt],
+  );
+  if (!rows[0]) throw new Error('that workspace id is taken');
+  return rows[0];
+}
+
+/** Change a tenant's plan. */
+export async function setPlan(tenantId, plan) {
+  const { rowCount } = await query('UPDATE tenants SET plan = $2 WHERE id = $1', [tenantId, plan]);
+  if (!rowCount) throw new Error('tenant not found');
+}
+
+export default { createNew, setPlan, isActive, activeIds, findById, list, create, listWithSubscription, setExpiry };

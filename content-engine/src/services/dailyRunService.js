@@ -35,6 +35,13 @@ export async function claim(tenantId, now = nowIst()) {
 }
 
 async function runOne(tenantId) {
+  // An expired or suspended workspace runs nothing.
+  const planService = await import('./planService.js');
+  const info = await planService.tenantInfo(tenantId).catch(() => ({ live: true }));
+  if (!info.live) {
+    log.info({ tenantId, reason: info.reason }, 'daily run skipped: workspace not live');
+    return;
+  }
   // Imported here: these services pull in most of the app.
   const routerService = await import('./routerService.js');
   const relay = await import('./linkedinRelayService.js');

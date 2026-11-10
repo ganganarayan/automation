@@ -88,9 +88,19 @@ export async function listByTenant(tenantId = 'default') {
 /** All active funnels across tenants (for the daily cron). */
 export async function listActive() {
   const { rows } = await query(
-    'SELECT id, tenant_id, name, style, active FROM funnels WHERE active = true ORDER BY tenant_id, name',
+    // Only live tenants' funnels: an expired or suspended tenant posts nothing.
+    `SELECT f.id, f.tenant_id, f.name, f.style, f.active
+       FROM funnels f JOIN tenants t ON t.id = f.tenant_id
+      WHERE f.active = true AND t.status = 'active' AND (t.expires_at IS NULL OR t.expires_at > now())
+      ORDER BY f.tenant_id, f.name`,
   );
   return rows;
+}
+
+/** How many funnels a tenant has. */
+export async function countByTenant(tenantId) {
+  const { rows } = await query('SELECT count(*)::int AS n FROM funnels WHERE tenant_id = $1', [tenantId]);
+  return rows[0].n;
 }
 
 export async function get(id) {

@@ -44,6 +44,10 @@ import { formatIst } from '../utils/time.js';
 import { mailMissing, parseRecord, healthLines } from '../utils/emailHealth.js';
 import { providerName, parseFrom } from '../utils/mailApis.js';
 import * as funnels from '../repositories/funnelsRepository.js';
+import * as planService from '../services/planService.js';
+import { PLANS, PLAN_IDS, validTenantId } from '../utils/planSpec.js';
+import { hashPassword } from '../utils/passwordSpec.js';
+import { randomBytes } from 'node:crypto';
 import * as tenantSettings from '../core/tenantSettings.js';
 import * as tenantConfigRepo from '../repositories/tenantConfigRepository.js';
 import { listOpenAiModels, listGeminiModels } from '../providers/modelsProvider.js';
@@ -190,7 +194,12 @@ export function register(ctx) {
       if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
       const body = req.body || {};
       const name = (body.name || '').toString().trim();
-      if (name) await funnels.create({ tenantId: body.tenant || req.tenantId || 'default', name });
+      const ft = (body.tenant || req.tenantId || 'default').toString();
+      if (name) {
+        const why = await planService.limitReason(ft, 'funnels', { used: await funnels.countByTenant(ft) });
+        if (why) return res.redirect(`${backToFunnels(body, req).replace('#funnels', '')}&error=${encodeURIComponent(why)}#funnels`);
+        await funnels.create({ tenantId: ft, name });
+      }
       res.redirect(backToFunnels(body, req));
     } catch (err) {
       next(err);
@@ -205,6 +214,8 @@ export function register(ctx) {
       const funnel = await funnels.get(id);
       if (funnel) {
         const set = body.set || {};
+        const tooMany = await channelsReason(funnel.tenant_id, set.postforme_accounts);
+        if (tooMany) return res.redirect(`${backToFunnels(body, req).replace('#funnels', '')}&error=${encodeURIComponent(tooMany)}#funnels`);
         for (const field of funnels.FUNNEL_FIELDS) {
           if (!(field.key in set)) continue;
           let val = String(set[field.key] ?? '');
@@ -354,6 +365,8 @@ export function register(ctx) {
       const step = WIZARD_STEPS[stepIndex];
       if (!step) return res.status(400).json({ ok: false, error: 'bad step' });
       const set = req.body?.set || {};
+      const tooMany = await channelsReason(funnel.tenant_id, set.postforme_accounts);
+      if (tooMany) return res.status(400).json({ ok: false, error: tooMany });
       // The funnel name lives on the funnels row, not funnel_config: rename first
       // so a clash or empty name is refused before anything else is saved.
       let newName = null;
@@ -447,6 +460,47 @@ export function register(ctx) {
     }
   });
 
+  // Super admin only: change a tenant's plan (limits in utils/planSpec).
+  router.post('/admin/tenants/plan', async (req, res) => {
+    try {
+      if (!(await superOk(req))) return res.status(403).json({ ok: false, error: 'super admin only' });
+      const plan = String(req.body?.plan || '');
+      if (!PLAN_IDS.includes(plan)) throw new Error('pick a plan');
+      const tenant = String(req.body?.tenant || '');
+      await tenantRepo.setPlan(tenant, plan);
+      planService.invalidate(tenant);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Super admin only: a new tenant, its owner (an admin who must choose a
+  // password at first sign-in) and a one-time password shown once.
+  router.post('/admin/tenants/new', async (req, res) => {
+    try {
+      if (!(await superOk(req))) return res.status(403).json({ ok: false, error: 'super admin only' });
+      const b = req.body || {};
+      const id = String(b.id || '').trim().toLowerCase();
+      const email = String(b.owner_email || '').trim().toLowerCase();
+      const plan = PLAN_IDS.includes(String(b.plan)) ? String(b.plan) : 'starter';
+      const months = Math.max(0, Math.min(36, Number(b.months) || 0));
+      if (!validTenantId(id)) throw new Error('Workspace id: 2 to 31 lower-case letters, digits or dashes');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Owner email is not valid');
+      if (await users.findByEmail(email)) throw new Error('That email already has an account');
+      let expiresAt = null;
+      if (months) { expiresAt = new Date(); expiresAt.setUTCMonth(expiresAt.getUTCMonth() + months); }
+      const tenant = await tenantRepo.createNew({ id, name: String(b.name || id).trim().slice(0, 80), ownerEmail: email, phone: String(b.phone || '').trim().slice(0, 30), plan, expiresAt });
+      const tempPassword = randomBytes(9).toString('base64url');
+      await users.createForTenant({ email, tenantId: tenant.id, role: 'admin', passwordHash: await hashPassword(tempPassword) });
+      tenantSettings.invalidate();
+      planService.invalidate();
+      res.json({ ok: true, tenant: tenant.id, email, tempPassword, expires: expiresAt ? formatIst(expiresAt, { withTime: false }) : '' });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   // Super admin only: extend (or clear) a tenant's expiry; saves on change.
   router.post('/admin/tenants/expiry', async (req, res) => {
     try {
@@ -457,6 +511,7 @@ export function register(ctx) {
       // The end of that day in IST, so "expires 30-11-2026" covers all of the 30th.
       const expiresAt = date ? new Date(`${date}T23:59:59+05:30`) : null;
       await tenantRepo.setExpiry(String(req.body?.tenant || ''), expiresAt);
+      planService.invalidate(String(req.body?.tenant || ''));
       res.json({ ok: true, expires: expiresAt ? formatIst(expiresAt, { withTime: false }) : '' });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
@@ -959,6 +1014,7 @@ function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [] }) {
         <td>${esc(t.owner_email || '-')}</td>
         <td>${esc(t.phone || '-')}</td>
         <td>${esc(formatIst(t.subscribed_at, { withTime: false }))}</td>
+        <td><select onchange="savePlan(${i}, '${escJs(t.id)}', this.value)">${PLAN_IDS.map((p) => '<option value="' + p + '"' + ((t.plan || 'custom') === p ? ' selected' : '') + '>' + esc(PLANS[p].label) + (PLANS[p].priceInr ? ' ₹' + PLANS[p].priceInr.toLocaleString('en-IN') : '') + '</option>').join('')}</select><span id="flag-p${i}" class="saveflag">saved</span></td>
         <td><div class="planwrap">
           <input id="tx-${i}" type="date" value="${ex}" onchange="saveExpiry(${i}, '${escJs(t.id)}')" title="${expired ? 'expired' : ''}">
           <button class="act" type="button" onclick="extendExpiry(${i}, '${escJs(t.id)}', 1)">+1 month</button>
@@ -973,12 +1029,46 @@ function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [] }) {
     <h2>Tenants</h2>
     <p class="blurb">Every customer account. Change an expiry date, or press +1 month / +1 year, and it saves at once. A blank expiry means it never expires.</p>
     <fieldset><legend>Tenants</legend>
-      <table><thead><tr><th>Tenant</th><th>Email</th><th>Phone</th><th>Subscribed</th><th>Expires</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="5" class="hint">No tenants yet.</td></tr>'}</tbody></table>
+      <table><thead><tr><th>Tenant</th><th>Email</th><th>Phone</th><th>Subscribed</th><th>Plan</th><th>Expires</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6" class="hint">No tenants yet.</td></tr>'}</tbody></table>
     </fieldset>
+    ${newTenantBox()}
     ${usageBox(tenantList, postUsage, new Date(), ownKeyIds)}
     ${wakerBox()}
   </section>`;
+}
+
+/** Owner only: make a tenant and its first admin; the one-time password is shown once. */
+function newTenantBox() {
+  return `<fieldset><legend>New tenant</legend>
+    <p class="hint">Makes the workspace and its owner's sign-in. Give the owner the one-time password shown below; they choose their own at first sign-in. An expired or suspended workspace can still look around but cannot change or post anything.</p>
+    <div class="row" style="gap:.4rem;align-items:center;flex-wrap:wrap">
+      <input id="nt-id" placeholder="workspace id, e.g. acme" style="min-width:10rem">
+      <input id="nt-name" placeholder="Name" style="min-width:12rem">
+      <input id="nt-email" placeholder="Owner email" style="min-width:14rem">
+      <input id="nt-phone" placeholder="Phone (optional)" style="min-width:9rem">
+      <select id="nt-plan">${PLAN_IDS.map((p) => '<option value="' + p + '"' + (p === 'starter' ? ' selected' : '') + '>' + esc(PLANS[p].label) + '</option>').join('')}</select>
+      <select id="nt-months"><option value="1">1 month</option><option value="12">1 year</option><option value="0">never expires</option></select>
+      <button type="button" class="act" onclick="newTenant()">➕ Create</button>
+    </div>
+    <p id="nt-st" class="hint"></p>
+    <script>
+      async function newTenant(){
+        const st=document.getElementById('nt-st'); const v=(id)=>document.getElementById(id).value.trim();
+        st.textContent='Creating…'; st.style.color='';
+        try{
+          const r=await fetch('/api/v1/admin/tenants/new',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:v('nt-id'),name:v('nt-name'),owner_email:v('nt-email'),phone:v('nt-phone'),plan:v('nt-plan'),months:v('nt-months')})});
+          const j=await r.json();
+          if(!j.ok){ st.textContent='🔴 '+(j.error||'failed'); st.style.color='#ff9a9a'; return; }
+          st.textContent='🟢 Made '+j.tenant+'. Sign-in: '+j.email+', one-time password: '+j.tempPassword+(j.expires?' (expires '+j.expires+')':'')+'. Copy it now: it is not shown again.'; st.style.color='#5bd08a';
+        }catch(e){ st.textContent='🔴 '+e.message; st.style.color='#ff9a9a'; }
+      }
+      async function savePlan(i, tenant, plan){
+        try{ const r=await fetch('/api/v1/admin/tenants/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenant,plan})}); const j=await r.json(); if(!j.ok) throw new Error(j.error||'failed'); const f=document.getElementById('flag-p'+i); if(f){f.classList.add('show'); setTimeout(()=>f.classList.remove('show'),1500);} }
+        catch(e){ alert('Could not change the plan: '+e.message); }
+      }
+    </script>
+  </fieldset>`;
 }
 
 /** Owner only: the one Cloudflare Worker that wakes the app once a day per tenant. */
@@ -1751,6 +1841,15 @@ function pfmAccountsRow(cfg, fid) {
     <input type="hidden" id="pfmaccts-${fid}" name="set[postforme_accounts]" value="${esc(JSON.stringify(ids))}">
     <input type="hidden" id="pfmmap-${fid}" name="set[account_map]" value="${esc(JSON.stringify(map))}">
     <p class="hint">One click: no JSON. Tick the accounts this funnel posts to.</p></div>`;
+}
+
+/** '' or why a funnel cannot tick this many accounts on its tenant's plan. */
+async function channelsReason(tenantId, accountsJson) {
+  if (accountsJson === undefined || accountsJson === null || accountsJson === '') return '';
+  let ids = [];
+  try { ids = JSON.parse(String(accountsJson)); } catch { return ''; }
+  if (!Array.isArray(ids) || !ids.length) return '';
+  return planService.limitReason(tenantId, 'channels', { used: 0, adding: ids.length });
 }
 
 // The platforms a connect link can be made for (Post for Me's platform names).
