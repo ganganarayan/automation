@@ -43,10 +43,14 @@ export function digestDay(now) {
  * @param {string} [o.morningOn] - the day the morning extra last went
  * @param {string[]} [o.waitingIds] - instances waiting on an approval now
  * @param {string[]} [o.sentIds] - the ones the last email already carried
+ * @param {string} [o.dailyOn] - the IST date the daily run last started (yyyy-MM-dd)
+ * @param {boolean} [o.quiet] - nothing holds the app awake (every lane has finished)
  */
-export function digestAction({ now, eveningOn = '', morningOn = '', waitingIds = [], sentIds = [] }) {
+export function digestAction({ now, eveningOn = '', morningOn = '', waitingIds = [], sentIds = [], dailyOn = '', quiet = false }) {
   const day = digestDay(now);
   if ((now.hour >= EVENING_HOUR || now.hour < DAY_START_HOUR) && eveningOn !== day) return 'evening';
+  // The daily run finished today and the app has gone quiet: its approvals are all made.
+  if (quiet && dailyOn && dailyOn === now.toFormat('yyyy-MM-dd') && eveningOn !== day) return 'evening';
   if (now.hour >= DAY_START_HOUR && now.hour < MORNING_END_HOUR && morningOn !== day && waitingIds.some((id) => !sentIds.includes(id))) return 'morning';
   return '';
 }

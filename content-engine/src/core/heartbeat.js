@@ -16,6 +16,12 @@ import { logger } from './logger.js';
 const BEAT_MS = 60 * 1000;
 const holds = new Map(); // label -> count
 let timer = null;
+const idleListeners = [];
+
+/** Call fn each time the last hold is released (the app is about to fall quiet). */
+export function onIdle(fn) {
+  idleListeners.push(fn);
+}
 
 function beat() {
   ping().catch((err) => logger.warn({ err: err.message }, 'heartbeat ping failed'));
@@ -38,6 +44,7 @@ export function hold(label = 'job') {
       clearInterval(timer);
       timer = null;
       logger.info('heartbeat off: the app may sleep');
+      for (const fn of idleListeners) setImmediate(() => Promise.resolve().then(fn).catch((err) => logger.warn({ err: err.message }, 'idle listener failed')));
     }
   };
 }
@@ -57,4 +64,4 @@ export function active() {
   return Object.fromEntries(holds);
 }
 
-export default { hold, during, active };
+export default { hold, during, active, onIdle };

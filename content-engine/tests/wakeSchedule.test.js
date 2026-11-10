@@ -102,19 +102,15 @@ describe('variableRequests / syncOutcome', () => {
   });
 });
 
-describe('Daily schedule fields on save', () => {
+describe('Daily schedule field on save', () => {
   const save = (set) => buildSaveOps('content-engine', { settings: set, modules: {} });
-  it('normalizes valid times and deletes blanks (default applies)', () => {
-    const { sets, dels, errors } = save({ router_check_time: '9:05', post_check_times: '20:20,08:20', nudge_time: '' });
-    expect(errors).toEqual([]);
-    expect(sets).toContainEqual({ key: 'router_check_time', value: '09:05' });
-    expect(sets).toContainEqual({ key: 'post_check_times', value: '08:20, 20:20' });
-    expect(dels).toContain('nudge_time');
+  it('normalizes a valid time and deletes a blank (19:00 applies)', () => {
+    expect(save({ daily_time: '9:05' }).sets).toContainEqual({ key: 'daily_time', value: '09:05' });
+    expect(save({ daily_time: '' }).dels).toContain('daily_time');
   });
   it('rejects a bad time with a clear error', () => {
-    const { errors } = save({ router_check_time: '25:00', post_check_times: '08:20, 9pm' });
-    expect(errors).toHaveLength(2);
+    const { errors } = save({ daily_time: '25:00' });
+    expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/HH:MM, 24-hour/);
-    expect(errors[1]).toMatch(/"9pm"/);
   });
 });

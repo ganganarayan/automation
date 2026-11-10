@@ -217,16 +217,12 @@ export const CONFIG_MANIFEST = {
         ],
       },
       {
-        // The app sleeps; GitHub Actions (.github/workflows/wake.yml) wakes it
-        // at these times, read from the repo variable WAKE_SCHEDULE that the
-        // Sync button (and saving here) writes. Blank = the default.
+        // The app sleeps; the owner's Cloudflare waker (Tenants panel) wakes it
+        // once a day at this time. Saving a changed time updates Cloudflare.
         title: 'Daily schedule (IST)',
         fields: [
-          { key: 'router_check_time', label: "Daily check: picks tomorrow's post and sends approvals", type: 'time', default: '16:00' },
-          { key: 'nudge_time', label: 'Morning nudge if the video lanes are empty', type: 'time', default: '10:00' },
-          { key: 'post_check_times', label: 'Backup checks that posts went live', type: 'time_list', default: '08:20, 20:20', placeholder: '08:20, 20:20', help: 'HH:MM, 24-hour, comma-separated.' },
-          { key: 'relay_times', label: 'LinkedIn → WhatsApp relay runs', type: 'time_list', default: '09:30, 21:30', placeholder: '09:30, 21:30', help: 'HH:MM, 24-hour, comma-separated. Each run wakes the app, so a handful of times a day keeps it cheap.' },
-          { key: 'wake_schedule_sync', label: 'GitHub wake-up times', type: 'wake_sync' },
+          { key: 'daily_time', label: "Daily time: picks tomorrow's posts, sends the one email with every approval, checks posts, relays LinkedIn", type: 'time', default: '19:00', help: 'The app wakes once a day at this time and sleeps the rest of the day. The email goes once every post for tomorrow is ready, usually within minutes. Approve each post before its time; a late approval posts at once.' },
+          { key: 'wake_schedule_sync', label: 'Wake-up timer', type: 'wake_sync' },
         ],
       },
       {

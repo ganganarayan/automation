@@ -9,7 +9,8 @@
  *               funnelsRepository, tenantConfigRepository, approvalService,
  *               providerFactory, utils/{digestSpec,approvalButtons}.
  *
- * Runs after every post check, so the GitHub wake-up is all it needs. A failed
+ * Runs after every post check and whenever the app falls quiet (the daily
+ * run's evening email goes then, once every lane has finished). A failed
  * send is not remembered, so the next check tries again.
  */
 import * as instanceRepo from '../repositories/instanceRepository.js';
@@ -23,6 +24,9 @@ import { digestAction, digestDay, buildDigest, lowSheets } from '../utils/digest
 import { pendingByInstance, APPROVAL_WAIT_STATUSES } from '../utils/approvalButtons.js';
 import { nowIst, formatIst } from '../utils/time.js';
 import { settings } from '../settings/index.js';
+import * as heartbeat from '../core/heartbeat.js';
+import * as tenantRepo from '../repositories/tenantRepository.js';
+import { RAN_DAILY_KEY } from '../utils/cloudflareWake.js';
 import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'digest' });
@@ -62,20 +66,21 @@ async function noPostDays(tenantId, day) {
 }
 
 /** Send what is due for one tenant. Returns the action taken ('' for none). */
-export async function runDue({ tenantId = 'default', now = nowIst() } = {}) {
-  const [eveningOn, morningOn, sent] = await Promise.all([
+export async function runDue({ tenantId = 'default', now = nowIst(), quiet = !Object.keys(heartbeat.active()).length } = {}) {
+  const [eveningOn, morningOn, sent, dailyOn] = await Promise.all([
     tenantConfig.get(tenantId, 'digest_evening_on').catch(() => ''),
     tenantConfig.get(tenantId, 'digest_morning_on').catch(() => ''),
     tenantConfig.get(tenantId, 'digest_approval_ids').catch(() => ''),
+    tenantConfig.get(tenantId, RAN_DAILY_KEY).catch(() => ''),
   ]);
   const day = digestDay(now);
   // Cheap test first: this runs after every post check.
-  if (!digestAction({ now, eveningOn, morningOn, waitingIds: ['?'], sentIds: [] })) return '';
+  if (!digestAction({ now, eveningOn, morningOn, waitingIds: ['?'], sentIds: [], dailyOn, quiet })) return '';
 
   const base = settings.app.publicBaseUrl || '';
   const rows = await loadRows(tenantId, base);
   const waitingIds = rows.filter((r) => r.approvalUrl).map((r) => String(r.id));
-  const action = digestAction({ now, eveningOn, morningOn, waitingIds, sentIds: parseIds(sent) });
+  const action = digestAction({ now, eveningOn, morningOn, waitingIds, sentIds: parseIds(sent), dailyOn, quiet });
   if (!action) return '';
 
   const nextDay = now.minus({ hours: 8 }).plus({ days: 1 }).toFormat('yyyy-MM-dd');
@@ -126,4 +131,10 @@ export async function runDue({ tenantId = 'default', now = nowIst() } = {}) {
   return action;
 }
 
-export default { runDue };
+/** Every tenant's due email: called when the app falls quiet, so the daily run's email goes once its lanes are done. */
+export async function runAllDue() {
+  const list = await tenantRepo.list().catch(() => [{ id: 'default' }]);
+  for (const t of list) await runDue({ tenantId: t.id }).catch((err) => log.warn({ tenantId: t.id, err: err.message }, 'daily email failed (the next quiet moment tries again)'));
+}
+
+export default { runDue, runAllDue };

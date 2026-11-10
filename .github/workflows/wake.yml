@@ -25,9 +25,10 @@ name: Wake content-engine for its daily jobs
 #   RUN_DUE_KEY         the content-engine ADMIN_KEY (sent as X-Admin-Key)
 # This repo is public: never print the secrets; only the times are logged.
 
+# The timed run is off: the Cloudflare waker (Settings > Tenants > Wake-up timer)
+# wakes the app once a day per tenant at its Daily time. GitHub ran the 15-minute
+# schedule only every 3 to 10 hours. This stays as a manual "run a job now".
 on:
-  schedule:
-    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       job:

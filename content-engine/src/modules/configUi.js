@@ -57,6 +57,8 @@ import { listReadyVideos } from '../services/readyPostService.js';
 import { parseDriveFolderId } from '../utils/readyPostSpec.js';
 import { keyOk, gateState, currentSession } from '../services/accessService.js';
 import * as wakeSchedule from '../services/wakeScheduleService.js';
+import * as cloudflareWake from '../services/cloudflareWakeService.js';
+import { DAILY_KEY, dailyTimeOf } from '../utils/cloudflareWake.js';
 import { stockForTenant } from '../services/funnelStockService.js';
 import { REFILL_BELOW } from '../utils/routerSpec.js';
 
@@ -112,10 +114,12 @@ export function register(ctx) {
       const q = new URLSearchParams({ tenant: tenantId });
       if (result.errors.length) q.set('error', result.errors.join('; '));
       else q.set('saved', body.app);
-      // A changed Daily schedule time moves GitHub's wake-up times too.
+      // A changed Daily time moves the Cloudflare waker's time for this tenant too.
       if (!result.errors.length && body.app === 'content-engine') {
         const after = await configService.load(tenantId).catch(() => ({}));
-        if (wakeSchedule.changed(before, after)) await wakeSchedule.sync();
+        if (String(before.daily_time ?? '') !== String(after.daily_time ?? '')) {
+          await cloudflareWake.syncTimes().catch((err) => log.warn({ err: err.message }, 'daily time not synced to Cloudflare (the next daily run syncs it)'));
+        }
       }
       res.redirect(`/api/v1/admin/settings?${q.toString()}#${body.app}`);
     } catch (err) {
@@ -420,7 +424,7 @@ export function register(ctx) {
       const session = await currentSession(req);
       if (!session || session.role !== 'super_admin') return res.status(403).json({ ok: false, error: 'super admin only' });
       const date = String(req.body?.date || '');
-      if (date && !/^d{4}-d{2}-d{2}$/.test(date)) throw new Error('pick a valid date');
+      if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('pick a valid date');
       // The end of that day in IST, so "expires 30-11-2026" covers all of the 30th.
       const expiresAt = date ? new Date(`${date}T23:59:59+05:30`) : null;
       await tenantRepo.setExpiry(String(req.body?.tenant || ''), expiresAt);
@@ -467,7 +471,53 @@ export function register(ctx) {
     }
   });
 
-  // GitHub wake-up times (Setup → Settings → Daily schedule).
+  // Settings → Daily schedule: is the waker on, and this tenant's last daily run.
+  router.get('/admin/wake-timer', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const tenantId = req.tenantId || 'default';
+      const st = await cloudflareWake.status();
+      const me = st.tenants.find((t) => String(t.id) === String(tenantId)) || {};
+      const cfg = await configService.load(tenantId).catch(() => ({}));
+      res.json({ ok: st.ok, time: dailyTimeOf(cfg[DAILY_KEY]), last: me.last || '' });
+    } catch (err) {
+      res.json({ ok: false, text: `🟡 ${err.message}` });
+    }
+  });
+
+  // Owner only: the Cloudflare waker (Tenants panel).
+  const ownerOnly = async (req, res) => {
+    const session = await currentSession(req).catch(() => null);
+    if (session && session.role === 'super_admin') return true;
+    res.status(403).json({ ok: false, error: 'super admin only' });
+    return false;
+  };
+  router.get('/admin/cloudflare-wake', async (req, res) => {
+    try {
+      if (!(await ownerOnly(req, res))) return;
+      res.json(await cloudflareWake.status());
+    } catch (err) {
+      res.status(400).json({ ok: false, text: `🔴 ${err.message}` });
+    }
+  });
+  router.post('/admin/cloudflare-wake/credentials', async (req, res) => {
+    try {
+      if (!(await ownerOnly(req, res))) return;
+      res.json(await cloudflareWake.saveCredentials({ account: req.body?.account, token: req.body?.token }));
+    } catch (err) {
+      res.status(400).json({ ok: false, text: `🔴 ${err.message}` });
+    }
+  });
+  router.post('/admin/cloudflare-wake/deploy', async (req, res) => {
+    try {
+      if (!(await ownerOnly(req, res))) return;
+      res.json(await cloudflareWake.deploy());
+    } catch (err) {
+      res.status(400).json({ ok: false, text: `🔴 ${err.message}` });
+    }
+  });
+
+  // GitHub wake-up times (old: the Cloudflare waker replaced them; kept for the manual workflow).
   router.get('/admin/wake-schedule', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -897,7 +947,40 @@ function tenantsPanel({ tenantList }) {
       <table><thead><tr><th>Tenant</th><th>Email</th><th>Phone</th><th>Subscribed</th><th>Expires</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="5" class="hint">No tenants yet.</td></tr>'}</tbody></table>
     </fieldset>
+    ${wakerBox()}
   </section>`;
+}
+
+/** Owner only: the one Cloudflare Worker that wakes the app once a day per tenant. */
+function wakerBox() {
+  return `<fieldset><legend>Wake-up timer (Cloudflare)</legend>
+    <p class="hint">One Worker on your Cloudflare account checks every 5 minutes, inside Cloudflare, and wakes this app only when a tenant's Daily time (Settings → Daily schedule) has come, once per tenant per day. A failed wake is tried again at the next check.
+      Make the token at dash.cloudflare.com → My Profile → API Tokens → Create Token → Create Custom Token, with Account permissions <b>Workers Scripts: Edit</b> and <b>Workers KV Storage: Edit</b>, for your account only.</p>
+    <div class="row" style="gap:.4rem;align-items:center;flex-wrap:wrap">
+      <input id="cf-acc" placeholder="Account ID (32 letters and digits)" style="min-width:20rem">
+      <input id="cf-tok" type="password" placeholder="API token (blank = keep the saved one)" style="min-width:20rem" autocomplete="off">
+      <button type="button" class="act" onclick="cfSave()">💾 Save</button>
+      <button type="button" class="act" onclick="cfDeploy()">☁ Deploy waker</button>
+    </div>
+    <p id="cf-st" class="hint">Checking…</p>
+    <table><thead><tr><th>Tenant</th><th>Daily time (IST)</th><th>Last daily run</th></tr></thead><tbody id="cf-rows"></tbody></table>
+    <script>
+      function cfShow(j){
+        document.getElementById('cf-st').textContent=(j.text||'🟡 unknown')+(j.hasToken?' · token saved':' · no token saved');
+        if(j.account) document.getElementById('cf-acc').value=j.account;
+        const e=(s)=>String(s==null?'':s).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+        document.getElementById('cf-rows').innerHTML=(j.tenants||[]).map(t=>'<tr><td>'+e(t.name||t.id)+(t.status!=='active'?' ('+e(t.status)+', not woken)':'')+'</td><td>'+e(t.time)+'</td><td>'+e(t.last)+'</td></tr>').join('');
+      }
+      async function cfPost(path, body){
+        const st=document.getElementById('cf-st');
+        try{ const r=await fetch('/api/v1/admin/cloudflare-wake'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); cfShow(await r.json()); }
+        catch(e){ st.textContent='🔴 '+e.message; }
+      }
+      function cfSave(){ document.getElementById('cf-st').textContent='Saving…'; cfPost('/credentials',{account:document.getElementById('cf-acc').value.trim(),token:document.getElementById('cf-tok').value.trim()}); document.getElementById('cf-tok').value=''; }
+      function cfDeploy(){ document.getElementById('cf-st').textContent='Deploying to Cloudflare…'; cfPost('/deploy'); }
+      (async function(){ try{ cfShow(await (await fetch('/api/v1/admin/cloudflare-wake')).json()); }catch(e){ document.getElementById('cf-st').textContent='🟡 Could not check: '+e.message; } })();
+    </script>
+  </fieldset>`;
 }
 
 function usersPanel({ userList, me }) {
@@ -1375,29 +1458,14 @@ function fieldRow(field, configMap) {
       ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
   }
   if (field.type === 'wake_sync') {
-    // Status is fetched live; saving a changed time above syncs on its own.
+    // The owner deploys the waker on the Tenants panel; everyone sees whether it is on.
     return `<div class="field"><label>${esc(field.label)}</label>
-      <div class="row" style="gap:.4rem;align-items:center">
-        <button type="button" class="act" onclick="wakeSync()">↻ Sync wake-up times</button>
-        <span id="wake-st" class="hint">Checking…</span>
-      </div>
-      <p class="hint">GitHub is set to check every 15 minutes but often runs only every few hours, so a job runs on the first check within 6 hours after its time (once per time). Saving a changed time syncs too.
-        Uses the GitHub token and repo under Keys and credit → Video clean; the token needs <b>Variables: Read and write</b>.</p>
-      <p id="wake-times" class="hint"></p>
+      <p id="wake-st" class="hint">Checking…</p>
       <script>
-        function wakeShow(j){
-          document.getElementById('wake-st').textContent=(j.text||'🟡 unknown')+(j.stale?', times changed since, press Sync':'');
-          const c=j.current||j.schedule; if(!c) return;
-          document.getElementById('wake-times').textContent='Daily check '+(c.router||[]).join(', ')+' · Nudge '+(c.nudge||[]).join(', ')+' · Post checks '+(c.posts||[]).join(', ')+' (IST, all tenants)';
-        }
-        async function wakeSync(){
-          const st=document.getElementById('wake-st'); st.textContent='Syncing…';
-          try{ const j=await (await fetch('/api/v1/admin/wake-schedule/sync',{method:'POST'})).json(); wakeShow(j); }
-          catch(e){ st.textContent='🟡 '+e.message; }
-        }
         (async function(){
-          try{ wakeShow(await (await fetch('/api/v1/admin/wake-schedule')).json()); }
-          catch(e){ document.getElementById('wake-st').textContent='🟡 Could not check: '+e.message; }
+          const st=document.getElementById('wake-st');
+          try{ const j=await (await fetch('/api/v1/admin/wake-timer')).json(); st.textContent=j.ok?('🟢 On: the app wakes once a day at your Daily time ('+(j.time||'19:00')+' IST). Last run: '+(j.last||'🟡 never')):'🟡 The wake-up timer is not set up yet, so nothing runs on its own. The owner sets it up under Tenants.'; }
+          catch(e){ st.textContent='🟡 Could not check: '+e.message; }
         })();
       </script></div>`;
   }

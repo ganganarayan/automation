@@ -50,6 +50,8 @@ import { currentSession, keyOk } from '../services/accessService.js';
 import * as approvalService from '../services/approvalService.js';
 import * as readyPost from '../services/readyPostService.js';
 import { requireAdminKey } from '../middleware/auth.js';
+import * as dailyRun from '../services/dailyRunService.js';
+import * as heartbeat from '../core/heartbeat.js';
 
 export function register(ctx) {
   const { router, log } = ctx;
@@ -68,6 +70,8 @@ export function register(ctx) {
   readyPost.onPosted((row, info) => imageLane.onPosted(row, info));
   readyPost.onPosted((row, info) => postedLog.onPosted(row, info));
   stageRunner.onStageFailed((id, step, err) => aiLane.onStageFailed(id, step, err));
+  // The evening email waits for the app to fall quiet, so it carries every approval the day made.
+  heartbeat.onIdle(() => import('../services/digestService.js').then((d) => d.runAllDue()));
   const yes = (v) => ['1', 'true', 'yes'].includes(String(v || '').toLowerCase());
 
   router.post('/jobs/router-check', requireAdminKey, async (req, res, next) => {
@@ -79,6 +83,19 @@ export function register(ctx) {
       res.status(202).json({ accepted: true, retry: retryNone, funnel: funnelId, tenants: tenantIds || 'all' });
       if (tenantIds && !tenantIds.length) return log.info('router check: no tenant due now');
       routerService.runCheck({ retryNone, funnelId, tenantIds, log }).catch((e) => log.error({ err: e.message }, 'router check failed'));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // The Cloudflare waker: one tenant's day, once per IST day however many pings arrive.
+  router.post('/jobs/daily', requireAdminKey, async (req, res, next) => {
+    try {
+      const tenantId = String(req.query.tenant || 'default').slice(0, 64);
+      const fresh = await dailyRun.claim(tenantId);
+      res.status(202).json({ accepted: true, tenant: tenantId, started: fresh });
+      if (fresh) dailyRun.start(tenantId);
+      else log.info({ tenantId }, 'daily run: already ran today');
     } catch (err) {
       next(err);
     }
