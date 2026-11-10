@@ -13,6 +13,8 @@
  */
 import { DateTime } from 'luxon';
 import { buildProviders } from './providerFactory.js';
+import { meter } from './usageMeter.js';
+import { costImages } from '../utils/pricing.js';
 import * as approvalService from './approvalService.js';
 import { setStatus } from '../repositories/approvalRepository.js';
 import { gitaVideoScheduledAt, simpleVideoScheduledAt } from '../utils/scheduling.js';
@@ -86,6 +88,7 @@ export async function runFull({ tenantId = 'default' }) {
   const imageUrls = [];
   for (const prompt of prompts) {
     const img = await providers.llm.generateImage({ prompt, size: '1024x1536' });
+    meter(providers, costImages({ count: 1, size: '1024x1536' }), 'video images');
     const up = await providers.storage.uploadPng(resolved.drive.gitaFolder, `video-day-${row.day}-${imageUrls.length}.png`, img);
     imageUrls.push(up.downloadUrl);
   }

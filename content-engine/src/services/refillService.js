@@ -11,6 +11,8 @@
  */
 import ExcelJS from 'exceljs';
 import { buildProviders } from './providerFactory.js';
+import { meter } from './usageMeter.js';
+import { costText } from '../utils/pricing.js';
 import * as refillState from '../repositories/refillStateRepository.js';
 import { VIDAPULSE_SYSTEM, vidapulseDashboardPrompt } from './prompts.js';
 import { childLogger } from '../core/logger.js';
@@ -56,7 +58,7 @@ export async function run({ tenantId = 'default' }) {
     .map((r) => ({ theme: r[themeCol], headline: r[headlineCol] }))
     .filter((x) => x.theme || x.headline);
 
-  const generated = await providers.llm.generateJson({
+  const refill = await providers.llm.generateJsonDetailed({
     system: String(resolved.prompts.refill || '').trim() || VIDAPULSE_SYSTEM,
     user:
       `Generate EXACTLY ${BATCH} brand-new VidaPulse posts as JSON ` +
@@ -65,6 +67,8 @@ export async function run({ tenantId = 'default' }) {
       `Do NOT repeat any of these existing angles: ${JSON.stringify(existing).slice(0, 6000)}`,
     maxTokens: 12000,
   });
+  meter(providers, costText({ ...(refill.usage || {}), model: refill.model }), 'sheet refill');
+  const generated = refill.data || {};
 
   const posts = Array.isArray(generated.posts) ? generated.posts.slice(0, BATCH) : [];
   if (posts.length === 0) {

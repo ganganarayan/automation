@@ -15,6 +15,7 @@
  *               approvalRepository, utils/imageGateSpec, logger.
  */
 import { buildProviders } from './providerFactory.js';
+import { meter } from './usageMeter.js';
 import * as approvalService from './approvalService.js';
 import * as funnels from '../repositories/funnelsRepository.js';
 import { setPayload } from '../repositories/approvalRepository.js';
@@ -43,10 +44,8 @@ async function loadFunnel(funnelId) {
 async function makeImage(providers, folderId, size, prompt, name, imageSize = '') {
   const buf = await fitImage(await providers.llm.generateImage({ prompt, size }), imageSize);
   // A picture outside any run: its cost goes to the usage ledger (the tenant's bill).
-  const r = providers.resolved || {};
   const c = costImages({ count: 1, size });
-  // Loaded on use: the repository pulls in the database (and the env check).
-  import('../repositories/usageRepository.js').then((usage) => usage.record({ tenantId: r.tenantId || 'default', provider: c.provider, model: c.model, unit: c.unit, quantity: c.quantity, costUsd: c.costUsd, source: 'image gate', keyOwner: (r.keyOwners || {}).openai === 'tenant' ? 'tenant' : 'platform' })).catch(() => {});
+  meter(providers, c, 'image gate');
   const up = await providers.storage.uploadPng(folderId, name, buf);
   return { id: up.id, url: up.downloadUrl, thumb: up.thumbnailUrl, prompt, keep: true };
 }

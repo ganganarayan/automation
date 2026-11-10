@@ -98,16 +98,18 @@ export function register(ctx) {
       // Who posts on a Post for Me key of its own (so is not on the owner's bill).
       const ownKeyIds = [];
       const keyOwners = {};
+      const keyHistories = {};
       if (superAdmin) {
         for (const t of tenantList) {
           const r = await tenantSettings.forTenant(t.id).catch(() => null);
           if (r && r.postformeKey && !r.postformeShared) ownKeyIds.push(String(t.id));
           if (r) keyOwners[String(t.id)] = { ...r.keyOwners };
+          if (r) keyHistories[String(t.id)] = r.keyHistory || [];
         }
       }
       const aiCosts = superAdmin ? await usageRepo.monthCosts({ months: 3 }).catch(() => null) : null;
       res.type('html').send(
-        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', session, key: '', saved: req.query.saved, superAdmin, tenantList, postUsage, ownKeyIds, aiCosts, keyOwners }),
+        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', session, key: '', saved: req.query.saved, superAdmin, tenantList, postUsage, ownKeyIds, aiCosts, keyOwners, keyHistories }),
       );
     } catch (err) {
       next(err);
@@ -455,6 +457,28 @@ export function register(ctx) {
     }
   });
 
+  // A workspace admin (or the super admin) adds a user to the workspace, within
+  // the plan's users limit. The new user gets a one-time password, shown once.
+  router.post('/admin/users/add', async (req, res) => {
+    try {
+      const session = await currentSession(req);
+      const isSuper = await superOk(req);
+      if (!isSuper && !(session && session.role === 'admin')) return res.status(403).json({ ok: false, error: 'only a workspace admin can add users' });
+      const tenantId = String(req.tenantId || 'default');
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      const role = req.body?.role === 'admin' ? 'admin' : 'user';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('That email is not valid');
+      if (await users.findByEmail(email)) throw new Error('That email already has an account');
+      const why = await planService.limitReason(tenantId, 'users', { used: await users.countForTenant(tenantId) });
+      if (why) return res.status(402).json({ ok: false, error: why });
+      const tempPassword = randomBytes(9).toString('base64url');
+      await users.createForTenant({ email, tenantId, role, passwordHash: await hashPassword(tempPassword) });
+      res.json({ ok: true, email, role, tempPassword });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   router.post('/admin/users/plan', async (req, res, next) => {
     try {
       if (!(await superOk(req))) return res.status(403).json({ error: 'only the owner can change plans' });
@@ -736,7 +760,7 @@ function creditPanel() {
   </fieldset>`;
 }
 
-function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, session = null, key, saved, superAdmin = false, tenantList = [], postUsage = null, ownKeyIds = [], aiCosts = null, keyOwners = {} }) {
+function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, session = null, key, saved, superAdmin = false, tenantList = [], postUsage = null, ownKeyIds = [], aiCosts = null, keyOwners = {}, keyHistories = {} }) {
   const menu = navHtml({ key, tabs: true, superAdmin, session });
 
   // Said once, on the two panels with plain config fields (not under every panel).
@@ -842,7 +866,7 @@ ${NAV_CSS}
     ${saved ? `<div class="flash">Saved <b>${esc(saved)}</b>.</div>` : ''}
     <div id="flash-error" class="flash err" style="display:none"></div>
 
-    ${superAdmin ? tenantsPanel({ tenantList, postUsage, ownKeyIds, aiCosts, keyOwners }) : ''}
+    ${superAdmin ? tenantsPanel({ tenantList, postUsage, ownKeyIds, aiCosts, keyOwners, keyHistories }) : ''}
     ${usersPanel({ userList, me })}
     ${funnelsPanel({ funnelList, funnelConfigs, tenantId, key })}
     ${appSections}
@@ -1034,7 +1058,7 @@ ${NAV_CSS}
 </script>`;
 }
 
-function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [], aiCosts = null, keyOwners = {} }) {
+function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [], aiCosts = null, keyOwners = {}, keyHistories = {} }) {
   const rows = (tenantList || [])
     .map((t, i) => {
       // The date input wants YYYY-MM-DD; the expiry is the end of that IST day.
@@ -1065,7 +1089,7 @@ function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [], aiCosts = 
     </fieldset>
     ${newTenantBox()}
     ${qaBox(tenantList)}
-    ${costBox(tenantList, aiCosts, new Date(), keyOwners)}
+    ${costBox(tenantList, aiCosts, new Date(), keyOwners, keyHistories)}
     ${usageBox(tenantList, postUsage, new Date(), ownKeyIds)}
     ${wakerBox()}
   </section>`;
@@ -1201,12 +1225,32 @@ function usersPanel({ userList, me }) {
 
   return `<section class="panel active card" id="panel-users">
     <h2>Users</h2>
-    <p class="blurb">Accounts are created when people sign up from the landing page. Change a role and it saves instantly, no save button. Users manage their own password in their own login. Account expiry lives on Tenants.</p>
+    <p class="blurb">Add the people who work in this workspace below; each gets a one-time password and picks their own at first sign-in. Change a role and it saves instantly, no save button. Account expiry lives on Tenants.</p>
 
     <fieldset><legend>Users</legend>
       <table><thead><tr><th>Email</th><th>Role</th><th>Last login</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="3" class="hint">No users yet: they appear here after signing up.</td></tr>'}</tbody></table>
       <p class="hint">The super admin is protected: it cannot be demoted or removed.</p>
+    </fieldset>
+
+    <fieldset><legend>Add a user</legend>
+      <div class="row">
+        <input id="nu-email" type="email" placeholder="name@example.com" style="min-width:16rem">
+        <select id="nu-role"><option value="user">user</option><option value="admin">admin</option></select>
+        <button type="button" class="act" onclick="addUser()">Add user</button>
+      </div>
+      <p id="nu-st" class="hint">Your plan sets how many users this workspace may have.</p>
+      <script>
+        async function addUser(){
+          const st=document.getElementById('nu-st'); st.textContent='Adding…';
+          try{
+            const r=await fetch('/api/v1/admin/users/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('nu-email').value,role:document.getElementById('nu-role').value})});
+            const j=await r.json();
+            if(!j.ok){ st.textContent='🔴 '+(j.error||'Could not add'); return; }
+            st.textContent='🟢 Added '+j.email+' ('+j.role+'). One-time password: '+j.tempPassword+' . Send it to them now; it is not shown again.';
+          }catch(e){ st.textContent='🔴 '+e.message; }
+        }
+      </script>
     </fieldset>
 
     <fieldset><legend>Sign-in</legend>

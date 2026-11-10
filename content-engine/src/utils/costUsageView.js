@@ -7,8 +7,9 @@
  * Responsibility: costSplit (pure numbers) and costBox (render).
  * Dependencies: planSpec, pfmScope (month helpers).
  *
- * The split uses each tenant's current key per provider: a provider the tenant
- * pays with its own key is not on the owner's bill.
+ * Whose key paid: the owner the entry kept (ledger rows), else the tenant's key
+ * history on that IST day, else its keys today. Spend on the tenant's own key
+ * is not on the owner's bill.
  */
 import { limitsFor, USD_INR } from './planSpec.js';
 import { usageMonth, monthLabel } from './pfmScope.js';
@@ -26,19 +27,34 @@ export function lastMonths(now = new Date(), n = 3) {
 }
 
 /**
- * Per tenant per month: { total, onBill, own, byProvider } in USD.
- * @param {Array<{tenant_id, month, provider, usd}>} rows
- * @param {Record<string, Record<string,string>>} keyOwners - tenantId -> provider -> 'tenant'|'platform'|'none'
+ * Who owned a provider's key on an IST day, from a tenant's key history
+ * ([{ from: ISO, owners }], oldest first). Before the first entry: the first
+ * entry's owner. No history: null.
  */
-export function costSplit(rows = [], keyOwners = {}) {
+export function ownerOn(history = [], provider, day) {
+  if (!Array.isArray(history) || !history.length) return null;
+  const end = day ? new Date(`${day}T18:29:59.999Z`).getTime() : Date.now(); // 23:59 IST
+  let hit = history[0];
+  for (const h of history) if (new Date(h.from).getTime() <= end) hit = h;
+  return ((hit && hit.owners) || {})[provider] || null;
+}
+
+/**
+ * Per tenant per month: { total, onBill, own, byProvider } in USD.
+ * @param {Array<{tenant_id, month, day?, provider, key_owner?, usd}>} rows
+ * @param {Record<string, Record<string,string>>} keyOwners - tenantId -> provider -> 'tenant'|'platform'|'none' (today)
+ * @param {Record<string, Array>} histories - tenantId -> key history
+ */
+export function costSplit(rows = [], keyOwners = {}, histories = {}) {
   const out = {};
   for (const r of rows || []) {
     const t = String(r.tenant_id);
-    const m = String(r.month);
+    const m = String(r.month || String(r.day || '').slice(0, 7));
     const usd = Number(r.usd) || 0;
     const cell = ((out[t] = out[t] || {})[m] = out[t][m] || { total: 0, onBill: 0, own: 0, byProvider: {} });
     cell.total += usd;
-    if (((keyOwners[t] || {})[r.provider]) === 'tenant') cell.own += usd; else cell.onBill += usd;
+    const who = r.key_owner || ownerOn(histories[t], r.provider, r.day) || (keyOwners[t] || {})[r.provider];
+    if (who === 'tenant') cell.own += usd; else cell.onBill += usd;
     cell.byProvider[r.provider] = (cell.byProvider[r.provider] || 0) + usd;
   }
   return out;
@@ -47,10 +63,10 @@ export function costSplit(rows = [], keyOwners = {}) {
 const usd = (n) => `$${(Number(n) || 0).toFixed(2)}`;
 const inr = (n) => `₹${Math.round((Number(n) || 0) * USD_INR).toLocaleString('en-IN')}`;
 
-export function costBox(tenantList = [], rows = null, now = new Date(), keyOwners = {}) {
+export function costBox(tenantList = [], rows = null, now = new Date(), keyOwners = {}, histories = {}) {
   if (!Array.isArray(rows)) return '<fieldset><legend>AI cost per tenant</legend><p class="hint">🟡 Could not read the costs just now. Reload to try again.</p></fieldset>';
   const months = lastMonths(now);
-  const split = costSplit(rows, keyOwners);
+  const split = costSplit(rows, keyOwners, histories);
   const ids = [...new Set([...(tenantList || []).map((t) => String(t.id)), ...Object.keys(split)])];
   const byId = Object.fromEntries((tenantList || []).map((t) => [String(t.id), t]));
   const body = ids.map((id) => {
@@ -74,4 +90,4 @@ export function costBox(tenantList = [], rows = null, now = new Date(), keyOwner
   </fieldset>`;
 }
 
-export default { costBox, costSplit, lastMonths };
+export default { costBox, costSplit, lastMonths, ownerOn };

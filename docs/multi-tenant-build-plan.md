@@ -22,8 +22,11 @@ keyOk only checks the role. So any admin could act as any tenant.
 ## Phase 1: lock the doors (🟢 on staging 10-11-2026, not tried with a real second tenant)
 
 Code: middleware/tenantGuard.js, repositories/ownershipRepository.js, migration 023.
-Not covered yet: Drive file ids in bodies (checked by Drive access, not tenant),
-approval review links (an unguessable emailed token).
+Drive file ids (added later): a tenant on the platform's shared service account may
+only download, share or rename a file in one of its own funnel folders (utils/driveGuard.js),
+and a pasted folder another tenant already uses is refused. A folder of the owner's that
+no funnel uses is not caught: give such tenants their own service account or Google sign-in.
+Approval review links stay on their unguessable emailed token, by design.
 
 - users.tenant_id (migration 023); a tenant's owner_email moves to that tenant.
 - The session sets req.tenantId. Only the super admin (or the machine admin key)
@@ -55,7 +58,8 @@ two workspaces at once: the second is told to wait.
 Code: utils/planSpec.js, services/planService.js, migration 024 (tenants.plan,
 default custom = no limits). Limits are checked when a funnel is made, when accounts
 are ticked, when the router lines up a post or an AI video, and on Schedule/Post.
-Not enforced yet: the users limit (there is no add-user flow besides New tenant).
+Users: a workspace admin adds users on the Users panel (one-time password), within the
+plan's users limit (POST /admin/users/add).
 
 - Enforce tenant status and expires_at on pages and on scheduled jobs
   (funnels.listActive, the waker's due tenants). An expired tenant gets a read-only page.
@@ -72,9 +76,11 @@ uses the owner's key (the platform key, on the owner's bill); an Agency tenant g
 platform key and must bring its own. Credit balances show only for the tenant's own keys.
 The Tenants panel has an "AI cost per tenant" box: on-bill cost for three months, this
 month in rupees (88 to the dollar), plan price and margin, own-key spend shown apart.
-Costs come from run steps (also deleted and remade runs) plus the ledger. Only the image
-gate writes to the ledger so far; other paid calls outside a run are not counted yet.
-The split uses each tenant's current keys, not the key in use on the day.
+Costs come from run steps (also deleted and remade runs) plus the ledger. Every paid call
+outside a run writes to the ledger (services/usageMeter.js: image gate, Lane 2 research,
+sheet refill, image factory, the older video images and funnel poster), with the key owner
+at the call. Run costs are split by the tenant's key history (tenant_config key_history,
+a new entry each time its key owners change), so old spend stays where it was paid.
 
 Planned:
 

@@ -10,6 +10,8 @@
  *               tenantSettings.
  */
 import { buildProviders } from './providerFactory.js';
+import { meter } from './usageMeter.js';
+import { costImages } from '../utils/pricing.js';
 import { factoryCaptionBar } from './imageComposer.js';
 import { wrapHook } from '../utils/wrap.js';
 import { childLogger } from '../core/logger.js';
@@ -46,11 +48,13 @@ export async function run({ tenantId = 'default' }) {
 
       // OpenAI variant
       const gpt = await providers.llm.generateImage({ prompt, size: '1024x1024' });
+      meter(providers, costImages({ count: 1, size: '1024x1024' }), 'image factory');
       const gptFinal = await factoryCaptionBar(gpt, wrapped.lines, wrapped.fontSize);
       await providers.storage.uploadPng(resolved.drive.factoryGptFolder, name, gptFinal);
 
       // Gemini variant
       const gem = await providers.llm.generateImageGemini({ prompt });
+      meter(providers, { ...costImages({ count: 1, model: 'gemini' }), provider: 'gemini' }, 'image factory');
       const gemFinal = await factoryCaptionBar(gem, wrapped.lines, wrapped.fontSize);
       await providers.storage.uploadPng(resolved.drive.factoryGeminiFolder, name, gemFinal);
 

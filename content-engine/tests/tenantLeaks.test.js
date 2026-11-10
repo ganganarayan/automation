@@ -75,6 +75,19 @@ describe('env fallbacks are the owner\'s only', () => {
     expect(acme.comparison.builtIn).toBe(false);
   });
 
+  it('key history: a new entry only when the owners change', () => {
+    const now = new Date('2026-11-10T06:00:00Z');
+    const first = ts.keyHistoryNext([], { openai: 'platform' }, now);
+    expect(first).toEqual([{ from: now.toISOString(), owners: { openai: 'platform' } }]);
+    expect(ts.keyHistoryNext(first, { openai: 'platform' }, now)).toBe(null);
+    expect(ts.keyHistoryNext(first, { openai: 'tenant' }, now)).toHaveLength(2);
+  });
+
+  it('a tenant on the shared service account is marked for the Drive guard', async () => {
+    expect((await ts.forTenant('acme')).google.serviceAccountShared).toBe(true);
+    expect((await ts.forTenant('default')).google.serviceAccountShared).toBe(false);
+  });
+
   it('providerKey rules', () => {
     expect(ts.providerKey('k', { own: { k: ' mine ' }, owner: { k: 'o' } })).toEqual(['mine', 'tenant']);
     expect(ts.providerKey('k', { own: {}, owner: { k: 'o' }, envValue: 'e' })).toEqual(['o', 'platform']);

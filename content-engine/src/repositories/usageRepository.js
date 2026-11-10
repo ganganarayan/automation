@@ -31,14 +31,16 @@ const stepCosts = (t) => `
   SELECT ${t}.tenant_id,
          CASE WHEN e->>'at' ~ '^\d{4}-\d{2}-\d{2}' THEN (e->>'at')::timestamptz ELSE ${t}.created_at END AS at,
          COALESCE(NULLIF(e->>'provider', ''), 'unknown') AS provider,
-         CASE WHEN jsonb_typeof(e->'costUsd') = 'number' THEN (e->>'costUsd')::numeric ELSE 0 END AS usd
+         CASE WHEN jsonb_typeof(e->'costUsd') = 'number' THEN (e->>'costUsd')::numeric ELSE 0 END AS usd,
+         NULLIF(e->>'keyOwner', '') AS key_owner
     FROM ${t === 'i' ? 'instances' : 'deleted_instances'} ${t},
          jsonb_array_elements(CASE WHEN jsonb_typeof(${t}.steps) = 'array' THEN ${t}.steps ELSE '[]'::jsonb END) s,
          jsonb_array_elements(CASE WHEN jsonb_typeof(s->'costs') = 'array' THEN s->'costs' ELSE '[]'::jsonb END) e
    WHERE ${t}.title <> '${SAMPLE}'`;
 
 /**
- * Cost per tenant, IST month and provider: [{ tenant_id, month: 'YYYY-MM', provider, usd }].
+ * Cost per tenant, IST day, provider and key owner (when the entry kept one):
+ * [{ tenant_id, day: 'YYYY-MM-DD', month: 'YYYY-MM', provider, key_owner, usd }].
  */
 export async function monthCosts({ months = 3 } = {}) {
   const n = Math.max(1, Math.min(24, Number(months) || 3));
@@ -48,14 +50,15 @@ export async function monthCosts({ months = 3 } = {}) {
        UNION ALL
        ${stepCosts('d')}
        UNION ALL
-       SELECT tenant_id, at, provider, cost_usd AS usd FROM usage_ledger
+       SELECT tenant_id, at, provider, cost_usd AS usd, key_owner FROM usage_ledger
      )
-     SELECT tenant_id, to_char((at AT TIME ZONE 'UTC') + interval '330 minutes', 'YYYY-MM') AS month, provider, sum(usd)::float AS usd
+     SELECT tenant_id, to_char((at AT TIME ZONE 'UTC') + interval '330 minutes', 'YYYY-MM-DD') AS day,
+            to_char((at AT TIME ZONE 'UTC') + interval '330 minutes', 'YYYY-MM') AS month, provider, key_owner, sum(usd)::float AS usd
        FROM c
       WHERE at >= ((date_trunc('month', (now() AT TIME ZONE 'UTC') + interval '330 minutes') - make_interval(months => $1::int - 1) - interval '330 minutes') AT TIME ZONE 'UTC')
-      GROUP BY 1, 2, 3
+      GROUP BY 1, 2, 3, 4, 5
      HAVING sum(usd) > 0
-      ORDER BY 2 DESC, 1, 4 DESC`,
+      ORDER BY 2 DESC, 1, 6 DESC`,
     [n],
   );
   return rows;

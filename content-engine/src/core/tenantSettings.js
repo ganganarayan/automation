@@ -100,6 +100,17 @@ export function providerKey(key, { own = {}, owner = {}, isOwner = false, byo = 
   return [plat, plat ? 'platform' : 'none'];
 }
 
+/**
+ * The key history with today's owners added, or null when nothing changed.
+ * Pure, for tests. Keeps the last 60 changes.
+ */
+export function keyHistoryNext(hist = [], owners = {}, now = new Date()) {
+  const last = (hist[hist.length - 1] || {}).owners || null;
+  const same = last && Object.keys({ ...last, ...owners }).every((p) => (last[p] || 'none') === (owners[p] || 'none'));
+  if (same) return null;
+  return [...hist, { from: now.toISOString(), owners: { ...owners } }].slice(-60);
+}
+
 export function invalidate(tenantId) {
   planCache.clear();
   tenantIds = null;
@@ -192,6 +203,14 @@ export async function forTenant(tenantId = 'default') {
   const gh = from(cleanShared);
   keyOwners.google = googleShared ? (g('google_oauth_client_id') ? 'platform' : 'none') : (isOwner ? 'platform' : 'tenant');
   keyOwners.github = cleanShared ? (gh('github_actions_token') ? 'platform' : 'none') : (isOwner ? 'platform' : 'tenant');
+  // Whose key paid, over time: a new entry each time a tenant's key owners change,
+  // so the cost report splits old spend by the key in use on the day.
+  const keyHistory = parseJson(o.key_history || null, []);
+  const hist = Array.isArray(keyHistory) ? keyHistory : [];
+  if (!isOwner) {
+    const next = keyHistoryNext(hist, keyOwners, new Date());
+    if (next) tenantConfig.set(String(tenantId), 'key_history', JSON.stringify(next)).then(() => cache.delete(String(tenantId))).catch(() => {});
+  }
 
   return {
     tenantId,
@@ -199,6 +218,8 @@ export async function forTenant(tenantId = 'default') {
     // (write-only in the UI) wins; env GOOGLE_SERVICE_ACCOUNT_JSON is a fallback.
     google: {
       serviceAccount: parseJson(pick('google_service_account_json', null), null) || env.google.serviceAccount,
+      // Another tenant on the platform's service account: its Drive ids are checked.
+      serviceAccountShared: !isOwner && !parseJson(o.google_service_account_json || null, null),
       // "Sign in with Google" + Drive picker (browser-side; no secret).
       oauthClientId: g('google_oauth_client_id'),
       pickerApiKey: g('google_picker_api_key'),
@@ -267,6 +288,7 @@ export async function forTenant(tenantId = 'default') {
     postformeShared: pfm.shared,
     // Per provider: 'tenant' (its own key), 'platform' (the owner's) or 'none'.
     get keyOwners() { return keyOwners; },
+    keyHistory: hist,
     // Central provider credentials (API Keys page). Funnels pick the provider;
     // the key is always taken from here, never from funnel_config.
     animation: {

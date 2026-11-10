@@ -125,6 +125,12 @@ export function createGoogleDriveProvider(cfg, log) {
       await drive.files.update({ fileId, supportsAllDrives: true, requestBody: { name } });
     },
 
+    /** The folders a file sits in (for the tenant Drive guard). */
+    async parentsOf(fileId) {
+      const res = await drive.files.get({ fileId, fields: 'parents', supportsAllDrives: true });
+      return res.data.parents || [];
+    },
+
     async download(fileId) {
       const res = await drive.files.get({ fileId, alt: 'media', supportsAllDrives: true }, { responseType: 'arraybuffer' });
       return Buffer.from(res.data);

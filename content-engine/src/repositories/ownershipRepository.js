@@ -33,4 +33,22 @@ export async function tenantOf(kind, id) {
   return rows[0] ? String(rows[0].tenant_id) : null;
 }
 
-export default { tenantOf, validId };
+/**
+ * The tenants whose funnels use this Drive folder (as a media or ready-video
+ * folder, or a saved source). A folder setting may hold a link, so it matches
+ * on the id inside it.
+ */
+export async function driveFolderTenants(folderId) {
+  const id = String(folderId || '').trim();
+  if (!/^[A-Za-z0-9_-]{10,}$/.test(id)) return [];
+  const { rows } = await query(
+    `SELECT DISTINCT f.tenant_id FROM funnel_config c JOIN funnels f ON f.id = c.funnel_id
+      WHERE c.key IN ('drive_folder_id', 'direct_drive_folder') AND position($1 in c.value) > 0
+     UNION
+     SELECT DISTINCT tenant_id FROM funnel_sources WHERE ref = $1`,
+    [id],
+  );
+  return rows.map((r) => String(r.tenant_id));
+}
+
+export default { tenantOf, validId, driveFolderTenants };

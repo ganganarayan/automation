@@ -26,6 +26,8 @@
 import { DateTime } from 'luxon';
 import * as funnels from '../repositories/funnelsRepository.js';
 import { buildProviders } from './providerFactory.js';
+import { meter } from './usageMeter.js';
+import { costImages } from '../utils/pricing.js';
 import * as approvalService from './approvalService.js';
 import { setStatus } from '../repositories/approvalRepository.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
@@ -113,6 +115,8 @@ export async function runFunnel(funnelRow) {
   }
 
   const image = await generate(providers, composePrompt(row), f.imageSize, f.imageKey);
+  const gem = !providers.resolved?.openai?.apiKey && providers.resolved?.gemini?.apiKey;
+  meter(providers, gem ? { ...costImages({ count: 1, model: 'gemini' }), provider: 'gemini' } : costImages({ count: 1, size: f.imageSize }), 'funnel poster');
   const upload = await providers.storage.uploadPng(f.driveFolder, `${slug(f.name)}-${row.matchKey || Date.now()}.png`, image);
   const { full, short } = composeCaptions(row, { ctaLink: f.ctaLink, audiencePrefix: f.audiencePrefix });
 

@@ -33,6 +33,8 @@ import * as imageLane from './imageLaneService.js';
 import * as stepLog from './stepLogService.js';
 import * as heartbeat from '../core/heartbeat.js';
 import { buildProviders } from './providerFactory.js';
+import { meter } from './usageMeter.js';
+import { costText } from '../utils/pricing.js';
 import { researchPrompt, normalizeResearch, historyLines, instanceHistoryLine, isCreditError, rerunAction } from '../utils/routerSpec.js';
 import { retitleForDate } from '../utils/retrySpec.js';
 import { stepDownNote } from '../utils/stepDownSpec.js';
@@ -66,7 +68,9 @@ export async function prepare({ funnelRow, scheduledFor, postDate, log = baseLog
   const { system, user } = researchPrompt({
     funnelName: f.name, landingUrl: f.landingPageUrl, landingText: page, history: historyLines(recent.map(instanceHistoryLine), 40),
   });
-  const brief = normalizeResearch(await providers.llm.generateJson({ system, user, maxTokens: 2000 }));
+  const researched = await providers.llm.generateJsonDetailed({ system, user, maxTokens: 2000 });
+  meter(providers, costText({ ...(researched.usage || {}), model: researched.model }), 'lane 2 research');
+  const brief = normalizeResearch(researched.data);
   const researchTo = new Date().toISOString();
 
   const inst = await instanceService.createForFunnel({
