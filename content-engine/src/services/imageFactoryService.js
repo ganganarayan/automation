@@ -15,6 +15,7 @@ import { costImages } from '../utils/pricing.js';
 import { factoryCaptionBar } from './imageComposer.js';
 import { wrapHook } from '../utils/wrap.js';
 import { childLogger } from '../core/logger.js';
+import { formatIst } from '../utils/time.js';
 
 const SHEET_TAB = 'Sheet1';
 
@@ -62,7 +63,7 @@ export async function run({ tenantId = 'default' }) {
       const statusCol = colLetter(col('status'));
       const doneCol = colLetter(col('done_at'));
       if (statusCol) await providers.sheets.updateCells(resolved.sheets.factory, `${SHEET_TAB}!${statusCol}${rowNumber}`, [['Done']]);
-      if (doneCol) await providers.sheets.updateCells(resolved.sheets.factory, `${SHEET_TAB}!${doneCol}${rowNumber}`, [[new Date().toISOString()]]);
+      if (doneCol) await providers.sheets.updateCells(resolved.sheets.factory, `${SHEET_TAB}!${doneCol}${rowNumber}`, [[formatIst(new Date())]]);
       processed += 1;
       log.info({ id }, 'factory row processed');
     } catch (err) {

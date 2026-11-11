@@ -15,6 +15,7 @@
 import { DateTime } from 'luxon';
 import { extractRow, sheetColumnIndex } from './postCompose.js';
 import { byFileOrder } from './readyPostSpec.js';
+import { noDashes } from './aiCopySpec.js';
 
 const ZONE = 'Asia/Kolkata';
 
@@ -330,6 +331,7 @@ export function refillPrompt({ funnelName = '', landingUrl = '', landingText = '
   const system = [
     `You plan daily social media image posts for the brand/funnel "${funnelName}".`,
     'Each post must be NEW: a different topic, angle and format from every past post listed, no repeats, no near-duplicates, and the set itself must vary (e.g. a tip, a story, a myth vs fact, a question, a quote, a checklist, a before/after).',
+    'Never use em dashes or en dashes anywhere. Use a comma, a full stop or a colon instead.',
     'Stay true to what the landing page offers and who it is for. Do not invent prices, guarantees or facts that are not on it.',
     'Do not put links in captions (the link is added separately).',
     `Return ONLY a JSON object: {"posts": [ ${count} objects ]}, each object with:`,
@@ -349,13 +351,15 @@ export function refillPrompt({ funnelName = '', landingUrl = '', landingText = '
 export function normalizeRefill(data, count = REFILL_COUNT) {
   const list = Array.isArray(data) ? data : (data && Array.isArray(data.posts) ? data.posts : []);
   const s = (v) => String(v ?? '').trim();
+  // What gets posted or drawn on the picture never carries an em or en dash.
+  const t = (v) => noDashes(s(v)).trim();
   return list
     .map((p) => ({
       imagePrompt: s(p && (p.imagePrompt || p.image_prompt || p.prompt)),
-      headline: s(p && p.headline),
-      subhead: s(p && p.subhead),
-      caption: s(p && (p.caption || p.captionFull)),
-      captionShort: s(p && p.captionShort),
+      headline: t(p && p.headline),
+      subhead: t(p && p.subhead),
+      caption: t(p && (p.caption || p.captionFull)),
+      captionShort: t(p && p.captionShort),
       hashtags: Array.isArray(p && p.hashtags) ? p.hashtags.map(s).join(' ') : s(p && p.hashtags),
     }))
     .filter((p) => p.imagePrompt)
@@ -614,6 +618,7 @@ export function researchPrompt({ funnelName = '', landingUrl = '', landingText =
     'It must be NEW: a topic, angle and format that differ from every past post listed (no repeats or near-duplicates). Vary the format (a story, a myth vs fact, a tip, a question, a list, a before/after).',
     'Stay true to what the landing page offers and who it is for. Never invent prices, guarantees or facts that are not on it.',
     'A third-person narrator speaks over animated images; nobody talks on screen.',
+    'Never use em dashes or en dashes anywhere. Use a comma, a full stop or a colon instead.',
     'Return ONLY a JSON object: {"topic": "...", "angle": "...", "format": "...", "title": "a short title", "caption": "the post caption (hook first, call to action last, no links)", "headline": "the hook in at most 8 words, to read on an image at a glance", "subhead": "one short line under the headline, at most 14 words"}',
   ].join('\n');
   const user = [
@@ -628,10 +633,10 @@ export function researchPrompt({ funnelName = '', landingUrl = '', landingText =
 /** The LLM's research reply → { topic, angle, format, title, caption, headline, subhead } (topic required). */
 export function normalizeResearch(data) {
   const o = data && typeof data === 'object' ? data : {};
-  const s = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const s = (v, n) => noDashes(String(v ?? '').replace(/\s+/g, ' ').trim()).trim().slice(0, n);
   const out = {
     topic: s(o.topic, 300), angle: s(o.angle, 300), format: s(o.format, 120), title: s(o.title, 120),
-    caption: String(o.caption ?? '').trim().slice(0, 2000),
+    caption: noDashes(String(o.caption ?? '').trim()).trim().slice(0, 2000),
     headline: s(o.headline, 90), subhead: s(o.subhead, 140),
   };
   if (!out.topic) throw new Error('the research step returned no topic');

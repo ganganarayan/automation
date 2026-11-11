@@ -15,7 +15,7 @@ import * as crossRead from '../repositories/dashboardReadRepository.js';
 import * as deliveryLog from '../repositories/pfmDeliveryLogRepository.js';
 import * as approvals from '../repositories/approvalRepository.js';
 import * as jobs from '../repositories/jobRepository.js';
-import { todayKeyIst, isoIst } from '../utils/time.js';
+import { todayKeyIst, formatIst } from '../utils/time.js';
 
 /** Collect data for every service section. */
 export async function collect(tenantId = 'default') {
@@ -104,7 +104,7 @@ export async function render(tenantId = 'default', opts = {}) {
             const p = r.payload || {};
             const ms = p.matchSignals || {};
             const signals = Object.entries(ms).filter(([, v]) => v).map(([k]) => k).join(', ');
-            return [p.paymentId || '', p.value ?? '', signals || '\u2014', p.metaStatus ?? '\u2014', r.created_at];
+            return [p.paymentId || '', p.value ?? '', signals || '-', p.metaStatus ?? '-', r.created_at];
           }))}
 
     <h2>Recent events</h2>
@@ -160,7 +160,7 @@ export async function render(tenantId = 'default', opts = {}) {
   </aside>
   <main>
     <header class="top">
-      <small>${d.day} IST · generated ${isoIst()}</small>
+      <small>${formatIst(`${d.day}T12:00:00+05:30`, { withTime: false })} IST · generated ${formatIst(new Date())}</small>
       <button class="refresh" onclick="location.reload()">Refresh</button>
     </header>
     ${overview}${content}${tracking}
@@ -212,7 +212,10 @@ function table(headers, rows) {
 /** Render a cell; pass through our own trusted <span>/<pre> markup, escape the rest. */
 function cell(c) {
   if (c === undefined || c === null) return '';
+  // A timestamp reads as DD-MM-YYYY HH:MM IST, never the server's own Date text.
+  if (c instanceof Date) return esc(formatIst(c));
   const s = String(c);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return esc(formatIst(s));
   if (s.startsWith('<span') || s.startsWith('<pre')) return s;
   return esc(s);
 }

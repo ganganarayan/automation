@@ -16,6 +16,7 @@ import { costText } from '../utils/pricing.js';
 import * as refillState from '../repositories/refillStateRepository.js';
 import { VIDAPULSE_SYSTEM, vidapulseDashboardPrompt } from './prompts.js';
 import { childLogger } from '../core/logger.js';
+import { noDashes } from '../utils/aiCopySpec.js';
 
 const BRAND = 'vidapulse';
 const SHEET_TAB = 'Sheet1';
@@ -82,14 +83,14 @@ export async function run({ tenantId = 'default' }) {
     format: 'image',
     audience: post.audience || '',
     theme: post.theme || '',
-    headline: post.headline || '',
-    subheadline: post.subheadline || '',
+    headline: noDashes(post.headline || ''),
+    subheadline: noDashes(post.subheadline || ''),
     image_prompt: vidapulseDashboardPrompt({
       scene: post.scene || '',
-      headline: post.headline || '',
-      subheadline: post.subheadline || '',
+      headline: noDashes(post.headline || ''),
+      subheadline: noDashes(post.subheadline || ''),
     }),
-    caption: ensureCaptionCta(post.caption),
+    caption: ensureCaptionCta(noDashes(post.caption || '')),
     status: 'Ready',
   }));
 

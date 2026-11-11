@@ -31,6 +31,7 @@ import { signTicket, peekTicket, readTicket, dispatchRequest, DEFAULT_REPO } fro
 import { buildSrt } from '../utils/stageSpec.js';
 import { HookError } from './readyPostService.js';
 import { childLogger } from '../core/logger.js';
+import { formatIst } from '../utils/time.js';
 
 const log = childLogger({ module: 'assemble' });
 
@@ -118,7 +119,7 @@ export async function hookJob({ ticket }) {
     height: Number(p.h) || 1920,
     accessToken: token,
     folderId,
-    fileName: `AI video ${String(p.d).slice(0, 8)} (${new Date().toISOString().slice(0, 10)}).mp4`,
+    fileName: `AI video ${String(p.d).slice(0, 8)} (${formatIst(new Date(), { withTime: false })}).mp4`,
   };
 }
 

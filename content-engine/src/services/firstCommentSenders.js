@@ -53,6 +53,29 @@ export function linkedinUrn(id = '') {
   return s.startsWith('urn:') ? s : `urn:li:ugcPost:${s}`;
 }
 
+/**
+ * The Facebook objects a first comment may go on, best first. Post for Me can
+ * hand back a bare post id, which Facebook refuses ("(#12) singular statuses
+ * API is deprecated"); the page_post form and the video id from the post's
+ * own URL (facebook.com/{page}/videos/{video}) are what Facebook accepts.
+ */
+export function facebookTargets(postId = '', { url = '', pageId = '' } = {}) {
+  const id = String(postId || '').trim();
+  const m = String(url || '').match(/facebook\.com\/(\d+)\/(?:videos|reel|posts)\/(\d+)/);
+  const page = String(pageId || '').trim() || (m ? m[1] : '');
+  const out = [];
+  if (id.includes('_')) out.push(id);
+  else if (id && page) out.push(`${page}_${id}`);
+  if (m && m[2]) out.push(m[2]);
+  if (id) out.push(id);
+  return [...new Set(out.filter(Boolean))];
+}
+
+/** Facebook's "wrong object" refusals: try the next id, nothing was posted. */
+function fbWrongObject(err) {
+  return /\(#12\)|\(#100\)|\(#803\)|Unsupported post request|does not exist/i.test(String((err && err.message) || ''));
+}
+
 /** Who comments on LinkedIn: the account's URN, else its org then person form. */
 export function linkedinActors(userId = '') {
   const s = String(userId || '');
@@ -80,8 +103,18 @@ export function createFirstCommentSenders({ request: req = realRequest, log } = 
   }
 
   const senders = {
-    async facebook({ postId, token, text }) {
-      return call(`https://graph.facebook.com/${FB_VERSION}/${encodeURIComponent(postId)}/comments`, { token, body: { message: text } }, 'firstComment.facebook');
+    async facebook({ postId, token, text, account, url }) {
+      const targets = facebookTargets(postId, { url, pageId: (account && account.user_id) || '' });
+      let last = null;
+      for (const id of targets) {
+        try {
+          return await call(`https://graph.facebook.com/${FB_VERSION}/${encodeURIComponent(id)}/comments`, { token, body: { message: text } }, 'firstComment.facebook');
+        } catch (err) {
+          last = err;
+          if (!fbWrongObject(err)) throw err;
+        }
+      }
+      throw last || new Error('no Facebook post id to comment on');
     },
 
     // Instagram Login tokens (IG…) live on graph.instagram.com, Facebook Login ones on graph.facebook.com.
@@ -128,12 +161,12 @@ export function createFirstCommentSenders({ request: req = realRequest, log } = 
 
   return {
     /** Comment on one published post. Returns { state: 'ok' } or { state: 'skipped', error }; throws on failure. */
-    async comment({ platform, postId, token, text, account }) {
+    async comment({ platform, postId, token, text, account, url = '' }) {
       const key = commentPlatform(platform);
       if (!key) return { state: 'skipped', error: `${platform || 'this platform'} has no comment API` };
       if (!postId) return { state: 'skipped', error: 'Post for Me gave no post id' };
       if (!token) return { state: 'skipped', error: 'no account token from Post for Me' };
-      await senders[key]({ postId, token, text, account });
+      await senders[key]({ postId, token, text, account, url });
       return { state: 'ok' };
     },
 
@@ -142,14 +175,14 @@ export function createFirstCommentSenders({ request: req = realRequest, log } = 
      * { state: 'ok', via, tried } or { state: 'skipped' }; when every token
      * fails, throws the last error (retryable only if that one was).
      */
-    async commentWithFallback({ platform, postId, tokens = [], text, account }) {
+    async commentWithFallback({ platform, postId, tokens = [], text, account, url = '' }) {
       const list = (tokens || []).filter((t) => t && t.token);
-      if (!list.length) return this.comment({ platform, postId, token: '', text, account });
+      if (!list.length) return this.comment({ platform, postId, token: '', text, account, url });
       const tried = [];
       let last = null;
       for (const { via, token } of list) {
         try {
-          const out = await this.comment({ platform, postId, token, text, account });
+          const out = await this.comment({ platform, postId, token, text, account, url });
           if (out.state !== 'ok') return out;
           return { ...out, via, tried };
         } catch (err) {
@@ -163,4 +196,4 @@ export function createFirstCommentSenders({ request: req = realRequest, log } = 
   };
 }
 
-export default { createFirstCommentSenders, commentPlatform, dmOnly, linkedinUrn, linkedinActors, COMMENT_PLATFORMS };
+export default { createFirstCommentSenders, commentPlatform, dmOnly, linkedinUrn, linkedinActors, facebookTargets, COMMENT_PLATFORMS };

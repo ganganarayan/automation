@@ -97,7 +97,7 @@ async function commentOn(publish, row, r, attempts) {
     }
     const postId = r.platform_data && r.platform_data.id;
     const out = await senders.commentWithFallback({
-      platform, postId, text: row.text, account,
+      platform, postId, text: row.text, account, url: (r.platform_data && r.platform_data.url) || '',
       tokens: await tokensFor(row.tenant_id, platform, postId, account),
     });
     await repo.mark(row.id, accountId, {
