@@ -31,6 +31,14 @@ describe('query connection retry', () => {
     expect(c.release).toHaveBeenCalledWith(err);
   });
 
+  it('waits for a database that is still starting up', async () => {
+    const c = client(async () => ({ rows: [1] }));
+    const starting = Object.assign(new Error('the database system is starting up'), { code: '57P03' });
+    poolConnect.mockRejectedValueOnce(starting).mockResolvedValueOnce(c);
+    await expect(query('SELECT 1')).resolves.toEqual({ rows: [1] });
+    expect(poolConnect).toHaveBeenCalledTimes(2);
+  });
+
   it('does not retry a non-network connect error', async () => {
     poolConnect.mockImplementation(async () => { throw new Error('password authentication failed'); });
     await expect(query('SELECT 1')).rejects.toThrow('password');

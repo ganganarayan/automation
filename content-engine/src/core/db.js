@@ -34,9 +34,11 @@ pool.on('error', (err) => {
   logger.error({ err: err.message }, 'idle postgres client error');
 });
 
-// Network errors on opening a connection, as just after the app wakes from sleep.
-const CONNECT_ERRORS = ['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN'];
-const CONNECT_RETRY_MS = [500, 1500, 3000];
+// Errors on opening a connection that pass on their own: network errors just after
+// the app wakes, and Postgres itself still waking from sleep or restarting
+// (57P03 "the database system is starting up"). About 20 s in all.
+const CONNECT_ERRORS = ['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN', '57P03'];
+const CONNECT_RETRY_MS = [500, 1500, 3000, 5000, 10000];
 
 /** Get a connection, trying again on a network error. Nothing has run yet, so this is always safe. */
 async function connect() {
