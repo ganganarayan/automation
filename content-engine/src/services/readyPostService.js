@@ -1632,6 +1632,10 @@ export async function startPost({ tenantId = 'default', funnelId, selections, ac
     for (const c of clashes) await replaceRouterPick(c, items.find((x) => x.driveId === c.driveId).instanceId);
   }
   for (const item of items) {
+    // A router pick moved to another day frees the day it was lined up for, so the next wake refills it.
+    const freed = await routerDays.releaseMovedPick(item.instanceId, postDateOf(item.scheduledIso))
+      .catch((err) => { log.warn({ err: err.message, instance: item.instanceId }, 'could not free the router day'); return []; });
+    if (freed.length) log.info({ funnel: funnel.name, instance: item.instanceId, freed }, 'router pick moved, its day freed for the next wake');
     await instanceRepo.markPosting(item.instanceId, { scheduledFor: item.scheduledIso ? new Date(item.scheduledIso) : null });
     await stepLog.start(item.instanceId, 'publish');
     postJobs.set(jobKey(funnel.tenant_id || tenantId, item.driveId), { state: 'running', instanceId: item.instanceId, scheduledIso: item.scheduledIso, startedAt: Date.now() });

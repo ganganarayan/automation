@@ -59,6 +59,24 @@ export async function release(funnelId, postDate) {
   return rows[0] || null;
 }
 
+/**
+ * A router pick posted or scheduled by hand for postDate: drop the days from
+ * today (IST) on that still point at it for another date, so the next wake
+ * lines up a fresh post there instead of leaving the day empty. Past days stay
+ * as history. Returns the post dates released (yyyy-MM-dd).
+ */
+export async function releaseMovedPick(instanceId, postDate) {
+  if (!instanceId || !postDate) return [];
+  const { rows } = await query(
+    `DELETE FROM router_days
+      WHERE instance_id = $1 AND post_date <> $2::date
+        AND post_date >= (now() AT TIME ZONE 'Asia/Kolkata')::date
+      RETURNING to_char(post_date, 'YYYY-MM-DD') AS post_date`,
+    [instanceId, postDate],
+  );
+  return rows.map((r) => r.post_date);
+}
+
 /** A tenant's decisions for a date range (inclusive, IST dates), by funnel. */
 export async function listByDates(tenantId = 'default', fromDate, toDate) {
   const { rows } = await query(
@@ -69,4 +87,4 @@ export async function listByDates(tenantId = 'default', fromDate, toDate) {
   return rows;
 }
 
-export default { get, claim, update, releaseNone, release, listByDates };
+export default { get, claim, update, releaseNone, release, releaseMovedPick, listByDates };
