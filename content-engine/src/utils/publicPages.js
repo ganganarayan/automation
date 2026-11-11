@@ -100,7 +100,7 @@ export const PLAN_FEATURES = {
   brand: {
     tag: 'One brand, posting every day, everywhere',
     lines: [
-      'Everything in the list on the left',
+      'Everything in the list above',
       'Ready video lane: AI copy, headline thumbnail in every size, end card, Clean check',
       'Image posts as voiced videos with music',
       'A call to action per funnel, with a per-post override',
@@ -111,7 +111,7 @@ export const PLAN_FEATURES = {
     tag: 'Every client on the same promise',
     lead: 'Everything in Always-On Brand, per client, plus',
     lines: [
-      'Each client its own workspace and login',
+      'Client logins: an owner who acts, or a viewer who only looks',
       'Your team on one sign-in across clients',
       'Cost per client, to bill your own clients',
       'Priority support',
