@@ -5,11 +5,12 @@ import { homePage } from '../src/utils/publicPages.js';
 import { costTts } from '../src/utils/pricing.js';
 
 describe('Starter Lite', () => {
-  it('is a ₹999 lean plan with 15 posts and no AI videos', () => {
-    expect(PLAN_IDS[0]).toBe('lite');
+  it('is a ₹999 lean plan with 15 posts and no AI videos, kept for workspaces already on it', () => {
+    expect(PLAN_IDS).toContain('lite');
     expect(PLANS.lite).toMatchObject({ priceInr: 999, posts: 15, aiVideos: 0, funnels: 1, users: 1, clients: 0, lean: true });
     expect(isLean('lite')).toBe(true);
-    for (const p of ['starter', 'growth', 'agency', 'custom', '']) expect(isLean(p)).toBe(false);
+    for (const p of ['brand', 'starter', 'growth', 'agency', 'custom', '']) expect(isLean(p)).toBe(false);
+    expect(isLean('solo')).toBe(true);
     expect(limitsFor('lite').label).toBe('Starter Lite');
   });
 
@@ -19,16 +20,16 @@ describe('Starter Lite', () => {
     expect(costTts({ provider: 'elevenlabs_flash', chars: 1000 }).costUsd).toBeCloseTo(costTts({ provider: 'elevenlabs', chars: 1000 }).costUsd / 2, 6);
   });
 
-  it('the landing page shows Lite first and every price + GST', () => {
+  it('the landing page no longer sells Lite, and every price carries + GST', () => {
     const h = homePage();
-    expect(h).toContain('Starter Lite');
-    expect(h).toContain('₹999<small> + GST / month');
-    expect(h).toContain('₹2,799<small> + GST / month');
+    expect(h).not.toContain('Starter Lite');
+    expect(h).toContain('₹3,099<small> + GST / month');
     expect(h).toContain('18% GST is added to every price');
     const prices = h.match(/₹[\d,]+(<small>)? ?[^₹]{0,12}/g) || [];
     // every plan price and add-on on the page carries + GST (comparison texts aside)
     // every rupee plan price and add-on carries + GST, or is the total with GST
-    const pricing = h.slice(h.indexOf('id="pricing"'), h.indexOf('id="compare"'));
+    // the plan cards and fine print (the value stack above them shows market prices)
+    const pricing = h.slice(h.indexOf('class="grid plans'), h.indexOf('id="compare"'));
     for (const m of pricing.match(/₹[\d,]+(<small>)?[^<\d,]{0,22}/g) || []) expect(m).toMatch(/\+ GST| with /);
     expect(prices.length).toBeGreaterThan(0);
   });

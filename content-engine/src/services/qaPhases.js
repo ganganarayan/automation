@@ -14,6 +14,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import * as tenantSettings from '../core/tenantSettings.js';
+import { bringsOwnKeys } from '../core/tenantSettings.js';
 import { query } from '../core/db.js';
 import { buildProviders } from './providerFactory.js';
 import * as planService from './planService.js';
@@ -30,7 +31,7 @@ import { recordDecision, decide, liveGate } from '../middleware/tenantGuard.js';
 import { guardDrive, NOT_YOURS } from '../utils/driveGuard.js';
 import { claimedIds } from '../utils/metaRoute.js';
 import { signTicket } from '../utils/cleanHookSpec.js';
-import { limitsFor } from '../utils/planSpec.js';
+import { limitsFor, limitsForTenant } from '../utils/planSpec.js';
 import { leakedSettings, keyFindings, accountFindings, metaFindings, keyHistoryFinding } from '../utils/qaSpec.js';
 
 export const EXPIRED_ID = 'qa-expired';
@@ -149,7 +150,7 @@ export async function lifecycleChecks(tenantId) {
   planService.invalidate(tenantId);
   const info = await planService.tenantInfo(tenantId);
   out.push(check(G, 'Workspace live', info.live ? 'ok' : 'warn', info.live ? `${limitsFor(info.plan).label}, live` : `not live: ${info.reason}`));
-  const lim = limitsFor(info.plan);
+  const lim = limitsForTenant(info.plan, { units: info.units, extraUsers: info.extraUsers });
   const now = { funnels: await funnelsRepo.countByTenant(tenantId), users: await users.countForTenant(tenantId), channels: 0, posts: null, aiVideos: null };
   for (const what of ['funnels', 'channels', 'posts', 'aiVideos', 'users']) {
     const max = lim[what];
@@ -181,7 +182,10 @@ export async function lifecycleChecks(tenantId) {
 
 export async function billingChecks(tenantId, mine, plan) {
   const G = 'Phase 4 billing';
-  const out = [...keyFindings(mine.keyOwners, plan)];
+  // An agency bought per client has AI included, so the owner's keys are right there.
+  const row = await tenantRepo.findById(tenantId).catch(() => null);
+  const head = row && row.parent_id ? await tenantRepo.findById(row.parent_id).catch(() => null) : row;
+  const out = [...keyFindings(mine.keyOwners, plan, bringsOwnKeys(head ? { plan: head.plan, units: head.units } : { plan }))];
   // The key history is written in the background on a read that sees a change.
   await new Promise((r) => setTimeout(r, 1500));
   tenantSettings.invalidate(tenantId);

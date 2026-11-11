@@ -51,7 +51,7 @@ export const ROWS = [
 export const US = {
   aiCopy: ['y', 'Claude writes caption, hook and picture prompt from the background you paste once.'],
   aiImages: ['y', 'OpenAI draws them with no text; Claude places the headline in the empty space.'],
-  aiVideo: ['y', 'Script, pictures, animation (Kling, Runway or MiniMax) and ElevenLabs voice. Growth and Agency.'],
+  aiVideo: ['y', 'Script, pictures, animation (Kling, Runway or MiniMax) and ElevenLabs voice. ₹499 + GST ($6) per video.'],
   rawVideo: ['y', 'Drop videos in Drive: AI copy, thumbnails in every size, end card and a Clean check.'],
   sizes: ['y', 'Thumbnails and image posts in all three sizes, the tall ones drawn as their own picture.'],
   autoDaily: ['y', 'The router triggers once a day and always posts: ready video, then AI video, then image post.'],
@@ -59,13 +59,13 @@ export const US = {
   channels: ['y', 'All eight, any number of accounts your plan allows, from one approval.'],
   firstComment: ['y', 'Posted as the first comment on every channel that allows it.'],
   deleteLive: ['y', 'Tick the channels, press Delete once; each platform removes it through its own API.'],
-  commentDm: ['y', 'Instagram and Facebook, each lead gets their own link. Growth and Agency.'],
+  commentDm: ['y', 'Instagram and Facebook, each lead gets their own link. In every plan.'],
   leadVisits: ['y', 'A small script on your page marks each DM\'d lead who opens their link.'],
   costPerPost: ['y', 'Every AI step records what it really cost, per post, on Log and cost.'],
   byoKeys: ['y', 'Agency plan: your OpenAI, Claude, Kling, MiniMax and ElevenLabs keys.'],
   workspaces: ['y', 'A funnel per brand, and a workspace per client with its own keys and accounts.'],
-  freePlan: ['p', 'No free plan. 7-day trial of Starter.'],
-  entryPrice: ['y', '₹999 + GST a month for 15 posts on every channel, AI included; ₹2,799 + GST for 30.'],
+  freePlan: ['p', 'No free plan. 7-day trial.'],
+  entryPrice: ['y', '₹3,099 + GST a month per brand: 30 finished posts on 10 channels, AI included.'],
   inr: ['y', 'Priced and billed in Indian rupees.'],
 };
 

@@ -44,4 +44,12 @@ export function cancelSubscription(keys, id) {
   return call(keys, 'POST', `/subscriptions/${encodeURIComponent(id)}/cancel`, { cancel_at_cycle_end: 1 });
 }
 
-export default { createPlan, createSubscription, cancelSubscription };
+/**
+ * Move a subscription to another plan from its next renewal. Razorpay allows
+ * this for card mandates; UPI and other mandates refuse it (the error says so).
+ */
+export function changePlan(keys, id, planId) {
+  return call(keys, 'PATCH', `/subscriptions/${encodeURIComponent(id)}`, { plan_id: planId, quantity: 1, schedule_change_at: 'cycle_end', customer_notify: 1 });
+}
+
+export default { createPlan, createSubscription, cancelSubscription, changePlan };

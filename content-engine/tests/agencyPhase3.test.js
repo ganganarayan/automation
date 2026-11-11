@@ -213,7 +213,7 @@ describe('cost CSV, move out, roll-up', () => {
     expect(new Date(tenants.c1.expires_at) - Date.now()).toBeGreaterThan(6.9 * 86400000);
     expect(out.plan).toBe('growth');
     tenants.c2 = { id: 'c2', parent_id: 'ag', status: 'active' };
-    expect((await agency.detachClient('ag', 'c2', 'agency')).plan).toBe('starter');
+    expect((await agency.detachClient('ag', 'c2', 'agency')).plan).toBe('brand');
     await expect(agency.detachClient('ag', 'x1')).rejects.toThrow('not yours');
   });
   it('one roll-up a day after 20:00 IST to the agency', async () => {

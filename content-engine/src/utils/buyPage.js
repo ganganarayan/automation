@@ -8,25 +8,14 @@
  * Dependencies: utils/billingSpec, utils/planSpec, utils/publicPages (shell).
  */
 import { shell, LOGIN_PATH } from './publicPages.js';
-import { PLANS } from './planSpec.js';
-import { BUYABLE, PERIODS, COUNTRIES, quoteTable, money, BUY_PATH } from './billingSpec.js';
+import { PLANS, MAX_UNITS, MAX_EXTRA_USERS } from './planSpec.js';
+import { BUYABLE, PERIODS, COUNTRIES, unitPrices, BUY_PATH } from './billingSpec.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-/** Price lines the page shows, keyed plan:bill:country (from billingSpec, never summed in the browser). */
-function priceLines() {
-  const out = {};
-  for (const [k, q] of Object.entries(quoteTable())) {
-    const per = PERIODS[q.bill].unit;
-    out[k] = q.currency === 'INR'
-      ? { pay: `${money(q.total, 'INR')}`, lines: [`${money(q.base, 'INR')} a ${per}`, `18% GST: ${money(q.gst, 'INR')}`, `Total: ${money(q.total, 'INR')} a ${per}, renews ${PERIODS[q.bill].word}`] }
-      : { pay: `${money(q.total, 'USD')}`, lines: [`${money(q.base, 'USD')} a ${per}`, 'No GST outside India', `Total: ${money(q.total, 'USD')} a ${per}, renews ${PERIODS[q.bill].word}`] };
-  }
-  return out;
-}
-
-export function buyPage({ plan = 'starter', bill = 'mo', cur = '', ready = false, email = '' } = {}) {
-  const p = BUYABLE.includes(plan) ? plan : 'starter';
+export function buyPage({ plan = 'brand', bill = 'mo', cur = '', units = '', ready = false, email = '' } = {}) {
+  const p = BUYABLE.includes(plan) ? plan : 'brand';
+  const n = Math.min(MAX_UNITS, Math.max(1, Math.floor(Number(units)) || 1));
   const b = PERIODS[bill] ? bill : 'mo';
   const country = cur === 'usd' ? 'XX' : cur === 'inr' ? 'IN' : '';
   const opt = (v, label, on) => `<option value="${esc(v)}"${on ? ' selected' : ''}>${esc(label)}</option>`;
@@ -51,8 +40,12 @@ ${closed}
 <div id="buy">
 <form class="buy" id="f" onsubmit="return go(event)">
   <div class="two">
-    <label>Plan<select name="plan" id="plan" onchange="sum()">${BUYABLE.map((id) => opt(id, PLANS[id].label, id === p)).join('')}</select></label>
+    <label>Plan<select name="plan" id="plan" onchange="sum()">${BUYABLE.map((id) => opt(id, PLANS[id].perUnit === 'client' ? 'Agency: priced per client' : `${PLANS[id].label}: priced per funnel (brand)`, id === p)).join('')}</select></label>
     <label>Billing<select name="bill" id="bill" onchange="sum()">${opt('mo', 'Monthly', b === 'mo')}${opt('yr', 'Yearly: 12 months for the price of 10', b === 'yr')}</select></label>
+  </div>
+  <div class="two">
+    <label><span id="unitlab">Funnels (brands), 10 channels each</span><input name="units" id="units" type="number" min="1" max="${MAX_UNITS}" value="${n}" required oninput="sum()"></label>
+    <label>Extra users (1 user is included${p === 'agency' ? ', plus one per client' : ''})<input name="users" id="users" type="number" min="0" max="${MAX_EXTRA_USERS}" value="0" oninput="sum()"></label>
   </div>
   <label>Where is your business billed?<select name="country" id="country" onchange="sum()">${Object.entries(COUNTRIES).map(([v, l]) => opt(v, v === 'IN' ? 'India: rupees, 18% GST added' : 'Outside India: US dollars, no GST', v === country)).join('')}</select></label>
   <div class="two">
@@ -71,11 +64,22 @@ ${closed}
 </form>
 </div>
 <script>
-var PRICES=${JSON.stringify(priceLines()).replace(/</g, '\\u003c')};
+var P=${JSON.stringify(unitPrices()).replace(/</g, '\\u003c')};
 var READY=${ready ? 'true' : 'false'};
 function el(id){return document.getElementById(id);}
 (function(){var c=el('country');if(!${country ? 'true' : 'false'}){var s='';try{s=localStorage.getItem('ce_cur')||'';}catch(e){}if(s==='inr')c.value='IN';else if(s==='usd')c.value='XX';else{var tz='';try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||'';}catch(e){}c.value=/^Asia\\/(Kolkata|Calcutta)$/.test(tz)?'IN':'XX';}}sum();})();
-function sum(){var k=el('plan').value+':'+el('bill').value+':'+el('country').value;var q=PRICES[k];if(!q)return;el('sum').innerHTML=q.lines.map(function(l,i){return '<p'+(i===q.lines.length-1?' class="tot"':'')+'>'+l+'</p>';}).join('');el('paybtn').textContent='Pay '+q.pay;el('gstrow').style.display=el('country').value==='IN'?'':'none';}
+function grp(n){var s=String(Math.round(n));if(s.length<=3)return s;return s.slice(0,-3).replace(/\\B(?=(\\d{2})+(?!\\d))/g,',')+','+s.slice(-3);}
+function cash(n,inr){if(inr)return '\u20b9'+grp(n);var c=Math.round(n*100);return '$'+String(Math.floor(c/100)).replace(/\\B(?=(\\d{3})+(?!\\d))/g,',')+(c%100?'.'+String(c%100).padStart(2,'0'):'');}
+function whole(id,lo,hi){var v=Math.floor(Number(el(id).value));return v>=lo&&v<=hi?v:lo;}
+function sum(){var pl=P.plans[el('plan').value];if(!pl)return;var inr=el('country').value==='IN';var yr=el('bill').value==='yr';
+ el('unitlab').textContent=pl.per==='client'?'Clients, each its own workspace, 10 channels':'Funnels (brands), 10 channels each';
+ var n=whole('units',1,P.maxUnits),u=whole('users',0,P.maxUsers);var unit=inr?pl.inr:pl.usd,user=inr?P.user.inr:P.user.usd;
+ var month=unit*n+user*u;var times=yr?10:1;var base=inr?Math.round(month*times):Math.round(month*times*100)/100;var gst=inr?Math.round(base*1.18)-base:0;var total=base+gst;var per=yr?'year':'month';
+ var lines=[n+' '+(pl.per==='client'?(n===1?'client':'clients'):(n===1?'funnel':'funnels'))+' x '+cash(unit*times,inr)];
+ if(u)lines.push(u+' extra user'+(u===1?'':'s')+' x '+cash(user*times,inr));
+ lines.push(inr?'18% GST: '+cash(gst,true):'No GST outside India');
+ lines.push('Total: '+cash(total,inr)+' a '+per+', renews '+(yr?'yearly':'monthly'));
+ el('sum').innerHTML=lines.map(function(l,i){return '<p'+(i===lines.length-1?' class="tot"':'')+'>'+l+'</p>';}).join('');el('paybtn').textContent='Pay '+cash(total,inr);el('gstrow').style.display=inr?'':'none';}
 function loadRzp(){return new Promise(function(ok,bad){if(window.Razorpay)return ok();var s=document.createElement('script');s.src='https://checkout.razorpay.com/v1/checkout.js';s.onload=ok;s.onerror=function(){bad(new Error('The payment window did not load. Check your connection and try again.'));};document.body.appendChild(s);});}
 async function post(u,b){var r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});var j=await r.json().catch(function(){return {ok:false,error:'Something went wrong'};});if(!j.ok)throw new Error(j.error||'Something went wrong');return j;}
 async function go(e){e.preventDefault();var m=el('msg');m.textContent='';if(!READY)return false;var btn=el('paybtn');btn.disabled=true;

@@ -83,7 +83,7 @@ export function register(ctx) {
       res.status(400).send(err.message);
     }
   });
-  router.post('/admin/clients/detach', action((agencyId, b) => agency.detachClient(agencyId, String(b.client || ''), String(b.plan || 'starter'))));
+  router.post('/admin/clients/detach', action((agencyId, b) => agency.detachClient(agencyId, String(b.client || ''), String(b.plan || 'brand'))));
   router.post('/admin/clients/add', action((agencyId, b) => agency.addClient(agencyId, b)));
   router.post('/admin/clients/archive', action((agencyId, b) => agency.setArchived(agencyId, String(b.client || ''), b.archived === true || b.archived === 'true')));
   router.post('/admin/clients/connect-link', action((agencyId, b) => agency.connectLink(agencyId, String(b.client || ''))));
@@ -201,7 +201,7 @@ export function clientsPage(data, session = null) {
         } catch (e) { alert(e.message); }
       }
       async function moveOut(client) {
-        const plan = prompt('Move ' + client + ' out of your agency? It becomes its own workspace with its own bill, keeps its funnels, posts and people, and stops using your keys. Channels connected on your own Post for Me key must be connected again.\n\nIts plan: type starter or growth.', 'starter');
+        const plan = prompt('Move ' + client + ' out of your agency? It becomes its own workspace with its own bill, keeps its funnels, posts and people, and stops using your keys. Channels connected on your own Post for Me key must be connected again.\n\nIts plan: type brand (Always-On Brand, 1 funnel).', 'brand');
         if (!plan) return;
         try { const j = await post('${CLIENTS_PATH}/detach', { client, plan: plan.trim().toLowerCase() }); alert(client + ' is now its own workspace on ' + j.plan + ' until ' + j.expires + '. The owner renews it on Tenants.'); location.reload(); } catch (e) { alert(e.message); }
       }

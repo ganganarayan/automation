@@ -123,3 +123,34 @@ extra AI video at ₹349 / $4 kept 34%.
 Not counted: server, database, email, the 7-day trial (about ₹250 each), and a
 bigger Post for Me plan past about 1,000 posts a month. Check the provider
 costs against a week of real posts on Log and cost.
+
+## One plan per funnel: Always-On Brand (11-11-2026)
+
+The pricing page now sells one plan, priced per funnel (brand), and Agency
+priced per client. Older plans (Starter Lite, Starter, Growth, flat Agency) stay
+in the app for workspaces already on them and are no longer sold.
+
+| Plan | Per | ₹ a month + GST | $ a month | Includes per unit | Lowest margin |
+|---|---|---|---|---|---|
+| Always-On Brand | funnel | 3,099 | 36 | 10 channels, 30 posts, 1 user, AI | about 51% (yearly) |
+| Agency | client | 3,899 | 45 | the same, plus a client workspace and login | about 61% (yearly) |
+| Solo (cancel page only) | workspace | 1,699 | 20 | 1 funnel, 5 channels, 30 posts, lean build | about 51% (yearly) |
+| Extra user | user | 100 | 1.50 | | |
+
+- Every funnel costs the same to run (about ₹1,188 a month for 30 posts on 10
+  channels), so the first and every next funnel cost the same: a cheaper extra
+  funnel would fall under 50%.
+- The pricing page sells the offer as a value stack: what a business would pay
+  without us (freelancer ₹15,000, Buffer for 10 channels ₹5,280, ManyChat
+  ₹1,500 = ₹21,780+, or $257+) against ₹3,099 + GST.
+- Bonuses on the page: 7 days free, a done-with-you setup call, the founding
+  price kept for the first 50 businesses, one-click cancel.
+- Not on the page yet: a "post every day or the day is on us" guarantee. Add it
+  after two weeks of clean daily posts on prod, with a way to credit days.
+- Solo is offered on the Plan page just before Cancel. A paid-online workspace
+  moves its Razorpay subscription to Solo from the next renewal (card mandates
+  only; Razorpay refuses a plan change on UPI); the workspace follows the next
+  charge. A workspace set up by the owner is asked to write in.
+- tenants.units holds funnels or clients bought; NULL keeps the flat limits.
+  An Agency bought per client has AI included (the owner's keys); a flat Agency
+  still brings its own keys.

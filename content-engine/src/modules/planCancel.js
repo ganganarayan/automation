@@ -13,13 +13,14 @@
  * Routes: GET  /api/v1/admin/plan              the page
  *         POST /api/v1/admin/plan/cancel       form post, then the exit assessment
  *         POST /api/v1/admin/plan/resume       form post, back to the page
+ *         POST /api/v1/admin/plan/solo         form post: move to Solo from the next renewal
  *         POST /api/v1/admin/plan/exit-link    super admin: { url }
  */
 import * as tenantRepo from '../repositories/tenantRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { keyOk, currentSession } from '../services/accessService.js';
 import { cancelProblem, exitLink, validExitUrl, EXIT_KEY, OWNER_TENANT } from '../utils/cancelSpec.js';
-import { planBody, PLAN_PATH } from '../utils/planPage.js';
+import { planBody, soloOffer, PLAN_PATH } from '../utils/planPage.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst } from '../utils/time.js';
 import * as billing from '../services/billingService.js';
@@ -94,6 +95,28 @@ export function register(ctx) {
       await tenantRepo.setCancelled(w.tenant.id, null);
       log.info({ tenant: w.tenant.id, by: w.session && w.session.email }, 'plan kept');
       return res.redirect(303, `${PLAN_PATH}?done=kept`);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/admin/plan/solo', async (req, res, next) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).type('html').send('<p>Sign in first.</p>');
+      const w = await who(req);
+      const why = cancelProblem(w);
+      const back = `<p><a class="act" href="${PLAN_PATH}">Back</a></p>`;
+      if (why) return res.status(403).type('html').send(shell('Plan', `<h1>Plan</h1><p class="hint">${esc(why)}</p>${back}`, w.session));
+      if (!soloOffer(w.tenant)) return res.status(409).type('html').send(shell('Plan', `<h1>Plan</h1><p class="hint">Solo is not open to this workspace.</p>${back}`, w.session));
+      if (!w.tenant.billing_sub_id) return res.status(409).type('html').send(shell('Plan', `<h1>Plan</h1><p class="hint">Your plan was set up by us: write to us and we move you to Solo.</p>${back}`, w.session));
+      try {
+        await billing.switchToSolo(w.tenant);
+      } catch (err) {
+        log.warn({ tenant: w.tenant.id, err: err.message }, 'solo switch failed');
+        return res.status(502).type('html').send(shell('Plan', `<h1>Plan</h1><p class="hint">🟡 ${esc(err.message)}</p>${back}`, w.session));
+      }
+      log.info({ tenant: w.tenant.id, by: w.session && w.session.email }, 'moved to solo at next renewal');
+      return res.redirect(303, `${PLAN_PATH}?done=solo`);
     } catch (err) {
       next(err);
     }

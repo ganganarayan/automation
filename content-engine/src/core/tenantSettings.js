@@ -112,6 +112,13 @@ const PROVIDER_KEYS = {
   json2video_api_key: { provider: 'json2video', env: () => settings.video.json2videoApiKey },
 };
 export const BYO_PLANS = ['agency'];
+/**
+ * Does this workspace bring its own AI keys? Only an Agency on the old flat
+ * price: one bought per client (units set) has AI included, on the owner's keys.
+ */
+export function bringsOwnKeys(meta) {
+  return !!meta && BYO_PLANS.includes(meta.plan) && !(Number(meta.units) > 0);
+}
 
 const planCache = new Map();
 async function tenantMeta(tenantId) {
@@ -120,6 +127,7 @@ async function tenantMeta(tenantId) {
   let plan = 'custom';
   let exists = false;
   let parentId = null;
+  let units = null;
   let failed = false;
   try {
     // One retry: the first query after the app wakes can fail.
@@ -128,12 +136,13 @@ async function tenantMeta(tenantId) {
     exists = !!row;
     plan = (row || {}).plan || 'custom';
     parentId = row && row.parent_id ? String(row.parent_id) : null;
+    units = row && row.units !== undefined && row.units !== null ? Number(row.units) : null;
   } catch {
     // A database hiccup: the last known answer, else "unknown" (callers fail closed).
     if (hit) return hit;
     failed = true;
   }
-  const meta = { at: Date.now(), plan, exists, parentId, failed };
+  const meta = { at: Date.now(), plan, exists, parentId, units, failed };
   if (!failed) planCache.set(tenantId, meta);
   return meta;
 }
@@ -149,13 +158,15 @@ function tenantKnown(tenantId) {
  * 'none'. A client of an agency (agency = the agency's overrides) uses its own
  * key, else the agency's, and never the owner's. Pure, for tests.
  */
-export function providerKey(key, { own = {}, owner = {}, isOwner = false, byo = false, envValue = '', agency = null }) {
+export function providerKey(key, { own = {}, owner = {}, isOwner = false, byo = false, envValue = '', agency = null, agencyIncluded = false }) {
   const mine = String(own[key] ?? '').trim();
   if (mine) return [mine, isOwner ? 'platform' : 'tenant'];
   if (isOwner) return [envValue || '', envValue ? 'platform' : 'none'];
   if (agency) {
     const theirs = String(agency[key] ?? '').trim();
-    return theirs ? [theirs, 'tenant'] : ['', 'none'];
+    if (theirs) return [theirs, 'tenant'];
+    // An agency bought per client has AI included: its clients fall back to the owner's key.
+    if (!agencyIncluded) return ['', 'none'];
   }
   if (byo) return ['', 'none'];
   const plat = String(owner[key] ?? '').trim() || String(envValue || '').trim();
@@ -249,10 +260,13 @@ export async function forTenant(tenantId = 'default') {
   // A client of an agency: its agency's keys, never the owner's. A failed read
   // of the tenant is treated as bring-your-own (no owner key) too.
   const agencyO = meta && meta.parentId ? await loadOverrides(meta.parentId) : null;
-  const byo = isOwner ? false : (!!(meta && meta.failed) || !!agencyO || BYO_PLANS.includes(meta ? meta.plan : 'custom'));
+  const agencyMeta = meta && meta.parentId ? await tenantMeta(meta.parentId) : null;
+  // An agency bought per client (units) pays for AI in its price: its clients use the owner's keys.
+  const agencyIncluded = !!agencyMeta && !agencyMeta.failed && !bringsOwnKeys(agencyMeta);
+  const byo = isOwner ? false : (!!(meta && meta.failed) || (!!agencyO && !agencyIncluded) || bringsOwnKeys(meta));
   const keyOwners = {};
   const key = (k) => {
-    const [v, who] = providerKey(k, { own: o, owner: ownerO, isOwner, byo, envValue: PROVIDER_KEYS[k].env(), agency: agencyO || null });
+    const [v, who] = providerKey(k, { own: o, owner: ownerO, isOwner, byo, envValue: PROVIDER_KEYS[k].env(), agency: agencyO || null, agencyIncluded });
     const p = PROVIDER_KEYS[k].provider;
     if (!keyOwners[p] || keyOwners[p] === 'none') keyOwners[p] = who;
     return v;

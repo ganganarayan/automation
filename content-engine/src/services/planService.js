@@ -16,7 +16,7 @@
  */
 import { query } from '../core/db.js';
 import * as tenantRepo from '../repositories/tenantRepository.js';
-import { limitsFor, overLimit, tenantLive } from '../utils/planSpec.js';
+import { limitsForTenant, overLimit, tenantLive } from '../utils/planSpec.js';
 import { AGENCY_PLAN, combineLive, clientProblem } from '../utils/workspaceSpec.js';
 
 const TTL_MS = 60_000;
@@ -45,6 +45,9 @@ export async function tenantInfo(tenantId) {
   const info = {
     tenantId: id,
     plan: (head && head.plan) || 'custom',
+    // Funnels or clients bought and extra users (the agency's, for a client).
+    units: head && head.units !== undefined && head.units !== null ? Number(head.units) : null,
+    extraUsers: head ? Number(head.extra_users) || 0 : 0,
     agencyId: parent ? String(parent.id) : null,
     pool: head ? [String(head.id), ...kids.map((k) => String(k.id)).filter((k) => k !== String(head.id))] : [id],
     live: live.live,
@@ -87,18 +90,19 @@ export async function monthUsage(tenantId) {
 export async function limitReason(tenantId, what, { adding = 1, used = null } = {}) {
   const info = await tenantInfo(tenantId);
   if (!info.live) return `This workspace cannot ${what === 'posts' ? 'post' : 'add more'} right now: ${info.reason}. Ask the owner to renew.`;
-  const lim = limitsFor(info.plan);
+  const lim = limitsForTenant(info.plan, { units: info.units, extraUsers: info.extraUsers });
   if (lim[what] === null || lim[what] === undefined) return '';
   let n = used;
   if (n === null) n = what === 'posts' || what === 'aiVideos' ? (await monthUsage(tenantId))[what] : 0;
-  return overLimit(info.plan, what, n, adding);
+  return overLimit(info.plan, what, n, adding, lim);
 }
 
 /** '' when `parentId` may take one more client, else the reason (the plan's clients limit). */
 export async function clientReason(parentId) {
   const parent = parentId ? await tenantRepo.findById(String(parentId)) : null;
   const clients = parent ? await tenantRepo.countChildren(parent.id) : 0;
-  return clientProblem({ parent, clients, limit: parent ? limitsFor(parent.plan).clients : null });
+  const lim = parent ? limitsForTenant(parent.plan, { units: parent.units, extraUsers: parent.extra_users }) : null;
+  return clientProblem({ parent, clients, limit: lim ? lim.clients : null });
 }
 
 export default { tenantInfo, monthUsage, limitReason, clientReason, invalidate };

@@ -70,11 +70,10 @@ export function leakedSettings(qa, owner, qaOverridden = () => false) {
 const PAID = ['openai', 'anthropic', 'gemini', 'kling', 'runway', 'hailuo', 'elevenlabs', 'heygen', 'transcript', 'json2video'];
 
 /**
- * Who pays per provider. An Agency tenant brings its own keys: a 'platform' key there
+ * Who pays per provider. An Agency on the old flat price brings its own keys (byo): a 'platform' key there
  * is a fail (it would land on the owner's bill). Other plans may use the platform's.
  */
-export function keyFindings(keyOwners = {}, plan = 'custom') {
-  const byo = String(plan) === 'agency';
+export function keyFindings(keyOwners = {}, plan = 'custom', byo = String(plan) === 'agency') {
   return PAID.map((p) => {
     const who = keyOwners[p] || 'none';
     if (byo && who === 'platform') return { group: 'Phase 4 billing', name: `key: ${p}`, status: 'fail', detail: 'Agency plan but uses the owner\'s key (owner pays)' };

@@ -74,7 +74,7 @@ export async function create({ id, name }) {
 /** Every tenant with its subscription details (the super admin's Tenants list). */
 export async function listWithSubscription() {
   const { rows } = await query(
-    `SELECT id, name, status, plan, parent_id, owner_email, phone, COALESCE(subscribed_at, created_at) AS subscribed_at, expires_at, cancelled_at
+    `SELECT id, name, status, plan, parent_id, owner_email, phone, COALESCE(subscribed_at, created_at) AS subscribed_at, expires_at, cancelled_at, units, extra_users
        FROM tenants ORDER BY (id = $1) DESC, COALESCE(parent_id, id) ASC, (parent_id IS NOT NULL) ASC, created_at ASC`,
     ['default'],
   );
@@ -94,13 +94,13 @@ export async function setExpiry(tenantId, expiresAt) {
 }
 
 /** A new tenant with its details (super admin). Fails if the id is taken. */
-export async function createNew({ id, name, ownerEmail, phone = '', plan = 'custom', expiresAt = null, parentId = null }) {
+export async function createNew({ id, name, ownerEmail, phone = '', plan = 'custom', expiresAt = null, parentId = null, units = null, extraUsers = 0 }) {
   const { rows } = await query(
-    `INSERT INTO tenants (id, name, status, owner_email, phone, plan, subscribed_at, expires_at, parent_id)
-     VALUES ($1, $2, 'active', $3, $4, $5, now(), $6, $7)
+    `INSERT INTO tenants (id, name, status, owner_email, phone, plan, subscribed_at, expires_at, parent_id, units, extra_users)
+     VALUES ($1, $2, 'active', $3, $4, $5, now(), $6, $7, $8, $9)
      ON CONFLICT (id) DO NOTHING
      RETURNING id, name, status, plan, parent_id, owner_email, phone, subscribed_at, expires_at`,
-    [id, name || id, String(ownerEmail || '').trim().toLowerCase(), phone || null, plan, expiresAt, parentId || null],
+    [id, name || id, String(ownerEmail || '').trim().toLowerCase(), phone || null, plan, expiresAt, parentId || null, units, Number(extraUsers) || 0],
   );
   if (!rows[0]) throw new Error('that workspace id is taken');
   return rows[0];
@@ -128,4 +128,10 @@ export async function setPlan(tenantId, plan) {
   if (!rowCount) throw new Error('tenant not found');
 }
 
-export default { setCancelled, createNew, setPlan, setStatus, detach, isActive, activeIds, findById, childrenOf, countChildren, list, create, listWithSubscription, setExpiry };
+/** Set a paid workspace's plan with the funnels or clients and extra users bought. */
+export async function setPlanUnits(tenantId, plan, units = null, extraUsers = 0) {
+  const { rowCount } = await query('UPDATE tenants SET plan = $2, units = $3, extra_users = $4 WHERE id = $1', [tenantId, plan, units, Number(extraUsers) || 0]);
+  if (!rowCount) throw new Error('tenant not found');
+}
+
+export default { setPlanUnits, setCancelled, createNew, setPlan, setStatus, detach, isActive, activeIds, findById, childrenOf, countChildren, list, create, listWithSubscription, setExpiry };

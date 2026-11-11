@@ -537,7 +537,7 @@ export function register(ctx) {
       const b = req.body || {};
       const id = String(b.id || '').trim().toLowerCase();
       const email = String(b.owner_email || '').trim().toLowerCase();
-      let plan = PLAN_IDS.includes(String(b.plan)) ? String(b.plan) : 'starter';
+      let plan = PLAN_IDS.includes(String(b.plan)) ? String(b.plan) : 'brand';
       let months = Math.max(0, Math.min(36, Number(b.months) || 0));
       if (!validTenantId(id)) throw new Error('Workspace id: 2 to 31 lower-case letters, digits or dashes');
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Owner email is not valid');
@@ -1147,7 +1147,7 @@ function newTenantBox(tenantList = []) {
       <input id="nt-email" placeholder="Owner email" style="min-width:14rem">
       <input id="nt-phone" placeholder="Phone (optional)" style="min-width:9rem">
       <select id="nt-parent" onchange="const c=!!this.value;document.getElementById('nt-plan').disabled=c;document.getElementById('nt-months').disabled=c"><option value="">Its own workspace</option>${agencyOpts}</select>
-      <select id="nt-plan">${PLAN_IDS.map((p) => '<option value="' + p + '"' + (p === 'starter' ? ' selected' : '') + '>' + esc(PLANS[p].label) + '</option>').join('')}</select>
+      <select id="nt-plan">${PLAN_IDS.map((p) => '<option value="' + p + '"' + (p === 'brand' ? ' selected' : '') + '>' + esc(PLANS[p].label) + '</option>').join('')}</select>
       <select id="nt-months"><option value="1">1 month</option><option value="12">1 year</option><option value="0">never expires</option></select>
       <button type="button" class="act" onclick="newTenant()">➕ Create</button>
     </div>
@@ -1179,7 +1179,7 @@ function qaBox(tenantList) {
     <p class="hint">Tests the app on this server, as a QA workspace, one group per multi-tenant phase: <b>1 doors</b> (sessions, your funnel, run, rule, lead and Drive ids, users, Post for Me accounts), <b>2 leaks</b> (your settings), <b>3 lifecycle</b> (every plan limit; an expired workspace, qa-expired, made once for this), <b>4 billing</b> (who pays per key, key history, balances, cost report), <b>5 shared</b> (Meta routing, Google ticket, Clean runner, comparison list), plus ffmpeg, fonts and the database. "With paid calls" also asks Claude and OpenAI for real (about 10 US cents) and turns the picture into a video. Nothing is posted or emailed. A QA workspace has no sign-in: open it as <b>/t/&lt;id&gt;/api/v1/admin/settings</b>. Set its expiry to a past date to switch it off.</p>
     <div class="row" style="gap:.4rem;align-items:center;flex-wrap:wrap">
       <input id="qa-id" placeholder="qa-starter" style="min-width:10rem">
-      <select id="qa-plan">${PLAN_IDS.map((p) => '<option value="' + p + '"' + (p === 'starter' ? ' selected' : '') + '>' + esc(PLANS[p].label) + '</option>').join('')}</select>
+      <select id="qa-plan">${PLAN_IDS.map((p) => '<option value="' + p + '"' + (p === 'brand' ? ' selected' : '') + '>' + esc(PLANS[p].label) + '</option>').join('')}</select>
       <button type="button" class="act" onclick="qaMake()">➕ Make QA workspace</button>
     </div>
     <div class="row" style="gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.4rem">

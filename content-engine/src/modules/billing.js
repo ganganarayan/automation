@@ -6,8 +6,8 @@
  * Dependencies: billingService, utils/buyPage, utils/billingSpec.
  *
  * Routes (mounted on the app, outside /api/v1, no sign-in):
- *   GET  /buy              the page (?plan=lite&bill=mo|yr&cur=inr|usd)
- *   POST /buy/start        { plan, bill, country, name, business, email, phone, gstin } -> Checkout details
+ *   GET  /buy              the page (?plan=brand|agency&bill=mo|yr&cur=inr|usd&units=n)
+ *   POST /buy/start        { plan, bill, units, users, country, name, business, email, phone, gstin } -> Checkout details
  *   POST /buy/confirm      { paymentId, subscriptionId, signature } -> the new workspace's sign-in
  *   POST /buy/webhook      Razorpay webhook (X-Razorpay-Signature over the raw body)
  */
@@ -32,7 +32,7 @@ export function mount(app, { log, contactEmail = async () => '' }) {
       res.set('Cache-Control', 'no-store');
       const q = req.query || {};
       res.type('html').send(buyPage({
-        plan: String(q.plan || ''), bill: String(q.bill || ''), cur: String(q.cur || ''),
+        plan: String(q.plan || ''), bill: String(q.bill || ''), cur: String(q.cur || ''), units: String(q.units || ''),
         ready: await billing.ready().catch(() => false), email: await contactEmail(),
       }));
     } catch (err) {

@@ -12,6 +12,12 @@ export async function planId(key) {
   return rows[0] ? rows[0].razorpay_plan_id : null;
 }
 
+/** The planKey a Razorpay plan was made for ('' when it was not made here). */
+export async function keyForPlanId(razorpayPlanId) {
+  const { rows } = await query('SELECT key FROM billing_plans WHERE razorpay_plan_id = $1', [razorpayPlanId]);
+  return rows[0] ? rows[0].key : '';
+}
+
 export async function savePlanId(key, id) {
   await query('INSERT INTO billing_plans (key, razorpay_plan_id) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING', [key, id]);
 }
@@ -19,9 +25,9 @@ export async function savePlanId(key, id) {
 /** A checkout started from the buy page (id = the Razorpay subscription id). */
 export async function createCheckout(c) {
   await query(
-    `INSERT INTO checkouts (id, plan, bill, currency, amount, base, gst, name, business, email, phone, country, gstin)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-    [c.id, c.plan, c.bill, c.currency, c.amount, c.base, c.gst, c.name || null, c.business || null, c.email, c.phone || null, c.country, c.gstin || null],
+    `INSERT INTO checkouts (id, plan, bill, currency, amount, base, gst, name, business, email, phone, country, gstin, units, extra_users)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+    [c.id, c.plan, c.bill, c.currency, c.amount, c.base, c.gst, c.name || null, c.business || null, c.email, c.phone || null, c.country, c.gstin || null, c.units || 1, c.users || 0],
   );
 }
 
@@ -76,4 +82,4 @@ export async function resetFirstPassword(email, passwordHash) {
   return rowCount > 0;
 }
 
-export default { planId, savePlanId, createCheckout, findCheckout, claim, release, markProvisioned, setTenantBilling, extendTenant, logPayment, resetFirstPassword };
+export default { keyForPlanId, planId, savePlanId, createCheckout, findCheckout, claim, release, markProvisioned, setTenantBilling, extendTenant, logPayment, resetFirstPassword };

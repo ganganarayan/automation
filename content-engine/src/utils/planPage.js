@@ -8,7 +8,7 @@
  * Dependencies: utils/cancelSpec, utils/planSpec (both pure).
  */
 import { cancelProblem } from './cancelSpec.js';
-import { planLabel } from './planSpec.js';
+import { planLabel, PLANS, limitsForTenant } from './planSpec.js';
 
 export const PLAN_PATH = '/api/v1/admin/plan';
 
@@ -25,9 +25,13 @@ export function planBody({ tenant = null, role = 'admin', superAdmin = false, ba
 
   if (flash === 'cancelled') out.push('<p class="ok">🟢 Your plan is cancelled. You will not be charged again.</p>');
   if (flash === 'kept') out.push('<p class="ok">🟢 Your plan will renew as usual.</p>');
+  if (flash === 'solo') out.push('<p class="ok">🟢 You move to Solo from your next renewal. Until then nothing changes.</p>');
 
   if (tenant) {
-    out.push(`<div class="card"><div class="row"><span>Plan</span><b>${esc(planLabel(tenant.plan))}</b></div>
+    const lim = limitsForTenant(tenant.plan, { units: tenant.units, extraUsers: tenant.extra_users });
+    const bought = lim.units ? `${lim.units} ${lim.perUnit === 'client' ? (lim.units === 1 ? 'client' : 'clients') : (lim.units === 1 ? 'funnel' : 'funnels')}` : '';
+    out.push(`<div class="card"><div class="row"><span>Plan</span><b>${esc(planLabel(tenant.plan))}${bought ? `, ${esc(bought)}` : ''}</b></div>
+      ${lim.users !== null && lim.users !== undefined ? `<div class="row"><span>Users</span><b>${esc(lim.users)}</b></div>` : ''}
       <div class="row"><span>${tenant.cancelled_at ? 'Works until' : 'Renews on'}</span><b>${esc(ends || 'no end date set')}</b></div>
       ${tenant.cancelled_at ? `<div class="row"><span>Cancelled on</span><b>${esc(day(tenant.cancelled_at))}</b></div>` : ''}</div>`);
   }
@@ -39,6 +43,7 @@ export function planBody({ tenant = null, role = 'admin', superAdmin = false, ba
       out.push(`<p class="hint">🟡 Cancelled. Everything keeps working${ends ? ` until ${esc(ends)}` : ''}; after that the workspace stops posting. Changed your mind?</p>
         <form method="post" action="${PLAN_PATH}/resume"><button class="act primary" type="submit">Keep my plan</button></form>`);
     } else {
+      if (soloOffer(tenant)) out.push(soloOffer(tenant));
       out.push(`<h2>Cancel</h2>
         <p class="hint">One click. You will not be charged again, and everything keeps working${ends ? ` until ${esc(ends)}` : ' until the end of the period you paid for'}. Payments are not refunded (<a href="/refund">refund policy</a>).</p>
         <form method="post" action="${PLAN_PATH}/cancel"><button class="act danger" type="submit">🔴 Cancel my plan</button></form>`);
@@ -73,4 +78,21 @@ export function planBody({ tenant = null, role = 'admin', superAdmin = false, ba
   return out.join('\n');
 }
 
-export default { PLAN_PATH, planBody };
+/**
+ * The offer to someone about to cancel: keep posting on Solo (1 funnel, 5
+ * channels, the lean build) for less. Never on the pricing page. '' when it
+ * does not apply (already on Solo, or a client of an agency).
+ */
+export function soloOffer(tenant) {
+  if (!tenant || tenant.plan === 'solo' || tenant.parent_id) return '';
+  const s = PLANS.solo;
+  const price = tenant.billing_currency === 'USD' ? `$${s.priceUsd} a month` : `₹${s.priceInr.toLocaleString('en-IN')} + GST a month`;
+  return `<h2>Before you go: Solo</h2>
+    <div class="card"><p>Keep a post going out every day for <b>${esc(price)}</b>: 1 funnel, ${s.channels} channels, ${s.posts} posts a month, with a lighter build (one picture cut to each size, a lower-cost voice).</p>
+    ${tenant.billing_sub_id
+    ? `<p class="hint">You move to Solo from your next renewal, on the same card.</p>
+    <form method="post" action="${PLAN_PATH}/solo"><button class="act primary" type="submit">Switch to Solo instead</button></form>`
+    : '<p class="hint">Write to us before your renewal date and we move you to Solo.</p>'}</div>`;
+}
+
+export default { PLAN_PATH, planBody, soloOffer };

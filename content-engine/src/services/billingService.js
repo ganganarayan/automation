@@ -27,7 +27,7 @@ import { hashPassword } from '../utils/passwordSpec.js';
 import { PLANS } from '../utils/planSpec.js';
 import { OWNER_TENANT } from '../utils/cancelSpec.js';
 import {
-  BILLING_KEYS, PERIODS, quote, describe, planKey, cleanBuyer, buyerProblem, sigOk, checkoutSigOk,
+  BILLING_KEYS, PERIODS, quote, describe, planKey, readPlanKey, countsText, cleanBuyer, buyerProblem, sigOk, checkoutSigOk,
   webhookAction, workspaceIdFrom, expiryAfter, expiryFromSub, money,
 } from '../utils/billingSpec.js';
 
@@ -66,7 +66,7 @@ async function razorpayPlan(k, q) {
   const plan = await rzp.createPlan(k, {
     period: PERIODS[q.bill].period,
     item: {
-      name: `Content Engine ${PLANS[q.plan].label} (${PERIODS[q.bill].word})`,
+      name: `Content Engine ${PLANS[q.plan].label}${countsText(q) ? `, ${countsText(q)}` : ''} (${PERIODS[q.bill].word})`.slice(0, 120),
       amount: q.amount,
       currency: q.currency,
       description: q.currency === 'INR' ? `${money(q.base, 'INR')} + 18% GST ${money(q.gst, 'INR')}` : 'Billed outside India, no GST',
@@ -87,13 +87,16 @@ export async function start(input = {}) {
   const why = buyerProblem(buyer);
   if (why) throw new Error(why);
   if (await users.findByEmail(buyer.email)) throw new Error('That email already has an account. Sign in, or use another email.');
-  const q = quote({ plan: String(input.plan || ''), bill: String(input.bill || 'mo'), country: buyer.country });
+  const plan = String(input.plan || '');
+  // Solo is offered only when cancelling (Plan page), never to a new buyer.
+  if (plan === 'solo') throw new Error('Pick a plan to buy');
+  const q = quote({ plan, bill: String(input.bill || 'mo'), country: buyer.country, units: input.units ?? 1, users: input.users ?? 0 });
   const planId = await razorpayPlan(k, q);
   const sub = await rzp.createSubscription(k, {
     plan_id: planId,
     total_count: PERIODS[q.bill].count,
     customer_notify: 1,
-    notes: { plan: q.plan, bill: q.bill, email: buyer.email, country: buyer.country, gstin: buyer.gstin || '', business: buyer.business.slice(0, 60) },
+    notes: { plan: q.plan, bill: q.bill, units: q.units, users: q.users, email: buyer.email, country: buyer.country, gstin: buyer.gstin || '', business: buyer.business.slice(0, 60) },
   });
   await repo.createCheckout({ id: sub.id, ...q, ...buyer });
   return {
@@ -119,7 +122,8 @@ async function provision(subId, { paymentId = '', expiresAt = null } = {}) {
       if (!(await tenantRepo.findById(id))) break;
     }
     const expires = expiresAt || expiryAfter(new Date(), c.bill);
-    const t = await tenantRepo.createNew({ id, name: c.business || c.name || id, ownerEmail: c.email, phone: c.phone || '', plan: c.plan, expiresAt: expires });
+    const units = PLANS[c.plan] && PLANS[c.plan].unit ? Number(c.units) || 1 : null;
+    const t = await tenantRepo.createNew({ id, name: c.business || c.name || id, ownerEmail: c.email, phone: c.phone || '', plan: c.plan, expiresAt: expires, units, extraUsers: Number(c.extra_users) || 0 });
     const tempPassword = randomBytes(9).toString('base64url');
     await users.createForTenant({ email: c.email, tenantId: t.id, role: 'admin', passwordHash: await hashPassword(tempPassword) });
     await repo.setTenantBilling(t.id, subId, c.currency);
@@ -177,6 +181,8 @@ export async function webhook(rawBody, signature, body) {
     let tenantId = c.tenant_id;
     if (!tenantId) tenantId = (await provision(a.subId, { paymentId: a.paymentId, expiresAt: until })).tenant;
     if (tenantId && until) await repo.extendTenant(tenantId, until);
+    // A plan change (Solo, chosen when cancelling) takes effect with the charge on the new plan.
+    if (tenantId && a.planId) await followPlan(tenantId, a.planId);
     if (tenantId && a.paymentId) await repo.logPayment(paymentRow(c, a.paymentId, tenantId));
     planService.invalidate();
     return { ok: true, tenant: tenantId, until };
@@ -188,6 +194,38 @@ export async function webhook(rawBody, signature, body) {
   return { ok: true, stopped: a.event };
 }
 
+/** Put the workspace on the plan its subscription now charges for, if that changed. */
+async function followPlan(tenantId, razorpayPlanId) {
+  const k = readPlanKey(await repo.keyForPlanId(razorpayPlanId).catch(() => ''));
+  if (!k.plan) return;
+  const t = await tenantRepo.findById(tenantId);
+  if (!t) return;
+  const units = PLANS[k.plan].unit ? k.units : null;
+  if (t.plan === k.plan && (t.units ?? null) === units && (Number(t.extra_users) || 0) === k.users) return;
+  await tenantRepo.setPlanUnits(tenantId, k.plan, units, k.users);
+  if (t.cancelled_at) await tenantRepo.setCancelled(tenantId, null);
+  planService.invalidate();
+  tenantSettings.invalidate();
+}
+
+/**
+ * The cancel page's offer: keep posting on Solo (1 funnel, 5 channels, the
+ * lean build) instead of leaving. The subscription moves to Solo from its next
+ * renewal; the workspace follows when that charge arrives (webhook).
+ */
+export async function switchToSolo(tenant) {
+  if (!tenant || !tenant.billing_sub_id) throw new Error('Your plan was set up by us: write to us and we will move you to Solo.');
+  const k = await keys();
+  const q = quote({ plan: 'solo', bill: 'mo', country: tenant.billing_currency === 'INR' ? 'IN' : 'XX' });
+  const planId = await razorpayPlan(k, q);
+  try {
+    await rzp.changePlan(k, tenant.billing_sub_id, planId);
+  } catch (err) {
+    throw new Error(`Your payment method does not allow a plan change (${err.message}). Write to us and we will move you to Solo.`);
+  }
+  return { plan: 'solo', price: describe(q) };
+}
+
 /** The Plan page's cancel: stop the Razorpay renewal at the end of the period. */
 export async function stopRenewal(tenant) {
   if (!tenant || !tenant.billing_sub_id) return { stopped: false };
@@ -195,4 +233,4 @@ export async function stopRenewal(tenant) {
   return { stopped: true };
 }
 
-export default { keys, ready, saveKeys, start, confirm, webhook, stopRenewal };
+export default { keys, ready, saveKeys, start, confirm, webhook, stopRenewal, switchToSolo };

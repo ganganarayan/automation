@@ -65,55 +65,55 @@ export function inr(n) {
 /** Channels the app publishes to (through Post for Me, plus the platforms' own APIs for take-downs). */
 export const CHANNELS = ['Instagram', 'Facebook', 'YouTube', 'TikTok', 'LinkedIn', 'Threads', 'X', 'Pinterest'];
 
-/** What each paid plan adds, in the words of docs/pricing-plan.md. Limits come from utils/planSpec. */
+/**
+ * The offer, sold as what it solves: what a business wants, what the app does
+ * about it, and what it would pay for that without us (inr, usd a month; null =
+ * included, nothing to compare). Anchors: a content freelancer at the low end,
+ * Buffer for 10 channels, ManyChat Essential (compareData).
+ */
+export const VALUE_STACK = [
+  { want: 'Content every day, without hiring', does: '30 finished posts a month per funnel: copy, a picture in every size, a voiced video with music, made from your videos or from nothing', costs: 'A content freelancer', inr: 15000, usd: 180 },
+  { want: 'Be everywhere your buyers scroll', does: '10 channels per funnel, all from one approval', costs: 'Buffer for 10 channels', inr: 5280, usd: 60 },
+  { want: 'Comments that turn into sales', does: 'Comment-to-DM on Instagram and Facebook, a personal link for each lead, your link as the first comment', costs: 'ManyChat', inr: 1500, usd: 17 },
+  { want: 'Never go silent', does: 'The router triggers once a day and always posts; festival posts arrive on time', costs: '', inr: null, usd: null },
+  { want: 'Stay in control in 10 seconds a day', does: 'Approve from your phone or the daily email; Disapprove and Remake learns your voice', costs: '', inr: null, usd: null },
+  { want: 'Fix a mistake fast', does: 'Delete a post from every channel in one click', costs: '', inr: null, usd: null },
+  { want: 'Stand out', does: 'Comparison videos, placed text on pictures, YouTube Shorts from every image post', costs: '', inr: null, usd: null },
+];
+
+/** What the stack would cost a month without us. */
+export const STACK_TOTAL = {
+  inr: VALUE_STACK.reduce((t, r) => t + (r.inr || 0), 0),
+  usd: VALUE_STACK.reduce((t, r) => t + (r.usd || 0), 0),
+};
+
+/** Why saying yes is easy (no promise here that the app does not keep). */
+export const BONUSES = [
+  ['7 days free', 'Try every feature for a week before the first charge.'],
+  ['Done-with-you setup', 'A 30-minute call: we connect your channels and set up your first funnel with you.'],
+  ['Founding price', 'The first 50 businesses keep this price for as long as they stay.'],
+  ['Cancel in one click', 'In the app, under Plan. No notice period, no fee.'],
+];
+
+/** The two plan cards. */
 export const PLAN_FEATURES = {
-  lite: {
-    tag: 'Show up every other day, for less',
+  brand: {
+    tag: 'One brand, posting every day, everywhere',
     lines: [
-      'Image posts as voiced videos with music, every size',
-      'One picture per post, cut to 9:16, 4:5 and 16:9',
-      'A lighter AI voice that costs less (ElevenLabs Flash)',
-      'AI copy and a headline on every picture',
-      'YouTube Shorts from image posts',
-      'Daily router that picks what goes out',
-      'Your link as the first comment',
-      'Approve from the app, one daily digest email',
-      'Connect your accounts from the app',
-    ],
-  },
-  starter: {
-    tag: 'Post every day, hands off',
-    lines: [
+      'Everything in the list on the left',
       'Ready video lane: AI copy, headline thumbnail in every size, end card, Clean check',
       'Image posts as voiced videos with music',
-      'YouTube Shorts from image posts',
-      'Daily router that never skips a day',
-      'Your link as the first comment',
-      'Approve from the app, one daily digest email',
-      'Take down a post from every channel at once',
-      'Connect your accounts from the app',
-    ],
-  },
-  growth: {
-    tag: 'Grow and capture leads',
-    lead: 'Everything in Starter, plus',
-    lines: [
-      'AI video lane: script, pictures, animation, voice',
-      'An image post when an animation fails',
-      'Comment-to-DM lead capture on Instagram and Facebook',
-      'Lead visit tracking on your landing pages',
-      'Disapprove and Remake, with learned lessons',
-      'Festival posts, comparison videos, placed text on pictures',
       'A call to action per funnel, with a per-post override',
+      'Connect your accounts from the app',
     ],
   },
   agency: {
-    tag: 'Many brands, your own keys',
-    lead: 'Everything in Growth, plus',
+    tag: 'Every client on the same promise',
+    lead: 'Everything in Always-On Brand, per client, plus',
     lines: [
-      'Your own OpenAI, Claude, Kling, MiniMax and ElevenLabs keys (you pay the providers)',
-      'Optionally your own Post for Me key',
-      'Cost log per funnel, to bill your own clients',
+      'Each client its own workspace and login',
+      'Your team on one sign-in across clients',
+      'Cost per client, to bill your own clients',
       'Priority support',
     ],
   },
@@ -213,12 +213,13 @@ const STEPS = [
 const FAQ = [
   ['Will it really post every day?', 'Yes. The router triggers once a day for each workspace, at its Daily time, and always posts: a ready video first, then an AI video, then an image post if nothing else is in stock.'],
   ['Does anything go out without me?', 'Only what you approve. Every post waits in the Library for Approve, and the daily digest tells you what is waiting.'],
-  ['How many channels can I connect?', `As many as your plan allows: any number of accounts across ${CHANNELS.join(', ')}. Each funnel posts to all of its channels from one approval.`],
-  ['Do I need my own AI keys?', 'Not on Starter Lite, Starter or Growth: the AI is included. On Agency you bring your own OpenAI, Claude, Kling, MiniMax and ElevenLabs keys and pay those providers directly.'],
+  ['How many channels can I connect?', `10 channels per funnel, across ${CHANNELS.join(', ')}. Each funnel posts to all of its channels from one approval.`],
+  ['Do I need my own AI keys?', 'No. The AI is included in every plan, Agency too. An agency may still add its own keys to pay those providers directly.'],
+  ['Why one plan?', 'Because every business needs the same thing: a post every day on every channel, and comments that turn into customers. You pay per funnel (brand), with 10 channels each, so one brand pays for one and five brands pay for five.'],
   ['What happens when a channel fails?', 'That channel shows ❌ on the Log with the reason. Press Retry failed only and just that channel is sent again.'],
   ['Can I remove a post after it is live?', 'Yes. Tick the channels and press Delete once; the post is taken down from each platform.'],
   ['What can the app see in my Google Drive?', 'Only the files it creates itself (the drive.file permission). Your other files stay private. See the privacy policy.'],
-  ['What if I go over my plan?', 'The app tells you before you go over. Add 30 more posts for ₹2,499 + GST ($29 outside India), or an extra AI video for ₹499 + GST ($6 outside India).'],
+  ['What if I go over my plan?', 'The app tells you before you go over. Add 30 more posts for ₹2,499 + GST ($29 outside India), an AI video for ₹499 + GST ($6 outside India), or another user for ₹100 + GST ($1.50) a month.'],
   ['Are prices with GST?', 'In India, prices are shown before GST, with the total beside each one: 18% GST is added and shown on your GST invoice, so a GST-registered business can claim it back. Outside India, prices are in US dollars and no GST is added.'],
 ];
 
@@ -387,6 +388,19 @@ const HOME_CSS = `
  .plan .trial{display:block;text-align:center;font-size:.88rem;margin-top:.5rem}
  .cur-usd{display:none}.usd .cur-usd{display:block}.usd .cur-inr{display:none}
  .where .cur-inr,.trust .cur-inr{display:inline}.usd .where .cur-usd,.usd .trust .cur-usd{display:inline}.usd .where .cur-inr,.usd .trust .cur-inr{display:none}
+ .stack{width:100%;border-collapse:collapse;margin:0 0 2rem;font-size:.95rem}
+ .stack th,.stack td{border-bottom:1px solid var(--line);padding:.7rem .6rem;text-align:left;vertical-align:top}
+ .stack th{color:var(--mute);font-weight:700;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+ .stack td:last-child{white-space:nowrap;text-align:right}.stack th:last-child{text-align:right}
+ .stack td small{display:block;color:var(--mute);font-size:.78rem}
+ .stack .cur-usd{display:none}.usd .stack .cur-usd{display:inline}.usd .stack .cur-inr{display:none}
+ .stack .sum td{font-weight:800;text-decoration:line-through;text-decoration-color:rgba(255,255,255,.35)}
+ .stack .you td{font-weight:800;font-size:1.15rem;color:var(--green);border-bottom:0}
+ .plans.two{grid-template-columns:repeat(auto-fit,minmax(280px,1fr));max-width:820px;margin:0 auto}
+ .bonus{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin:2rem 0 1rem}
+ .bonus div{border:1px dashed var(--line);border-radius:12px;padding:1rem}
+ .bonus b{display:block;margin-bottom:.3rem}
+ @media (max-width:760px){.stack td:last-child{white-space:normal}}
  .float-cta{position:fixed;right:18px;bottom:18px;z-index:9;background:#f5d90a;color:#14140a;font-weight:800;border-radius:12px;padding:.85rem 1.2rem;text-decoration:none;box-shadow:0 10px 30px rgba(0,0,0,.35)}
  @media (max-width:900px){.act-wrap,.act-stage{grid-template-columns:1fr}}
  @media (max-width:760px){.links{display:none}.hero{padding:3.5rem 0 2.5rem}section{padding:3rem 0}}
@@ -473,30 +487,41 @@ export function priceBlock(lim, extra = '') {
 
 function planCard(id, contactHref) {
   const lim = PLANS[id];
+  const u = lim.unit || lim;
   const f = PLAN_FEATURES[id];
-  const many = (n, one, other) => (n === null ? `Unlimited ${other}` : `${n} ${n === 1 ? one : other}`);
+  const client = lim.perUnit === 'client';
   const limits = [
-    ...(lim.clients ? [`${lim.clients} clients, each its own workspace and login`] : []),
-    lim.clients && lim.funnels === null ? 'Unlimited funnels per client' : many(lim.funnels, 'funnel (brand)', 'funnels (brands)'),
-    lim.channels === null ? 'Unlimited channels' : `${lim.channels} channels per funnel`,
-    `${lim.posts === null ? 'Unlimited' : lim.posts} posts a month`,
-    lim.aiVideos === null ? 'AI videos as your keys allow' : lim.aiVideos === 0 ? 'No AI videos' : `${lim.aiVideos} AI videos a month`,
-    many(lim.users, 'user', 'users'),
+    client ? 'Per client: its own workspace and login' : 'Per funnel (brand)',
+    `${u.channels} channels`,
+    `${u.posts} finished posts a month`,
+    client ? '1 user per client, plus yours' : '1 user; more at ₹100 + GST ($1.50) a month each',
+    'AI included, no keys needed',
   ];
-  const best = id === 'growth';
+  const best = id === 'brand';
   return `<div class="card plan${best ? ' best' : ''}">
-  ${best ? '<span class="badge">Most popular</span>' : ''}
+  ${best ? '<span class="badge">Founding price</span>' : ''}
   <h3>${esc(lim.label)}</h3>
-  ${priceBlock(lim, id === 'agency' ? ' + your own AI keys' : '')}
+  ${priceBlock({ priceInr: u.priceInr, priceUsd: u.priceUsd }, client ? ' per client' : ' per funnel')}
   <p class="ptag">${esc(f.tag)}</p>
   <ul>
     ${limits.map((l) => `<li class="lim">${esc(l)}</li>`).join('')}
     ${f.lead ? `<li class="head">${esc(f.lead)}</li>` : ''}
     ${f.lines.map((l) => `<li>${esc(l)}</li>`).join('')}
   </ul>
-  <a class="btn${best ? '' : ' ghost'}" data-buy="${id}" href="/buy?plan=${id}">Buy ${esc(lim.label)}</a>
-  ${id === 'starter' ? `<a class="trial" href="${contactHref(lim.label)}">or start the 7-day trial</a>` : ''}
+  <a class="btn${best ? '' : ' ghost'}" data-buy="${id}" href="/buy?plan=${id}">${client ? 'Buy for my clients' : 'Get Always-On Brand'}</a>
+  ${best ? `<a class="trial" href="${contactHref('7-day trial')}">or start the 7-day trial</a>` : ''}
 </div>`;
+}
+
+/** The value stack: what it solves, and what that costs without us. */
+function stackTable() {
+  const cell = (r, cur) => (r[cur] === null ? 'Included' : cur === 'inr' ? `₹${inr(r.inr)}` : usd(r.usd));
+  const both = (r) => `<span class="cur-inr">${cell(r, 'inr')}</span><span class="cur-usd">${cell(r, 'usd')}</span>`;
+  return `<table class="stack"><thead><tr><th>You want</th><th>What we do</th><th>Without us, a month</th></tr></thead><tbody>
+    ${VALUE_STACK.map((r) => `<tr><td><b>${esc(r.want)}</b></td><td>${esc(r.does)}</td><td>${both(r)}${r.costs ? `<small>${esc(r.costs)}</small>` : ''}</td></tr>`).join('')}
+    <tr class="sum"><td colspan="2">What it would cost you a month</td><td><span class="cur-inr">₹${inr(STACK_TOTAL.inr)}+</span><span class="cur-usd">${usd(STACK_TOTAL.usd)}+</span></td></tr>
+    <tr class="you"><td colspan="2">What you pay, per funnel</td><td><span class="cur-inr">₹${inr(PLANS.brand.priceInr)} ${GST_NOTE}</span><span class="cur-usd">${usd(PLANS.brand.priceUsd)}</span></td></tr>
+  </tbody></table>`;
 }
 
 /**
@@ -505,7 +530,7 @@ function planCard(id, contactHref) {
  */
 export function homePage({ email = '' } = {}) {
   const contactHref = contactHrefFor(email);
-  const trialHref = contactHref('Starter trial');
+  const trialHref = contactHref('7-day trial');
   const cards = (items) => items.map(([t, p]) => `<div class="card"><h3>${esc(t)}</h3><p>${esc(p)}</p></div>`).join('');
 
   return `${landingHead('Content Engine: a post every day on every channel, made and published for you',
@@ -528,7 +553,7 @@ ${landingNav('')}
   <div class="grid g5">${STEPS.map(([t, p], i) => `<div class="card"><span class="num">${i + 1}</span><h3>${esc(t)}</h3><p>${esc(p)}</p></div>`).join('')}</div>
   <div class="stats">
     <div class="stat"><b>3 lanes</b><span>so a day is never skipped</span></div>
-    <div class="stat"><b>Any number</b><span>of channels your plan allows, from one approval</span></div>
+    <div class="stat"><b>10 channels</b><span>per funnel, from one approval</span></div>
     <div class="stat"><b>3 sizes</b><span>16:9, 9:16 and 4:5, for every platform</span></div>
     <div class="stat"><b>1 email</b><span>a day, after 20:00 IST</span></div>
   </div>
@@ -561,16 +586,18 @@ ${landingNav('')}
 </div></section>
 
 <section id="pricing"><div class="wrap">
-  <h2>Pricing</h2>
-  <p class="kicker">One post means one post on all its channels. AI is included on Starter Lite, Starter and Growth.</p>
+  <h2>Always-On Brand</h2>
+  <p class="kicker">Your brand posts every day on 10 channels, and comments turn into customers, without you making a single post. One plan, everything in it.</p>
+  ${stackTable()}
   <div class="toggles">
     <div class="billing" role="group" aria-label="Billing"><span class="save">2 months free</span><button type="button" class="on" data-b="mo" onclick="bill('mo')">MONTHLY</button><button type="button" data-b="yr" onclick="bill('yr')">YEARLY</button></div>
     <div class="billing curs" role="group" aria-label="Currency"><button type="button" class="on" data-c="inr" onclick="cur('inr',1)">₹ INR</button><button type="button" data-c="usd" onclick="cur('usd',1)">$ USD</button></div>
   </div>
   <p class="where"><span class="cur-inr">Showing Indian prices: rupees, before 18% GST.</span><span class="cur-usd">Showing prices outside India: US dollars, no GST.</span></p>
-  <div class="grid plans">${['lite', 'starter', 'growth', 'agency'].map((id) => planCard(id, contactHref)).join('')}</div>
-  <p class="fine cur-inr">All plans: over the limit, ₹${inr(EXTRAS.posts30.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.posts30.inr))} with GST) for 30 more posts and ₹${inr(EXTRAS.aiVideo.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.aiVideo.inr))} with GST) per extra AI video. Pay yearly: 10 months, get 12. Start with a 7-day trial of Starter. Prices in Indian rupees, per workspace, before GST: 18% GST is added to every price and shown on your GST invoice.</p>
-  <p class="fine cur-usd">All plans: over the limit, ${usd(EXTRAS.posts30.usd)} for 30 more posts and ${usd(EXTRAS.aiVideo.usd)} per extra AI video. Pay yearly: 10 months, get 12. Start with a 7-day trial of Starter. Prices in US dollars, per workspace, for customers outside India: no GST is added.</p>
+  <div class="grid plans two">${['brand', 'agency'].map((id) => planCard(id, contactHref)).join('')}</div>
+  <div class="bonus">${BONUSES.map(([t, p]) => `<div><b>${esc(t)}</b>${esc(p)}</div>`).join('')}</div>
+  <p class="fine cur-inr">Priced per funnel (brand) with 10 channels each; Agency per client. Add 30 more posts for ₹${inr(EXTRAS.posts30.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.posts30.inr))} with GST), an AI video for ₹${inr(EXTRAS.aiVideo.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.aiVideo.inr))} with GST), another user for ₹${inr(EXTRAS.user.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.user.inr))} with GST) a month. Pay yearly: 10 months, get 12. Prices in Indian rupees, before GST: 18% GST is added to every price and shown on your GST invoice. Costs without us are typical market prices, not quotes.</p>
+  <p class="fine cur-usd">Priced per funnel (brand) with 10 channels each; Agency per client. Add 30 more posts for ${usd(EXTRAS.posts30.usd)}, an AI video for ${usd(EXTRAS.aiVideo.usd)}, another user for $1.50 a month. Pay yearly: 10 months, get 12. Prices in US dollars for customers outside India: no GST is added. Costs without us are typical market prices, not quotes.</p>
 </div></section>
 
 ${compareSection()}
@@ -583,7 +610,7 @@ ${compareSection()}
 
 <section class="final"><div class="wrap">
   <h2>Stop making posts. Start revenue from posts.</h2>
-  <p class="kicker" style="margin:0 auto 1.6rem">Seven days free on Starter. Access is by invitation: ask, and your workspace is set up for you.</p>
+  <p class="kicker" style="margin:0 auto 1.6rem">Seven days free, then ₹3,099 + GST a funnel ($36 outside India). Or buy now and your workspace is ready the moment you pay.</p>
   <div class="cta"><a class="btn" href="${trialHref}">Start the 7-day trial</a><a class="btn ghost" href="${LOGIN_PATH}">Sign in</a></div>
 </div></section>
 
@@ -660,7 +687,7 @@ export function refundPage({ email = '' } = {}) {
 <h2>Use it until the end of what you paid for</h2>
 <p>After you cancel, your workspace keeps working, with every feature of your plan, until the last day of the period you have already paid for. On that day it stops posting and is paused. What happens to your data after that is set out in the <a href="/privacy">privacy policy</a>.</p>
 <h2>Trial</h2>
-<p>The 7-day Starter trial is free. If you do not continue after it, nothing is charged.</p>
+<p>The 7-day trial is free. If you do not continue after it, nothing is charged.</p>
 <h2>Billing mistakes</h2>
 <p>If you were charged twice for the same period, or charged after you had cancelled, write to ${contactLine(email)} and the mistaken charge is returned to the account it came from. This is a correction of an error, not a refund of a payment you meant to make.</p>
 <h2>Contact</h2>

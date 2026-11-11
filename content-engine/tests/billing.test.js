@@ -2,40 +2,69 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createHmac } from 'node:crypto';
 import {
   quote, quoteTable, describe as describeQuote, planKey, currencyFor, money, validGstin, cleanBuyer, buyerProblem,
-  checkoutSigOk, sigOk, webhookAction, workspaceIdFrom, expiryAfter, expiryFromSub, BUYABLE,
+  checkoutSigOk, sigOk, webhookAction, workspaceIdFrom, expiryAfter, expiryFromSub, BUYABLE, CHARGEABLE, readPlanKey, cleanCounts,
 } from '../src/utils/billingSpec.js';
-import { PLANS, validTenantId, withGst } from '../src/utils/planSpec.js';
+import { PLANS, validTenantId, withGst, limitsForTenant, monthlyPrice, overLimit } from '../src/utils/planSpec.js';
 import { buyPage } from '../src/utils/buyPage.js';
 import { homePage, refundPage } from '../src/utils/publicPages.js';
-import { planBody } from '../src/utils/planPage.js';
+import { planBody, soloOffer } from '../src/utils/planPage.js';
 
 const hmac = (s, k) => createHmac('sha256', k).update(s).digest('hex');
 const DASH = String.fromCharCode(0x2014);
 
 describe('prices by where the business is billed', () => {
-  it('India pays rupees with 18% GST added, in paise', () => {
-    const q = quote({ plan: 'lite', bill: 'mo', country: 'IN' });
-    expect(q).toMatchObject({ currency: 'INR', base: 999, gst: 180, total: 1179, amount: 117900 });
-    const y = quote({ plan: 'starter', bill: 'yr', country: 'IN' });
-    expect(y).toMatchObject({ currency: 'INR', base: 27990, total: withGst(27990), amount: withGst(27990) * 100 });
+  it('India pays rupees with 18% GST added, in paise, per funnel', () => {
+    const q = quote({ plan: 'brand', bill: 'mo', country: 'IN' });
+    expect(q).toMatchObject({ currency: 'INR', units: 1, users: 0, base: 3099, gst: 558, total: 3657, amount: 365700 });
+    const y = quote({ plan: 'brand', bill: 'yr', country: 'IN', units: 3, users: 2 });
+    const base = (3099 * 3 + 100 * 2) * 10;
+    expect(y).toMatchObject({ currency: 'INR', units: 3, users: 2, base, total: withGst(base), amount: withGst(base) * 100 });
   });
-  it('outside India pays US dollars, no GST, in cents', () => {
-    expect(quote({ plan: 'lite', bill: 'mo', country: 'XX' })).toMatchObject({ currency: 'USD', base: 12, gst: 0, total: 12, amount: 1200 });
-    expect(quote({ plan: 'agency', bill: 'yr', country: 'US' })).toMatchObject({ currency: 'USD', total: PLANS.agency.priceUsd * 10 });
+  it('outside India pays US dollars, no GST, in cents (an extra user is $1.50)', () => {
+    expect(quote({ plan: 'brand', bill: 'mo', country: 'XX' })).toMatchObject({ currency: 'USD', base: 36, gst: 0, total: 36, amount: 3600 });
+    expect(quote({ plan: 'agency', bill: 'mo', country: 'XX', units: 4, users: 1 })).toMatchObject({ total: 181.5, amount: 18150 });
+    expect(quote({ plan: 'agency', bill: 'yr', country: 'US', units: 2 })).toMatchObject({ currency: 'USD', total: 45 * 2 * 10 });
   });
-  it('every buyable plan has a rupee and a dollar price; Custom cannot be bought', () => {
-    for (const p of BUYABLE) expect(PLANS[p].priceUsd).toBeGreaterThan(0);
+  it('only the per-funnel plan and Agency are on sale; Solo is chargeable but not buyable; counts are checked', () => {
+    expect(BUYABLE).toEqual(['brand', 'agency']);
+    expect(CHARGEABLE).toContain('solo');
     expect(() => quote({ plan: 'custom' })).toThrow();
-    expect(() => quote({ plan: 'lite', bill: 'weekly' })).toThrow();
-    expect(Object.keys(quoteTable())).toHaveLength(BUYABLE.length * 4);
+    expect(() => quote({ plan: 'lite' })).toThrow();
+    expect(() => quote({ plan: 'brand', bill: 'weekly' })).toThrow();
+    expect(() => quote({ plan: 'brand', units: 0 })).toThrow(/funnels/);
+    expect(() => quote({ plan: 'agency', units: 51 })).toThrow(/clients/);
+    expect(() => quote({ plan: 'brand', users: -1 })).toThrow(/users/);
+    expect(cleanCounts('solo', { units: 9 })).toEqual({ units: 1, users: 0 });
+    expect(Object.keys(quoteTable())).toHaveLength(CHARGEABLE.length * 4);
   });
-  it('a price change makes a new Razorpay plan key, and money reads right', () => {
-    expect(planKey(quote({ plan: 'lite', country: 'IN' }))).toBe('lite:mo:INR:117900');
+  it('a price change makes a new Razorpay plan key that reads back, and money reads right', () => {
+    const q = quote({ plan: 'agency', country: 'IN', units: 3, users: 1 });
+    expect(planKey(q)).toBe('agency:mo:INR:1392000:3:1');
+    expect(readPlanKey(planKey(q))).toMatchObject({ plan: 'agency', units: 3, users: 1 });
+    expect(readPlanKey('junk').plan).toBe('');
     expect(currencyFor('in')).toBe('INR');
     expect(currencyFor('')).toBe('USD');
     expect(money(117882, 'INR')).toBe('₹1,17,882');
     expect(money(1690, 'USD')).toBe('$1,690');
-    expect(describeQuote(quote({ plan: 'lite', country: 'IN' }))).toBe('Starter Lite, monthly: ₹1,179 (₹999 + ₹180 GST)');
+    expect(money(181.5, 'USD')).toBe('$181.50');
+    expect(describeQuote(quote({ plan: 'brand', country: 'IN', units: 2 }))).toBe('Always-On Brand (2 funnels), monthly: ₹7,314 (₹6,198 + ₹1,116 GST)');
+  });
+  it('limits scale with what was bought; a workspace without units keeps its flat plan', () => {
+    expect(limitsForTenant('brand', { units: 3, extraUsers: 2 })).toMatchObject({ funnels: 3, channels: 10, posts: 90, users: 3 });
+    expect(limitsForTenant('agency', { units: 4 })).toMatchObject({ clients: 4, posts: 120, users: 5, channels: 10 });
+    expect(limitsForTenant('agency')).toMatchObject({ clients: 10, posts: 300 });
+    expect(limitsForTenant('starter', { extraUsers: 1 }).users).toBe(2);
+    expect(monthlyPrice('brand', { units: 2, extraUsers: 1 }, 'USD')).toBe(73.5);
+    expect(overLimit('brand', 'funnels', 1, 1)).toMatch(/Add a funnel/);
+    expect(overLimit('brand', 'funnels', 2, 1, limitsForTenant('brand', { units: 3 }))).toBe('');
+  });
+  it('every plan on sale keeps at least 50% after the Razorpay fee and provider cost, yearly too', () => {
+    const cost = { brand: 1188, agency: 1188, solo: 660 }; // rupees a month per unit
+    for (const plan of CHARGEABLE) {
+      const yearlyMonth = (PLANS[plan].unit || PLANS[plan]).priceInr * 10 / 12;
+      const margin = (yearlyMonth * 0.972152 - cost[plan]) / yearlyMonth;
+      expect(margin).toBeGreaterThanOrEqual(0.5);
+    }
   });
 });
 
@@ -88,9 +117,12 @@ describe('signatures and webhooks', () => {
 
 describe('pages', () => {
   it('the buy page carries both currencies, picks India by time zone, and is closed without keys', () => {
-    const open = buyPage({ plan: 'lite', ready: true });
-    expect(open).toContain('"lite:mo:IN":{"pay":"₹1,179"');
-    expect(open).toContain('"lite:mo:XX":{"pay":"$12"');
+    const open = buyPage({ plan: 'agency', units: '3', ready: true });
+    expect(open).toContain('"brand":{"inr":3099,"usd":36,"per":"funnel"');
+    expect(open).toContain('"agency":{"inr":3899,"usd":45,"per":"client"');
+    expect(open).toContain('name="units" id="units" type="number" min="1" max="50" value="3"');
+    expect(open).toContain('<option value="agency" selected>');
+    expect(open).not.toContain('<option value="solo"');
     expect(open).toContain('checkout.razorpay.com/v1/checkout.js');
     expect(open).toContain('Asia\\/(Kolkata|Calcutta)');
     expect(open).not.toContain('Online payment opens soon');
@@ -102,10 +134,10 @@ describe('pages', () => {
   });
   it('plan cards link to the buy page with the chosen billing and currency', () => {
     const h = homePage();
-    for (const id of ['lite', 'starter', 'growth', 'agency']) expect(h).toContain(`data-buy="${id}" href="/buy?plan=${id}"`);
+    for (const id of ['brand', 'agency']) expect(h).toContain(`data-buy="${id}" href="/buy?plan=${id}"`);
     expect(h).toContain("a.href='/buy?plan='+a.getAttribute('data-buy')+'&bill='+B+'&cur='+C");
-    expect(h).toContain('$12<small> / month');
-    expect(h.indexOf('class="toggles"')).toBeLessThan(h.indexOf('class="grid plans"'));
+    expect(h).toContain('$36<small> / month');
+    expect(h.indexOf('class="toggles"')).toBeLessThan(h.indexOf('class="grid plans'));
     expect(refundPage()).toContain('US dollars, with no GST');
   });
   it('a workspace paid online cannot press Keep my plan once cancelled; the owner sees the Payments box', () => {
@@ -118,6 +150,20 @@ describe('pages', () => {
     expect(owner).toContain('https://x.y/buy/webhook');
     expect(planBody({ tenant: t, role: 'admin' })).not.toContain('Payments (owner only)');
   });
+  it('Solo is offered only to someone about to cancel, never to a client or a Solo workspace', () => {
+    const paid = { id: 'a', name: 'A', plan: 'brand', units: 2, billing_sub_id: 'sub_1', billing_currency: 'INR', expires_at: new Date() };
+    const h = planBody({ tenant: paid, role: 'admin' });
+    expect(h).toContain('Always-On Brand, 2 funnels');
+    expect(h).toContain('Before you go: Solo');
+    expect(h).toContain('₹1,699 + GST a month');
+    expect(h).toContain('/solo"');
+    expect(h.indexOf('Before you go')).toBeLessThan(h.indexOf('Cancel my plan'));
+    expect(soloOffer({ ...paid, billing_currency: 'USD' })).toContain('$20 a month');
+    expect(soloOffer({ ...paid, billing_sub_id: null })).not.toContain('<form');
+    expect(soloOffer({ ...paid, plan: 'solo' })).toBe('');
+    expect(soloOffer({ ...paid, parent_id: 'ag' })).toBe('');
+    expect(planBody({ tenant: { ...paid, cancelled_at: new Date() }, role: 'admin' })).not.toContain('Before you go');
+  });
 });
 
 // The service, with the database and Razorpay replaced.
@@ -126,7 +172,8 @@ vi.mock('../src/repositories/tenantConfigRepository.js', () => ({ get: async (_t
 vi.mock('../src/repositories/billingRepository.js', () => ({
   planId: async (k) => db.plans.get(k) || null,
   savePlanId: async (k, id) => db.plans.set(k, id),
-  createCheckout: async (c) => db.checkouts.set(c.id, { ...c, status: 'created', tenant_id: null, paid_at: null }),
+  keyForPlanId: async (id) => [...db.plans.entries()].find(([, v]) => v === id)?.[0] || '',
+  createCheckout: async (c) => db.checkouts.set(c.id, { ...c, extra_users: c.users, status: 'created', tenant_id: null, paid_at: null }),
   findCheckout: async (id) => db.checkouts.get(id) || null,
   claim: async (id, paymentId) => {
     const c = db.checkouts.get(id);
@@ -145,6 +192,7 @@ vi.mock('../src/repositories/tenantRepository.js', () => ({
   findById: async (id) => db.tenants.get(id) || null,
   createNew: async (t) => { const row = { ...t, expires_at: t.expiresAt, cancelled_at: null }; db.tenants.set(t.id, row); return row; },
   setCancelled: async (id, at) => { db.tenants.get(id).cancelled_at = at; return true; },
+  setPlanUnits: async (id, plan, units, extraUsers) => Object.assign(db.tenants.get(id), { plan, units, extra_users: extraUsers }),
 }));
 vi.mock('../src/repositories/usersRepository.js', () => ({
   findByEmail: async (e) => db.users.get(e) || null,
@@ -158,6 +206,7 @@ vi.mock('../src/providers/razorpayBilling.js', () => ({
   createPlan: async (_k, p) => { calls.push(['plan', p]); return { id: `plan_${calls.length}` }; },
   createSubscription: async (_k, s) => { calls.push(['sub', s]); return { id: `sub_${calls.length}` }; },
   cancelSubscription: async (_k, id) => { calls.push(['cancel', id]); return {}; },
+  changePlan: async (_k, id, planId) => { calls.push(['change', id, planId]); return {}; },
 }));
 
 describe('billing service', () => {
@@ -167,7 +216,7 @@ describe('billing service', () => {
     calls.length = 0;
     svc = await import('../src/services/billingService.js');
   });
-  const buyer = { plan: 'lite', bill: 'mo', country: 'IN', name: 'Asha', business: 'Asha Foods', email: 'asha@x.co', phone: '+919876543210' };
+  const buyer = { plan: 'brand', units: 2, users: 1, bill: 'mo', country: 'IN', name: 'Asha', business: 'Asha Foods', email: 'asha@x.co', phone: '+919876543210' };
 
   it('refuses until the owner saves keys, and checks the key id', async () => {
     await expect(svc.start(buyer)).rejects.toThrow(/not open yet/);
@@ -181,16 +230,18 @@ describe('billing service', () => {
   it('India: a rupee plan with GST; then confirm makes the workspace once and shows a one-time password', async () => {
     await svc.saveKeys({ keyId: 'rzp_live_abc', keySecret: 'ks', webhookSecret: 'ws' });
     const s = await svc.start(buyer);
-    expect(calls[0][1].item).toMatchObject({ amount: 117900, currency: 'INR' });
-    expect(calls[1][1]).toMatchObject({ total_count: 120, notes: { plan: 'lite', country: 'IN' } });
+    expect(calls[0][1].item).toMatchObject({ amount: withGst(3099 * 2 + 100) * 100, currency: 'INR' });
+    expect(calls[0][1].item.name).toBe('Content Engine Always-On Brand, 2 funnels, 1 extra user (monthly)');
+    expect(calls[1][1]).toMatchObject({ total_count: 120, notes: { plan: 'brand', units: 2, users: 1, country: 'IN' } });
+    await expect(svc.start({ ...buyer, email: 'solo@x.co', plan: 'solo' })).rejects.toThrow(/Pick a plan/);
     expect(s.keyId).toBe('rzp_live_abc');
     await expect(svc.confirm({ paymentId: 'pay_1', subscriptionId: s.subscriptionId, signature: 'nope' })).rejects.toThrow(/verified/);
     const sig = hmac(`pay_1|${s.subscriptionId}`, 'ks');
     const r = await svc.confirm({ paymentId: 'pay_1', subscriptionId: s.subscriptionId, signature: sig });
     expect(r.tenant).toMatch(/^asha-foods-/);
     expect(r.tempPassword).toBeTruthy();
-    expect(db.tenants.get(r.tenant)).toMatchObject({ plan: 'lite', billing_sub_id: s.subscriptionId, billing_currency: 'INR' });
-    expect(db.payments.get('pay_1')).toMatchObject({ currency: 'INR', base: 999, gst: 180 });
+    expect(db.tenants.get(r.tenant)).toMatchObject({ plan: 'brand', units: 2, extraUsers: 1, billing_sub_id: s.subscriptionId, billing_currency: 'INR' });
+    expect(db.payments.get('pay_1')).toMatchObject({ currency: 'INR', base: 6298, gst: withGst(6298) - 6298 });
     const again = await svc.confirm({ paymentId: 'pay_1', subscriptionId: s.subscriptionId, signature: sig });
     expect(again.tenant).toBe(r.tenant);
     expect(db.tenants.size).toBe(1);
@@ -200,8 +251,8 @@ describe('billing service', () => {
 
   it('outside India: dollars; the webhook can make the workspace first, renewals extend, a stop cancels', async () => {
     await svc.saveKeys({ keyId: 'rzp_live_abc', keySecret: 'ks', webhookSecret: 'ws' });
-    const s = await svc.start({ ...buyer, email: 'bob@x.co', phone: '+14155550100', country: 'XX', bill: 'yr', plan: 'growth' });
-    expect(calls[0][1]).toMatchObject({ period: 'yearly', item: { amount: PLANS.growth.priceUsd * 1000, currency: 'USD' } });
+    const s = await svc.start({ ...buyer, email: 'bob@x.co', phone: '+14155550100', country: 'XX', bill: 'yr', plan: 'agency', units: 3, users: 0 });
+    expect(calls[0][1]).toMatchObject({ period: 'yearly', item: { amount: 45 * 3 * 1000, currency: 'USD' } });
     const body = { event: 'subscription.charged', payload: { subscription: { entity: { id: s.subscriptionId, current_end: 1798761600 } }, payment: { entity: { id: 'pay_9' } } } };
     const raw = Buffer.from(JSON.stringify(body));
     expect((await svc.webhook(raw, 'bad', body)).ok).toBe(false);
@@ -224,5 +275,26 @@ describe('billing service', () => {
     expect(db.tenants.get(w.tenant).cancelled_at).toBeTruthy();
     await svc.stopRenewal(db.tenants.get(w.tenant));
     expect(calls.at(-1)).toEqual(['cancel', s.subscriptionId]);
+    expect(db.tenants.get(w.tenant)).toMatchObject({ plan: 'agency', units: 3 });
+  });
+
+  it('Solo: the subscription moves at the next renewal, and the workspace follows the charge', async () => {
+    await svc.saveKeys({ keyId: 'rzp_live_abc', keySecret: 'ks', webhookSecret: 'ws' });
+    const s = await svc.start(buyer);
+    const sig = hmac(`pay_1|${s.subscriptionId}`, 'ks');
+    const r = await svc.confirm({ paymentId: 'pay_1', subscriptionId: s.subscriptionId, signature: sig });
+    const t = db.tenants.get(r.tenant);
+    const out = await svc.switchToSolo(t);
+    expect(out.plan).toBe('solo');
+    const change = calls.find((c) => c[0] === 'change');
+    expect(change[1]).toBe(s.subscriptionId);
+    const soloPlanId = change[2];
+    expect(calls.find((c) => c[0] === 'plan' && c[1].item.amount === withGst(1699) * 100)).toBeTruthy();
+    // the next charge is on the Solo plan: the workspace moves to Solo
+    const body = { event: 'subscription.charged', payload: { subscription: { entity: { id: s.subscriptionId, current_end: 1798761600, plan_id: soloPlanId } }, payment: { entity: { id: 'pay_2' } } } };
+    const raw = Buffer.from(JSON.stringify(body));
+    await svc.webhook(raw, hmac(raw, 'ws'), body);
+    expect(db.tenants.get(r.tenant)).toMatchObject({ plan: 'solo', units: null, extra_users: 0 });
+    await expect(svc.switchToSolo({ id: 'x' })).rejects.toThrow(/write to us/);
   });
 });

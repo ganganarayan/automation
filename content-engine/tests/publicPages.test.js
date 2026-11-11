@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { homePage, privacyPage, termsPage, refundPage, shippingPage, inr, CHANNELS, LOGIN_PATH, UPDATED } from '../src/utils/publicPages.js';
+import { homePage, privacyPage, termsPage, refundPage, shippingPage, inr, CHANNELS, LOGIN_PATH, UPDATED, STACK_TOTAL } from '../src/utils/publicPages.js';
 import { PLANS } from '../src/utils/planSpec.js';
 
 describe('public pages', () => {
@@ -9,15 +9,15 @@ describe('public pages', () => {
     expect(h).toContain('href="/privacy"');
     expect(h).toContain('href="/terms"');
   });
-  it('home shows every plan from planSpec, with Indian rupee grouping', () => {
+  it('home sells one plan per funnel and Agency per client, with Indian rupee grouping', () => {
     const h = homePage();
-    for (const id of ['starter', 'growth', 'agency']) {
-      expect(h).toContain(PLANS[id].label);
-      expect(h).toContain(`₹${inr(PLANS[id].priceInr)}`);
-    }
-    expect(h).toContain('30 posts a month');
-    expect(h).toContain('No AI videos');
-    expect(h).toContain('10 clients, each its own workspace and login');
+    expect(h).toContain('Always-On Brand');
+    expect(h).toContain('₹3,099<small> + GST / month per funnel');
+    expect(h).toContain('₹3,899<small> + GST / month per client');
+    expect(h).toContain('$36<small> / month per funnel');
+    expect(h).toContain('30 finished posts a month');
+    expect(h).toContain('10 channels');
+    for (const old of ['Starter Lite', 'data-buy="growth"', 'data-buy="solo"', 'Solo']) expect(h).not.toContain(old);
     for (const c of CHANNELS) expect(h).toContain(c);
     expect(h).not.toContain(String.fromCharCode(0x2014));
   });
@@ -26,18 +26,20 @@ describe('public pages', () => {
     expect(h).toContain('Before Content Engine');
     expect(h).toContain('See it in action');
     expect(h).toContain('Cancel any time, one click');
-    expect(h).toContain(`₹${inr(Math.round((PLANS.starter.priceInr * 10) / 12))}`);
-    expect(h).toContain(`₹${inr(PLANS.starter.priceInr * 10)} + GST a year`);
+    expect(h).toContain(`₹${inr(Math.round((PLANS.brand.priceInr * 10) / 12))}`);
+    expect(h).toContain(`₹${inr(PLANS.brand.priceInr * 10)} + GST a year`);
     expect(h).toContain('class="float-cta"');
   });
-  it('+ GST is normal text with the total beside it, and Starter Lite says it is the lean build', () => {
+  it('+ GST is normal text with the total beside it, and the value stack adds up', () => {
     const h = homePage();
     expect(h).not.toContain('class="gst"');
     expect(h).not.toContain('.gst{');
-    expect(h).toContain(`₹${inr(PLANS.lite.priceInr)}<small> + GST / month`);
-    expect(h).toContain('₹1,179 a month with 18% GST');
-    expect(h).toContain('One picture per post, cut to 9:16, 4:5 and 16:9');
-    expect(h).toContain('ElevenLabs Flash');
+    expect(h).toContain('₹3,657 a month with 18% GST');
+    expect(STACK_TOTAL).toEqual({ inr: 21780, usd: 257 });
+    expect(h).toContain('₹21,780+');
+    expect(h).toContain('$257+');
+    expect(h).toContain('Founding price');
+    expect(h).toContain('Done-with-you setup');
   });
   it('home plan buttons mail the contact, or open sign-in without one', () => {
     expect(homePage({ email: 'a@b.co' })).toContain('mailto:a@b.co?subject=');

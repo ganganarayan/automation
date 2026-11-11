@@ -13,11 +13,24 @@
  * means India.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { PLANS, withGst, validTenantId } from './planSpec.js';
+import { PLANS, EXTRAS, MAX_UNITS, MAX_EXTRA_USERS, withGst, validTenantId, monthlyPrice } from './planSpec.js';
 
 export const BUY_PATH = '/buy';
-/** Plans a person can buy on their own (Custom is set up by the owner). */
-export const BUYABLE = ['lite', 'starter', 'growth', 'agency'];
+/** Plans on the buy page: one plan per funnel, and Agency per client. */
+export const BUYABLE = ['brand', 'agency'];
+/** Plans a buyer may be charged for: the buy page's, and Solo (offered when cancelling). */
+export const CHARGEABLE = [...BUYABLE, 'solo'];
+
+/** Funnels (or clients) and extra users, as whole numbers within the limits. */
+export function cleanCounts(plan, { units = 1, users = 0 } = {}) {
+  const per = !!(PLANS[plan] && PLANS[plan].unit);
+  const u = Math.floor(Number(units));
+  const blank = users === '' || users === undefined || users === null;
+  const x = blank ? 0 : Math.floor(Number(users));
+  if (per && !(u >= 1 && u <= MAX_UNITS)) throw new Error(`Pick 1 to ${MAX_UNITS} ${PLANS[plan].perUnit === 'client' ? 'clients' : 'funnels'}; for more, write to us`);
+  if (!(x >= 0 && x <= MAX_EXTRA_USERS)) throw new Error(`Pick 0 to ${MAX_EXTRA_USERS} extra users`);
+  return { units: per ? u : 1, users: x };
+}
 /** Billing periods: Razorpay period, months paid for, renewals before the subscription ends. */
 export const PERIODS = {
   mo: { months: 1, period: 'monthly', count: 120, word: 'monthly', unit: 'month' },
@@ -42,49 +55,87 @@ export function currencyFor(country) {
 /** Indian digit grouping (117882 -> "1,17,882"). */
 const groupInr = (n) => String(Math.round(Number(n) || 0)).replace(/(\d)(?=(\d\d)+\d$)/g, '$1,');
 
-/** A price for people: "₹1,179" or "$12". */
+/** A price for people: "₹1,179", "$12" or "$37.50". */
 export function money(n, currency) {
-  return currency === 'INR' ? `₹${groupInr(n)}` : `$${Math.round(Number(n) || 0).toLocaleString('en-US')}`;
+  if (currency === 'INR') return `₹${groupInr(n)}`;
+  const cents = Math.round((Number(n) || 0) * 100);
+  const whole = String(Math.floor(cents / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `$${whole}${cents % 100 ? `.${String(cents % 100).padStart(2, '0')}` : ''}`;
 }
 
 /**
  * What a plan costs this buyer for one period. Amounts are whole rupees or
  * dollars; `amount` is the charge in the smallest unit (paise or cents).
  */
-export function quote({ plan, bill = 'mo', country = 'IN' } = {}) {
+export function quote({ plan, bill = 'mo', country = 'IN', units = 1, users = 0 } = {}) {
   const lim = PLANS[plan];
-  if (!lim || !BUYABLE.includes(plan)) throw new Error('Pick a plan to buy');
+  if (!lim || !CHARGEABLE.includes(plan)) throw new Error('Pick a plan to buy');
   const p = PERIODS[bill];
   if (!p) throw new Error('Pick monthly or yearly billing');
+  const n = cleanCounts(plan, { units, users });
   const currency = currencyFor(country);
   const times = bill === 'yr' ? 10 : 1; // yearly: 12 months for the price of 10
+  const month = monthlyPrice(plan, { units: n.units, extraUsers: n.users }, currency);
+  const counts = { units: n.units, users: n.users };
   if (currency === 'INR') {
-    const base = lim.priceInr * times;
+    const base = Math.round(month * times);
     const total = withGst(base);
-    return { plan, bill, currency, base, gst: total - base, total, amount: total * 100 };
+    return { plan, bill, currency, ...counts, base, gst: total - base, total, amount: total * 100 };
   }
-  const base = lim.priceUsd * times;
-  return { plan, bill, currency, base, gst: 0, total: base, amount: base * 100 };
+  // Dollars may carry cents ($1.50 an extra user).
+  const base = Math.round(month * times * 100) / 100;
+  return { plan, bill, currency, ...counts, base, gst: 0, total: base, amount: Math.round(base * 100) };
 }
 
-/** Every price the buy page can show, so its summary never does its own sums. */
+/** Unit prices for the buy page's own sum (the server quotes the charge again). */
+export function unitPrices() {
+  const out = {};
+  for (const plan of CHARGEABLE) {
+    const lim = PLANS[plan];
+    const u = lim.unit || lim;
+    out[plan] = { inr: u.priceInr, usd: u.priceUsd, per: lim.perUnit || '', label: lim.label };
+  }
+  return { plans: out, user: EXTRAS.user, maxUnits: MAX_UNITS, maxUsers: MAX_EXTRA_USERS };
+}
+
+/** Every one-unit price, plan:bill:country (tests and the owner's checks). */
 export function quoteTable() {
   const out = {};
-  for (const plan of BUYABLE) for (const bill of Object.keys(PERIODS)) for (const country of Object.keys(COUNTRIES)) {
+  for (const plan of CHARGEABLE) for (const bill of Object.keys(PERIODS)) for (const country of Object.keys(COUNTRIES)) {
     out[`${plan}:${bill}:${country}`] = quote({ plan, bill, country });
   }
   return out;
 }
 
-/** One line for people: "Starter Lite, monthly: ₹1,179 (₹999 + ₹180 GST)". */
+/** What was bought, in words: "3 funnels, 2 extra users". */
+export function countsText(q) {
+  const lim = PLANS[q.plan];
+  const parts = [];
+  if (lim && lim.unit) {
+    const n = q.units || 1;
+    parts.push(`${n} ${lim.perUnit === 'client' ? (n === 1 ? 'client' : 'clients') : (n === 1 ? 'funnel' : 'funnels')}`);
+  }
+  if (q.users) parts.push(`${q.users} extra user${q.users === 1 ? '' : 's'}`);
+  return parts.join(', ');
+}
+
+/** One line for people: "Always-On Brand (2 funnels), monthly: ₹7,314 (₹6,198 + ₹1,116 GST)". */
 export function describe(q) {
-  const head = `${PLANS[q.plan].label}, ${PERIODS[q.bill].word}: ${money(q.total, q.currency)}`;
+  const what = countsText(q);
+  const head = `${PLANS[q.plan].label}${what ? ` (${what})` : ''}, ${PERIODS[q.bill].word}: ${money(q.total, q.currency)}`;
   return q.currency === 'INR' ? `${head} (${money(q.base, 'INR')} + ${money(q.gst, 'INR')} GST)` : `${head}, no GST`;
 }
 
 /** The cached Razorpay plan for this exact price (a price change makes a new plan). */
 export function planKey(q) {
-  return `${q.plan}:${q.bill}:${q.currency}:${q.amount}`;
+  return `${q.plan}:${q.bill}:${q.currency}:${q.amount}:${q.units || 1}:${q.users || 0}`;
+}
+
+/** Plan, funnels or clients, and extra users back from a planKey ('' plan when it is not one). */
+export function readPlanKey(key) {
+  const [plan, bill, currency, amount, units, users] = String(key || '').split(':');
+  if (!PLANS[plan] || !PERIODS[bill]) return { plan: '' };
+  return { plan, bill, currency, amount: Number(amount) || 0, units: Number(units) || 1, users: Number(users) || 0 };
 }
 
 /** A GSTIN, or blank (it is optional). */
@@ -145,7 +196,7 @@ export function webhookAction(body) {
   if (!sub || !sub.id) return { kind: 'ignore', event: ev };
   if (ev === 'subscription.charged') {
     return {
-      kind: 'charged', event: ev, subId: String(sub.id), currentEnd: Number(sub.current_end) || 0,
+      kind: 'charged', event: ev, subId: String(sub.id), currentEnd: Number(sub.current_end) || 0, planId: sub.plan_id ? String(sub.plan_id) : '',
       paymentId: pay && pay.id ? String(pay.id) : '', amount: pay ? Number(pay.amount) || 0 : 0, currency: pay ? String(pay.currency || '') : '',
     };
   }
@@ -178,6 +229,6 @@ export function expiryFromSub(currentEnd) {
 }
 
 export default {
-  BUY_PATH, BUYABLE, PERIODS, BILLING_KEYS, WEBHOOK_EVENTS, COUNTRIES, currencyFor, money, quote, quoteTable, describe, planKey,
+  BUY_PATH, BUYABLE, CHARGEABLE, cleanCounts, unitPrices, countsText, readPlanKey, PERIODS, BILLING_KEYS, WEBHOOK_EVENTS, COUNTRIES, currencyFor, money, quote, quoteTable, describe, planKey,
   validGstin, cleanBuyer, buyerProblem, sigOk, checkoutSigOk, webhookAction, workspaceIdFrom, expiryAfter, expiryFromSub,
 };

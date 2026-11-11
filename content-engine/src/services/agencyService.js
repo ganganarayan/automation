@@ -33,7 +33,7 @@ import { settings } from '../settings/index.js';
 import { formatIst } from '../utils/time.js';
 import { monthRange, costCsv, rollupMail, rollupDue } from '../utils/agencyReport.js';
 import { buildProviders } from './providerFactory.js';
-import { limitsFor, validTenantId } from '../utils/planSpec.js';
+import { limitsForTenant, validTenantId } from '../utils/planSpec.js';
 import { AGENCY_PLAN, templateTenantKey, templateFunnelKey, teamRole, teamProblem } from '../utils/workspaceSpec.js';
 import { DAILY_KEY, dailyTimeOf } from '../utils/cloudflareWake.js';
 import { NEEDS_YOU_STATUSES } from '../utils/libraryStatus.js';
@@ -74,7 +74,7 @@ export async function overview(agencyId) {
   const times = {};
   for (const c of clients) times[c.id] = dailyTimeOf(await tenantConfig.get(String(c.id), DAILY_KEY).catch(() => ''));
   const usage = await planService.monthUsage(agency.id).catch(() => null);
-  const lim = limitsFor(agency.plan);
+  const lim = limitsForTenant(agency.plan, { units: agency.units, extraUsers: agency.extra_users });
   return {
     agency,
     clients: clients.map((c) => ({ ...c, dailyTime: times[c.id], stats: byId.get(String(c.id)) || null })),
@@ -189,17 +189,17 @@ export async function costCsvFor(agencyId, ym = '') {
 
 // A moved-out client gets a week on its new plan: the owner then renews it on Tenants.
 const MOVE_OUT_DAYS = 7;
-const MOVE_OUT_PLANS = ['starter', 'growth'];
+const MOVE_OUT_PLANS = ['brand', 'starter', 'growth'];
 
 /**
  * Move a client out: it becomes its own workspace on Starter or Growth, keeps
  * its funnels, posts, people and history, and stops using the agency's keys.
  * Channels connected on the agency's own Post for Me key must be connected again.
  */
-export async function detachClient(agencyId, clientId, plan = 'starter') {
+export async function detachClient(agencyId, clientId, plan = 'brand') {
   const agency = await agencyRow(agencyId);
   const client = await clientOf(agency.id, clientId);
-  const p = MOVE_OUT_PLANS.includes(String(plan)) ? String(plan) : 'starter';
+  const p = MOVE_OUT_PLANS.includes(String(plan)) ? String(plan) : 'brand';
   const expires = new Date(Date.now() + MOVE_OUT_DAYS * 86400000);
   await tenantRepo.detach(client.id, p, expires);
   await tenantConfig.set(String(client.id), 'connect_link', '').catch(() => {});

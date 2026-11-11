@@ -11,7 +11,7 @@
  * history on that IST day, else its keys today. Spend on the tenant's own key
  * is not on the owner's bill.
  */
-import { limitsFor, USD_INR } from './planSpec.js';
+import { monthlyPrice, USD_INR } from './planSpec.js';
 import { usageMonth, monthLabel } from './pfmScope.js';
 
 function esc(s) {
@@ -72,7 +72,8 @@ export function costBox(tenantList = [], rows = null, now = new Date(), keyOwner
   const body = ids.map((id) => {
     const t = byId[id] || { id, name: id, plan: 'custom' };
     const cur = (split[id] || {})[months[0]] || { total: 0, onBill: 0, own: 0, byProvider: {} };
-    const price = limitsFor(t.plan).priceInr;
+    // A plan bought per funnel or client: the price for what was bought.
+    const price = t.parent_id ? null : monthlyPrice(t.plan, { units: t.units || 1, extraUsers: t.extra_users || 0 }, 'INR');
     const margin = price ? Math.round(((price - cur.onBill * USD_INR) / price) * 100) : null;
     const dot = margin === null ? '' : margin >= 50 ? '🟢 ' : margin >= 0 ? '🟡 ' : '🔴 ';
     const top = Object.entries(cur.byProvider).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([p, v]) => `${esc(p)} ${usd(v)}`).join(', ');

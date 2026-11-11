@@ -33,10 +33,10 @@ const cell = (v, note, src) => {
 };
 
 function finalCta(email, heading) {
-  const trial = contactHrefFor(email)('Starter trial');
+  const trial = contactHrefFor(email)('7-day trial');
   return `<section class="final"><div class="wrap">
   <h2>${esc(heading)}</h2>
-  <p class="kicker" style="margin:0 auto 1.6rem">Seven days free on Starter. Access is by invitation: ask, and your workspace is set up for you.</p>
+  <p class="kicker" style="margin:0 auto 1.6rem">Seven days free, then ₹3,099 + GST a funnel ($36 outside India). Or buy now and your workspace is ready the moment you pay.</p>
   <div class="cta"><a class="btn" href="${trial}">Start the 7-day trial</a><a class="btn ghost" href="/#pricing">See pricing</a></div>
 </div></section>`;
 }
@@ -93,7 +93,7 @@ ${landingNav('/')}
   <span class="pill">${esc(c.name)} · ${esc(c.category)} · checked ${esc(CHECKED_ON)}</span>
   <h1 style="margin-left:0">Content Engine vs <em>${esc(c.name)}</em></h1>
   <p class="lead" style="margin-left:0">${esc(c.lede)}</p>
-  <div class="cta" style="justify-content:flex-start"><a class="btn" href="${contactHrefFor(email)('Starter trial')}">Start the 7-day trial</a><a class="btn ghost" href="#table">See every feature</a></div>
+  <div class="cta" style="justify-content:flex-start"><a class="btn" href="${contactHrefFor(email)('7-day trial')}">Start the 7-day trial</a><a class="btn ghost" href="#table">See every feature</a></div>
 </div></header>
 
 <section><div class="wrap">
@@ -124,7 +124,7 @@ ${landingNav('/')}
 <section><div class="wrap">
   <h2>Price</h2>
   <div class="grid g3">
-    <div class="card"><h3>Content Engine</h3><p>Starter Lite ₹999, Starter ₹2,799, Growth ₹10,499, Agency ₹14,999 a month + GST, per workspace ($12, $32, $119 and $169 outside India, no GST), AI included on Starter Lite, Starter and Growth. 7-day trial. <a href="/#pricing">See plans</a></p></div>
+    <div class="card"><h3>Content Engine</h3><p>Always-On Brand: ₹3,099 + GST a month per funnel (brand) with 10 channels and 30 finished posts ($36 outside India, no GST). Agency ₹3,899 + GST per client ($45). AI included. 7-day trial. <a href="/#pricing">See plans</a></p></div>
     <div class="card"><h3>${esc(c.name)}</h3><p>${esc(c.price)}</p></div>
   </div>
 </div></section>
