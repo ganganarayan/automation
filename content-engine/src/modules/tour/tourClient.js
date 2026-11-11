@@ -15,7 +15,7 @@
   if (window.__ctour) return;
   window.__ctour = true;
 
-  var TOTAL = 7;
+  var TOTAL = 8;
   var PREFIX = (location.pathname.match(/^\/t\/[^/]+/) || [''])[0];
   var API = PREFIX + '/api/v1/admin/tour/state';
   var ADMIN_KEY = new URLSearchParams(location.search).get('key') || '';
@@ -135,7 +135,8 @@
   var STAGE_META = {
     basics: { n: 4, title: 'Fill in the basics', page: 'Shared basics' },
     publish: { n: 5, title: 'Connect your social accounts', page: 'Publish & comments' },
-    image: { n: 6, title: 'Bring your Google Sheet', page: 'Lane 3: Image post' },
+    ready: { n: 6, title: 'Add your ready videos folder', page: 'Lane 1: Ready video' },
+    image: { n: 7, title: 'Bring your Google Sheet', page: 'Lane 3: Image post' },
   };
 
   /** -> { n, title, html, sel|el, here, go:{label,run}|null, finish } */
@@ -169,9 +170,9 @@
 
     if (S.stage === 'done') {
       return {
-        n: 7, title: 'You are set up',
+        n: 8, title: 'You are set up',
         html: '<p><b>' + esc(f && f.name) + '</b> now posts every day at its publish time. Each day the router picks a ready video, an AI video or an image post from your sheet, and emails you to approve it first.</p>' +
-          '<p>Optional, when you want more:</p><ol><li><b>Lane 1</b>: a Drive folder of your own videos, posted in order.</li><li><b>Lane 2</b>: AI videos, once your keys are in.</li></ol>' +
+          '<p>Keep the Drive folder topped up with videos; when your sheet runs low on ideas the app adds more by itself. Optional later: <b>Lane 2</b>, AI videos, once your keys are in.</p>' +
           '<p>Click <b>Help</b> at the top right any time to see this again.</p>',
         finish: true,
       };
@@ -215,6 +216,7 @@
     // On the right page: point at the next field.
     if (S.stage === 'basics') return basicsStep(meta);
     if (S.stage === 'publish') return publishStep(meta, f.id);
+    if (S.stage === 'ready') return readyStep(meta);
     return imageStep(meta);
   }
 
@@ -279,21 +281,72 @@
     };
   }
 
-  function imageStep(meta) {
-    var hdr = (S.sheetHeaders || []).join('\t');
+  /** "Share it with <email> as Editor", or the anyone-with-the-link fallback. */
+  function shareLi(what) {
     var sa = S.saEmail || '';
-    var shareLine = sa
-      ? '<li>Click <b>Share</b> on the sheet and add <code>' + esc(sa) + '</code><button type="button" class="ct-copy" data-copy="' + esc(sa) + '">Copy</button> as <b>Editor</b>.</li>'
-      : '<li>Click <b>Share</b> on the sheet and set <b>General access</b> to <b>Anyone with the link</b>, role <b>Editor</b>.</li>';
-    var steps = '<p>On days with no video, the funnel posts an image from a Google Sheet that you own. You only make it once; the app fills in new post ideas by itself.</p>' +
-      '<ol><li>Open <a href="https://sheets.new" target="_blank" rel="noopener">sheets.new</a> in a new tab to make a blank sheet.</li>' +
-      '<li>Click cell <b>A1</b> and paste the headers <button type="button" class="ct-copy" data-copy="' + esc(hdr) + '">Copy headers</button><br><code>' + esc((S.sheetHeaders || []).join(' | ')) + '</code></li>' +
-      shareLine +
-      '<li>Copy the sheet\'s address from the browser bar and paste it in the highlighted box. I keep only the ID.</li></ol>';
-    if (!filled('[name="set[sheet_id]"]')) {
+    return sa
+      ? '<li>Click <b>Share</b> on the ' + what + ' and add <code>' + esc(sa) + '</code><button type="button" class="ct-copy" data-copy="' + esc(sa) + '">Copy</button> as <b>Editor</b>.</li>'
+      : '<li>Click <b>Share</b> on the ' + what + ' and set <b>General access</b> to <b>Anyone with the link</b>, role <b>Editor</b>.</li>';
+  }
+
+  function readyStep(meta) {
+    var box = q('[name="set[direct_drive_folder]"]');
+    if (!filled('[name="set[direct_drive_folder]"]')) {
       return {
         n: meta.n, title: meta.title,
-        html: steps + '<div class="ct-do">Paste your sheet\'s link into <b>Content sheet ID</b>.</div>',
+        html: '<p>Videos you already have (reels, shorts, ads) go in one Google Drive folder. Every day the app posts the next one, so this folder is your first choice of post.</p>' +
+          '<ol><li>Open <a href="https://drive.google.com/drive/my-drive" target="_blank" rel="noopener">Google Drive</a>, click <b>New</b>, then <b>New folder</b>. Name it, for example <b>' + esc(S.funnel.name) + ' ready videos</b>.</li>' +
+          '<li>Upload your videos. Put a number in each name to set the order: <b>Ad1</b>, <b>Ad2</b>, <b>Ad3</b>. Optional: a picture and a .txt with the same name become its thumbnail and caption.</li>' +
+          shareLi('folder') +
+          '<li>Click <b>Copy link</b> in the same Share box and paste it in the highlighted box.</li></ol>' +
+          '<p style="font-size:.8rem;color:#8a8aa2">No videos yet? Make the folder now and add them later. On days with no video the app posts an image instead.</p>' +
+          '<div class="ct-do">Paste your folder link into the highlighted box.</div>',
+        el: box, here: 'Paste the folder link',
+      };
+    }
+    var st = document.getElementById('rv-status');
+    if (st && !String(st.textContent || '').trim()) {
+      return {
+        n: meta.n, title: meta.title,
+        html: '<p>Folder linked. Check that the app can see your videos.</p><div class="ct-do">Click <b>Load videos</b>. A yellow note means the folder is not shared yet: share it as Editor and click again.</div>',
+        el: q('button[onclick="loadVideos()"]'), here: 'Click Load videos',
+      };
+    }
+    return {
+      n: meta.n, title: meta.title,
+      html: '<p>Good. The top video is the next one posted.</p><div class="ct-do">Click <b>Save</b> at the bottom.</div>',
+      el: q('.btn.save'), here: 'Click Save',
+    };
+  }
+
+  var MADE_KEY = 'ctour-made-';
+
+  function imageStep(meta) {
+    var made = ss(MADE_KEY + S.funnel.id) === '1';
+    if (!made && !filled('[name="set[sheet_id]"]')) {
+      return {
+        n: meta.n, title: 'Make your post ideas with AI',
+        html: '<p>On days with no video, the app posts an image from a Google Sheet you own. Your own AI (ChatGPT, Claude or Gemini) can write 30 post ideas for your business in a couple of minutes.</p>' +
+          '<ol><li>Open the prompt maker and fill in your business details.</li>' +
+          '<li>Download the Excel template and copy the prompt.</li>' +
+          '<li>In your AI, attach the template, paste the prompt and send.</li>' +
+          '<li>Download the filled Excel it gives back.</li></ol>' +
+          '<div class="ct-do">Click <b>Open prompt maker</b>.</div>' +
+          '<p style="font-size:.8rem"><a href="#" data-a="have">I already have my sheet</a></p>',
+        go: { label: 'Open prompt maker', run: openMaker },
+      };
+    }
+    if (!filled('[name="set[sheet_id]"]')) {
+      return {
+        n: meta.n, title: 'Put it in your Google Sheet',
+        html: '<p>Got the filled Excel from your AI? Now make it a Google Sheet the app can read and add to.</p>' +
+          '<ol><li>Open <a href="https://sheets.new" target="_blank" rel="noopener">sheets.new</a> for a blank sheet.</li>' +
+          '<li>Click <b>File</b>, <b>Import</b>, <b>Upload</b>, pick the Excel, choose <b>Replace current sheet</b>, then <b>Import data</b>. Or open the Excel, copy everything including the header row and paste it into cell <b>A1</b>.</li>' +
+          '<li>Row 1 must keep these headers: <code>' + esc((S.sheetHeaders || []).join(' | ')) + '</code><button type="button" class="ct-copy" data-copy="' + esc((S.sheetHeaders || []).join('\t')) + '">Copy headers</button></li>' +
+          shareLi('sheet') +
+          '<li>Copy the sheet\'s address from the browser bar and paste it in the highlighted box. I keep only the ID.</li></ol>' +
+          '<div class="ct-do">Paste your sheet\'s link into <b>Content sheet ID</b>.</div>' +
+          '<p style="font-size:.8rem"><a href="#" data-a="maker">Back to the prompt maker</a></p>',
         el: q('[name="set[sheet_id]"]'), here: 'Paste the sheet link',
       };
     }
@@ -302,6 +355,92 @@
       html: '<p>Sheet linked. Make sure it is shared as Editor, or the app cannot add ideas to it.</p><div class="ct-do">Click <b>Save</b> at the bottom.</div>',
       el: q('.btn.save'), here: 'Click Save',
     };
+  }
+
+  // ---- prompt maker -------------------------------------------------------
+  // Business details in, a prompt out that their own AI fills the template with.
+  var MAKER_CSS = [
+    '#ctour-maker{position:fixed;inset:0;z-index:2147483001;background:rgba(5,5,12,.75);display:flex;align-items:center;justify-content:center;padding:16px;font-family:system-ui,sans-serif;color:#e8e8ef}',
+    '#ctour-maker .mk{background:#12121b;border:1px solid #2d6cdf;border-radius:14px;width:min(980px,100%);max-height:calc(100vh - 32px);display:flex;flex-direction:column;overflow:hidden}',
+    '#ctour-maker .mk-h{display:flex;align-items:center;gap:.7rem;padding:.8rem 1rem;border-bottom:1px solid #24243a}',
+    '#ctour-maker .mk-h b{font-size:1.02rem;color:#fff}#ctour-maker .mk-h .ct-bot{width:36px;height:36px}',
+    '#ctour-maker .mk-x{margin-left:auto;background:none;border:0;color:#8a8aa2;font-size:1.3rem;cursor:pointer}',
+    '#ctour-maker .mk-steps{display:flex;gap:.4rem;flex-wrap:wrap;padding:.6rem 1rem;border-bottom:1px solid #1e1e2c;font-size:.8rem;color:#c7c7d9}',
+    '#ctour-maker .mk-steps span{background:#15151f;border:1px solid #24243a;border-radius:999px;padding:.2rem .65rem}',
+    '#ctour-maker .mk-steps i{font-style:normal;color:#ffd479;font-weight:700;margin-right:.3rem}',
+    '#ctour-maker .mk-b{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:1rem;padding:1rem;overflow:auto}',
+    '@media(max-width:760px){#ctour-maker .mk-b{grid-template-columns:1fr}}',
+    '#ctour-maker label{display:block;font-size:.78rem;color:#c7c7d9;margin:.55rem 0 .2rem}#ctour-maker label:first-child{margin-top:0}',
+    '#ctour-maker input,#ctour-maker textarea{width:100%;box-sizing:border-box;background:#0b0b12;color:#fff;border:1px solid #333;border-radius:8px;padding:.45rem .55rem;font:inherit;font-size:.86rem}',
+    '#ctour-maker textarea{min-height:3.2rem;resize:vertical}',
+    '#ctour-maker .mk-out{width:100%;height:100%;min-height:320px;font-family:ui-monospace,Consolas,monospace;font-size:.76rem;line-height:1.45;color:#d7d7e6}',
+    '#ctour-maker .mk-f{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;padding:.75rem 1rem;border-top:1px solid #24243a}',
+    '#ctour-maker .mk-note{font-size:.78rem;color:#8a8aa2;margin-right:auto}',
+  ].join('\n');
+
+  function makerSaved() {
+    try { return JSON.parse(localStorage.getItem('ctour-prompt-' + S.funnel.id) || '{}') || {}; } catch (e) { return {}; }
+  }
+
+  function openMaker() {
+    if (document.getElementById('ctour-maker')) return;
+    if (!document.getElementById('ctour-maker-css')) {
+      var st = document.createElement('style'); st.id = 'ctour-maker-css'; st.textContent = MAKER_CSS; document.head.appendChild(st);
+    }
+    var fields = S.promptFields || [];
+    var saved = makerSaved();
+    var defs = S.promptDefaults || {};
+    var form = fields.map(function (f) {
+      var key = f[0], label = f[1], ph = f[2];
+      var val = saved[key] != null ? saved[key] : (defs[key] || '');
+      var multi = key === 'audience' || key === 'pain_points' || key === 'solutions';
+      return '<label for="mk-' + key + '">' + esc(label) + '</label>' + (multi
+        ? '<textarea id="mk-' + key + '" data-k="' + key + '" placeholder="' + esc(ph) + '">' + esc(val) + '</textarea>'
+        : '<input id="mk-' + key + '" data-k="' + key + '" placeholder="' + esc(ph) + '" value="' + esc(val) + '">');
+    }).join('');
+    var tpl = PREFIX + '/api/v1/admin/tour/sheet-template.xlsx';
+    var m = document.createElement('div');
+    m.id = 'ctour-maker';
+    m.setAttribute('role', 'dialog');
+    m.setAttribute('aria-label', 'Prompt maker');
+    m.innerHTML = '<div class="mk">' +
+      '<div class="mk-h">' + BOT + '<div><b>Prompt maker</b><div style="font-size:.78rem;color:#8a8aa2">Your details stay in this browser. Blank boxes stay as [brackets] to fill in your AI.</div></div><button type="button" class="mk-x" aria-label="Close">×</button></div>' +
+      '<div class="mk-steps"><span><i>1</i>Fill in your business</span><span><i>2</i>Download the template</span><span><i>3</i>Copy the prompt</span><span><i>4</i>In ChatGPT, Claude or Gemini: attach the template, paste, send</span><span><i>5</i>Download the Excel it returns</span></div>' +
+      '<div class="mk-b"><div>' + form + '</div><div><label for="mk-out">Your prompt</label><textarea id="mk-out" class="mk-out" readonly></textarea></div></div>' +
+      '<div class="mk-f"><span class="mk-note">Then come back here: the next step puts it in Google Sheets.</span>' +
+      '<a class="ct-btn" href="' + tpl + '" download="' + esc(S.templateName || 'content-sheet-template.xlsx') + '" style="background:#2a2a44;color:#fff;border-radius:8px;padding:.5rem .9rem;font-size:.86rem;text-decoration:none">Download template</a>' +
+      '<button type="button" class="mk-copy" style="background:#2a2a44;color:#fff;border:0;border-radius:8px;padding:.5rem .9rem;font-size:.86rem;cursor:pointer">Copy prompt</button>' +
+      '<button type="button" class="mk-done" style="background:#2d6cdf;color:#fff;border:0;border-radius:8px;padding:.5rem .9rem;font-size:.86rem;cursor:pointer">I have my Excel, next</button></div></div>';
+    document.body.appendChild(m);
+
+    var out = m.querySelector('#mk-out');
+    function build() {
+      var vals = {};
+      m.querySelectorAll('[data-k]').forEach(function (el) { vals[el.getAttribute('data-k')] = String(el.value || '').trim(); });
+      try { localStorage.setItem('ctour-prompt-' + S.funnel.id, JSON.stringify(vals)); } catch (e) { /* stays for this visit only */ }
+      var labels = {};
+      fields.forEach(function (f) { labels[f[0]] = f[1]; });
+      out.value = String(S.promptTemplate || '').replace(/\{\{(\w+)\}\}/g, function (_m, k) {
+        return vals[k] || '[' + String(labels[k] || k).toLowerCase() + ']';
+      });
+    }
+    function close() { m.remove(); document.removeEventListener('keydown', onKey); }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    m.addEventListener('input', build);
+    m.querySelector('.mk-x').onclick = close;
+    m.addEventListener('click', function (e) { if (e.target === m) close(); });
+    document.addEventListener('keydown', onKey);
+    var cp = m.querySelector('.mk-copy');
+    cp.onclick = function () { build(); copy(out.value, cp); };
+    m.querySelector('.mk-done').onclick = function () {
+      ss(MADE_KEY + S.funnel.id, '1');
+      close();
+      lastKey = '';
+      render(true);
+    };
+    build();
+    var first = m.querySelector('[data-k]');
+    if (first) first.focus();
   }
 
   // ---- render -------------------------------------------------------------
@@ -356,13 +495,16 @@
 
   function wire(step) {
     root.querySelectorAll('[data-a]').forEach(function (b) {
-      b.onclick = function () {
+      b.onclick = function (e) {
+        if (b.tagName === 'A' && e) e.preventDefault();
         var a = b.getAttribute('data-a');
         if (a === 'go' && step.go) step.go.run();
         else if (a === 'show') { setTarget(step.el, step.here, true); jump(); }
         else if (a === 'hide') setOpen(false);
         else if (a === 'skip') { save('dismissed'); S.saved = 'dismissed'; setOpen(false); }
         else if (a === 'finish') { save('done'); S.saved = 'done'; setOpen(false); }
+        else if (a === 'maker') openMaker();
+        else if (a === 'have') { ss(MADE_KEY + S.funnel.id, '1'); lastKey = ''; render(true); }
       };
     });
     root.querySelectorAll('[data-copy]').forEach(function (b) {

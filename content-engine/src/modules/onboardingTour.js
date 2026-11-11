@@ -13,6 +13,7 @@
  * Routes: GET  /api/v1/admin/tour.js       the browser script
  *         GET  /api/v1/admin/tour/state    { stage, funnel, open, saEmail, ... }
  *         POST /api/v1/admin/tour/state    { state: 'dismissed'|'done'|'' }
+ *         GET  /api/v1/admin/tour/sheet-template.xlsx   headers + 2 sample rows
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -20,9 +21,15 @@ import * as funnels from '../repositories/funnelsRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import { keyOk } from '../services/accessService.js';
 import { buildProviders } from '../services/providerFactory.js';
-import { pickStage, autoOpen, wizardIndex, SHEET_HEADERS, TOUR_KEY } from '../utils/tourSpec.js';
+import ExcelJS from 'exceljs';
+import {
+  pickStage, autoOpen, wizardIndex, buildPrompt, SHEET_HEADERS, SHEET_SAMPLE, TEMPLATE_NAME, PROMPT_FIELDS, TOUR_KEY,
+} from '../utils/tourSpec.js';
 
 const CLIENT_JS = readFileSync(fileURLToPath(new URL('./tour/tourClient.js', import.meta.url)), 'utf8');
+
+/** First non-blank line of a multi-line setting. */
+const firstLine = (v) => String(v || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean)[0] || '';
 
 // The service-account email barely changes: look it up once per workspace per 10 minutes.
 const saCache = new Map();
@@ -48,6 +55,23 @@ export function register(ctx) {
     res.type('application/javascript').set('Cache-Control', 'no-cache').send(CLIENT_JS);
   });
 
+  router.get('/admin/tour/sheet-template.xlsx', async (req, res, next) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).send('sign in');
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Content');
+      ws.addRow(SHEET_HEADERS);
+      for (const r of SHEET_SAMPLE) ws.addRow(r);
+      ws.getRow(1).font = { bold: true };
+      ws.columns.forEach((c, i) => { c.width = [10, 30, 36, 60, 60, 36][i] || 20; });
+      const buf = Buffer.from(await wb.xlsx.writeBuffer());
+      res.set('Content-Disposition', `attachment; filename="${TEMPLATE_NAME}"`);
+      res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(buf);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get('/admin/tour/state', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'sign in' });
@@ -57,6 +81,7 @@ export function register(ctx) {
       const list = [];
       for (const f of rows) list.push({ id: f.id, name: f.name, cfg: await funnels.getConfig(f.id).catch(() => ({})) });
       const { stage, funnel } = pickStage(list, req.query.funnel);
+      const cfg = funnel ? (list.find((f) => Number(f.id) === funnel.id) || {}).cfg || {} : {};
       const saved = (await tenantConfig.get(tenantId, TOUR_KEY).catch(() => '')) || '';
       res.json({
         ok: true,
@@ -64,9 +89,19 @@ export function register(ctx) {
         funnel,
         open: autoOpen(stage, saved),
         saved,
-        wizard: { basics: wizardIndex('basics'), publish: wizardIndex('publish'), image: wizardIndex('image') },
+        wizard: { basics: wizardIndex('basics'), publish: wizardIndex('publish'), ready: wizardIndex('ready'), image: wizardIndex('image') },
         sheetHeaders: SHEET_HEADERS,
-        saEmail: stage === 'image' ? await saEmailFor(tenantId) : '',
+        saEmail: stage === 'ready' || stage === 'image' ? await saEmailFor(tenantId) : '',
+        ...(stage === 'image' ? {
+          templateName: TEMPLATE_NAME,
+          promptFields: PROMPT_FIELDS,
+          // {{key}} slots the browser fills from the form; an empty one becomes [label].
+          promptTemplate: buildPrompt(Object.fromEntries(PROMPT_FIELDS.map(([k]) => [k, `{{${k}}}`]))),
+          promptDefaults: {
+            cta: String(cfg.cta_link || '').trim(),
+            landing_page: firstLine(cfg.landing_page_url),
+          },
+        } : {}),
       });
     } catch (err) {
       log.warn({ err: err.message }, 'tour state failed');
