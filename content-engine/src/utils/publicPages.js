@@ -266,6 +266,7 @@ const HOME_CSS = `
  th.us,td.us{background:rgba(45,108,223,.10)}
  tbody tr:last-child td{border-bottom:0}
  td.c{text-align:center;white-space:nowrap}
+ tbody td:first-child{min-width:260px}
  .y{color:var(--green);font-weight:800}.p{color:#e0b23a;font-weight:800}.n{color:#ef6b6b;font-weight:800}.u{color:var(--mute)}
  tr.grp td{background:#0f0f19;color:var(--mute);font-weight:700;text-transform:uppercase;font-size:.75rem;letter-spacing:.06em}
  td small{display:block;color:var(--mute);font-size:.82rem;margin-top:.15rem}
