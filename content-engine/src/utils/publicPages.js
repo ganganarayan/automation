@@ -322,7 +322,7 @@ const HOME_CSS = `
  footer{border-top:1px solid var(--line);padding:2rem 0;color:#6f6f88;font-size:.88rem}
  footer .wrap{display:flex;gap:1.2rem;flex-wrap:wrap;align-items:center}
  footer .wrap span{margin-right:auto}
- .tbl{overflow-x:auto;border:1px solid var(--line);border-radius:14px}
+ .tbl{position:relative;overflow-x:auto;border:1px solid var(--line);border-radius:14px}
  table{border-collapse:collapse;width:100%;font-size:.92rem}
  th,td{padding:.7rem .85rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
  thead th{background:var(--card);position:sticky;top:0;font-weight:700;white-space:nowrap}
