@@ -101,7 +101,7 @@ const FEATURE_GROUPS = [
     items: [
       ['Claude writes the copy', 'Caption, hook and picture prompt from Claude, written against a background you paste once per funnel. OpenAI draws the pictures.'],
       ['Placed picture text', 'The picture is drawn with no text, then Claude places the audience eyebrow, headline and sub-head in its empty space, so words never sit on a face.'],
-      ['Thumbnails in every size', '16:9, 9:16 and 4:5, with the tall ones drawn as their own picture instead of cropped. An audience tag sits above the headline and still reads at 160 px.'],
+      ['Thumbnails in every size', '16:9, 9:16 and 4:5 for every platform you post to, with the tall ones drawn as their own picture instead of cropped. An audience tag sits above the headline and still reads at 160 px.'],
       ['Your own thumbnail headline', 'Type a headline for a ready video and it is used as is; leave it blank and the AI writes one.'],
       ['End card', 'A closing card with your call to action on every ready video.'],
       ['Comparison videos', 'Thumbnail and copy built from a facts list you keep in Settings, with no AI picture to get the numbers wrong.'],
@@ -188,7 +188,7 @@ const STEPS = [
 const FAQ = [
   ['Will it really post every day?', 'Yes. The router wakes each workspace once a day at its Daily time and always posts: a ready video first, then an AI video, then an image post if nothing else is in stock.'],
   ['Does anything go out without me?', 'Only what you approve. Every post waits in the Library for Approve, and the daily digest tells you what is waiting.'],
-  ['Which channels does it post to?', `${CHANNELS.join(', ')}. You pick the channels per funnel, up to your plan's limit.`],
+  ['How many channels can I connect?', `As many as your plan allows: any number of accounts across ${CHANNELS.join(', ')}. Each funnel posts to all of its channels from one approval.`],
   ['Do I need my own AI keys?', 'Not on Starter or Growth: the AI is included. On Agency you bring your own OpenAI, Claude, Kling, MiniMax and ElevenLabs keys and pay those providers directly.'],
   ['What happens when a channel fails?', 'That channel shows ❌ on the Log with the reason. Press Retry failed only and just that channel is sent again.'],
   ['Can I remove a post after it is live?', 'Yes. Tick the channels and press Delete once; the post is taken down from each platform.'],
@@ -257,8 +257,55 @@ const HOME_CSS = `
  footer{border-top:1px solid var(--line);padding:2rem 0;color:#6f6f88;font-size:.88rem}
  footer .wrap{display:flex;gap:1.2rem;flex-wrap:wrap;align-items:center}
  footer .wrap span{margin-right:auto}
+ .tbl{overflow-x:auto;border:1px solid var(--line);border-radius:14px}
+ table{border-collapse:collapse;width:100%;font-size:.92rem}
+ th,td{padding:.7rem .85rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+ thead th{background:var(--card);position:sticky;top:0;font-weight:700;white-space:nowrap}
+ thead th a{color:#fff;text-decoration:none}thead th a:hover{color:var(--link)}
+ th.us,td.us{background:rgba(45,108,223,.10)}
+ tbody tr:last-child td{border-bottom:0}
+ td.c{text-align:center;white-space:nowrap}
+ .y{color:var(--green);font-weight:800}.p{color:#e0b23a;font-weight:800}.n{color:#ef6b6b;font-weight:800}.u{color:var(--mute)}
+ tr.grp td{background:#0f0f19;color:var(--mute);font-weight:700;text-transform:uppercase;font-size:.75rem;letter-spacing:.06em}
+ td small{display:block;color:var(--mute);font-size:.82rem;margin-top:.15rem}
+ .legend{color:var(--mute);font-size:.85rem;margin-top:.8rem}
+ .vs h3{display:flex;justify-content:space-between;align-items:center;gap:.5rem}
+ .vs .cat{color:var(--mute);font-size:.8rem;font-weight:500}
+ .crumb{color:var(--mute);font-size:.9rem;margin-bottom:1rem}.crumb a{color:var(--mute)}
+ .win{border-left:3px solid #e0b23a}
+ .money{border-left:3px solid var(--green)}
  @media (max-width:760px){.links{display:none}.hero{padding:3.5rem 0 2.5rem}section{padding:3rem 0}}
 `;
+
+/** Plan-button target: a prefilled email to the contact, or sign-in without one. */
+export function contactHrefFor(email = '') {
+  return (plan) => (email
+    ? `mailto:${esc(email)}?subject=${encodeURIComponent(`Content Engine: ${plan} plan`)}`
+    : LOGIN_PATH);
+}
+
+/** <head> and the opening <body> shared by the landing and comparison pages. */
+export function landingHead(title, description) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)}</title>
+<meta name="description" content="${esc(description)}">
+<style>${HOME_CSS}</style></head><body>`;
+}
+
+/** Top bar. `base` is '' on the home page (same-page anchors) and '/' elsewhere. */
+export function landingNav(base = '') {
+  return `<nav class="top"><div class="wrap">
+  <a class="brand" href="/">Content Engine</a>
+  <span class="links"><a href="${base}#how">How it works</a><a href="${base}#features">Features</a><a href="${base}#pricing">Pricing</a><a href="${base}#faq">FAQ</a></span>
+  <a class="btn sm" href="${LOGIN_PATH}">Sign in</a>
+</div></nav>`;
+}
+
+/** Footer and the closing tags. */
+export function landingFooter(email = '') {
+  return `<footer><div class="wrap"><span>Content Engine</span><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a>${email ? `<a href="mailto:${esc(email)}">Contact</a>` : ''}</div></footer>
+</body></html>`;
+}
 
 function planCard(id, contactHref) {
   const lim = PLANS[id];
@@ -291,21 +338,13 @@ function planCard(id, contactHref) {
  * buttons ('' = they open sign-in instead, since there is no self sign-up).
  */
 export function homePage({ email = '' } = {}) {
-  const contactHref = (plan) => (email
-    ? `mailto:${esc(email)}?subject=${encodeURIComponent(`Content Engine: ${plan} plan`)}`
-    : LOGIN_PATH);
+  const contactHref = contactHrefFor(email);
   const trialHref = contactHref('Starter trial');
   const cards = (items) => items.map(([t, p]) => `<div class="card"><h3>${esc(t)}</h3><p>${esc(p)}</p></div>`).join('');
 
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Content Engine: a post every day on every channel, made and published for you</title>
-<meta name="description" content="Content Engine makes, checks and publishes one post a day per brand to ${esc(CHANNELS.join(', '))}. Ready videos, AI videos and image posts, approved by you, with comment-to-DM lead capture.">
-<style>${HOME_CSS}</style></head><body>
-<nav class="top"><div class="wrap">
-  <a class="brand" href="/">Content Engine</a>
-  <span class="links"><a href="#how">How it works</a><a href="#lanes">Lanes</a><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a></span>
-  <a class="btn sm" href="${LOGIN_PATH}">Sign in</a>
-</div></nav>
+  return `${landingHead('Content Engine: a post every day on every channel, made and published for you',
+    `Content Engine makes, checks and publishes one post a day per brand to ${CHANNELS.join(', ')}. Ready videos, AI videos and image posts, approved by you, with comment-to-DM lead capture.`)}
+${landingNav('')}
 
 <header class="hero"><div class="wrap">
   <span class="pill">One post a day, per brand, on every channel</span>
@@ -321,8 +360,8 @@ export function homePage({ email = '' } = {}) {
   <div class="grid g5">${STEPS.map(([t, p], i) => `<div class="card"><span class="num">${i + 1}</span><h3>${esc(t)}</h3><p>${esc(p)}</p></div>`).join('')}</div>
   <div class="stats">
     <div class="stat"><b>3 lanes</b><span>so a day is never skipped</span></div>
-    <div class="stat"><b>${CHANNELS.length} channels</b><span>from one approval</span></div>
-    <div class="stat"><b>3 sizes</b><span>16:9, 9:16 and 4:5 every time</span></div>
+    <div class="stat"><b>Any number</b><span>of channels your plan allows, from one approval</span></div>
+    <div class="stat"><b>3 sizes</b><span>16:9, 9:16 and 4:5, for every platform</span></div>
     <div class="stat"><b>1 email</b><span>a day, after 20:00 IST</span></div>
   </div>
 </div></section>
@@ -353,13 +392,12 @@ export function homePage({ email = '' } = {}) {
 </div></section>
 
 <section class="final"><div class="wrap">
-  <h2>Stop making posts. Start approving them.</h2>
+  <h2>Stop making posts. Start revenue from posts.</h2>
   <p class="kicker" style="margin:0 auto 1.6rem">Seven days free on Starter. Access is by invitation: ask, and your workspace is set up for you.</p>
   <div class="cta"><a class="btn" href="${trialHref}">Start the 7-day trial</a><a class="btn ghost" href="${LOGIN_PATH}">Sign in</a></div>
 </div></section>
 
-<footer><div class="wrap"><span>Content Engine</span><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a>${email ? `<a href="mailto:${esc(email)}">Contact</a>` : ''}</div></footer>
-</body></html>`;
+${landingFooter(email)}`;
 }
 
 /** The privacy policy. `email` is the contact address ('' = "the site owner"). */
