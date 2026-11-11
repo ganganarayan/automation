@@ -198,6 +198,48 @@ const FAQ = [
   ['What if I go over my plan?', 'The app tells you before you go over. Add 30 more posts for ₹999, or an extra AI video for ₹349.'],
 ];
 
+/** Before and after: our own words for what changes on day one. */
+const BEFORE = [
+  'Hunting for tonight\'s post idea at 11 pm',
+  'Resizing one picture three times',
+  'Pasting the same link under every post',
+  'Price questions in the comments, answered days late',
+];
+const AFTER = [
+  'Tomorrow\'s post made and waiting for Approve',
+  'Every size made for every platform',
+  'Your link in the first comment, everywhere',
+  'Every keyword comment gets a DM with a link',
+];
+
+/** "See it in action": each scene is a phone chat and a note beside it. */
+const SCENES = [
+  {
+    tab: 'A comment becomes a lead',
+    who: 'Your Instagram post',
+    chat: [['in', 'priya_k: PRICE'], ['sys', 'Comment matched your keyword'], ['out', 'Hi Priya! Here is your link with today\'s offer:'], ['out', 'yourbrand.in/p/priya-7f3'], ['sys', 'Priya opened the link. The Leads page marks her.']],
+    note: ['Comments turn into contacts', 'Someone comments your keyword and gets a DM with their own link. When they open it, the Leads page shows who it was, so you follow up the warm ones first.'],
+  },
+  {
+    tab: 'A raw video becomes a post',
+    who: 'Your Drive folder',
+    chat: [['in', '07 Morning routine.mp4 added'], ['sys', 'Transcribed and checked against your glossary'], ['out', 'Caption, hook and hashtags written'], ['out', 'Thumbnails drawn: 16:9, 9:16 and 4:5'], ['sys', 'Waiting for your Approve']],
+    note: ['Drop a video, get a post', 'Put your videos in a Drive folder. Each one gets copy, a thumbnail in every size, an end card and a Clean check, then waits for your Approve.'],
+  },
+  {
+    tab: 'Nothing in stock today',
+    who: 'The daily router, 19:00 IST',
+    chat: [['sys', 'No ready video left in this funnel'], ['out', 'Script written from your background'], ['out', 'Pictures drawn, animated and voiced'], ['sys', 'Animation failed? The same post goes out as an image post.'], ['out', 'Posted on all your channels ✓']],
+    note: ['A day is never skipped', 'When you have nothing new, the router makes an AI video or an image post instead, so every funnel posts every day.'],
+  },
+  {
+    tab: 'A post went out wrong',
+    who: 'The Log',
+    chat: [['in', 'Instagram ✓  Facebook ✓  X ✗'], ['out', 'Retry failed only'], ['sys', 'X ✓, the others left alone'], ['in', 'Wrong price in the caption?'], ['out', 'Tick the channels, press Delete once'], ['sys', 'Taken down everywhere']],
+    note: ['Fix it in one click', 'Each channel shows its own result. Re-send only what failed, or take a post down from every channel at once.'],
+  },
+];
+
 const HOME_CSS = `
  :root{color-scheme:dark;--bg:#0b0b12;--card:#13131f;--line:#24243a;--text:#e8e8ef;--mute:#9a9ab0;--blue:#2d6cdf;--link:#7aa2ff;--green:#3ecf8e}
  *{box-sizing:border-box}html{scroll-behavior:smooth}
@@ -214,14 +256,14 @@ const HOME_CSS = `
  .btn.sm{padding:.45rem .9rem;font-size:.9rem}
  .hero{padding:5rem 0 3.5rem;text-align:center}
  .pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:.25rem .8rem;font-size:.82rem;color:var(--mute);margin-bottom:1.2rem}
- .hero h1{font-size:clamp(2rem,5vw,3.4rem);line-height:1.12;margin:0 auto 1rem;max-width:820px;letter-spacing:-.02em}
+ .hero h1{font-size:clamp(2.2rem,6vw,4rem);font-weight:900;line-height:1.05;margin:0 auto 1rem;max-width:880px;letter-spacing:-.03em}
  .hero h1 em{font-style:normal;color:var(--link)}
  .hero p.lead{font-size:1.15rem;color:var(--mute);max-width:680px;margin:0 auto 2rem}
  .cta{display:flex;gap:.8rem;justify-content:center;flex-wrap:wrap}
  .chips{display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap;margin-top:2.4rem}
  .chip{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.3rem .75rem;font-size:.88rem}
  section{padding:4rem 0;border-top:1px solid var(--line)}
- h2{font-size:clamp(1.5rem,3vw,2.1rem);margin:0 0 .5rem;letter-spacing:-.01em}
+ h2{font-size:clamp(1.7rem,4vw,2.7rem);font-weight:900;line-height:1.1;margin:0 0 .6rem;letter-spacing:-.025em}
  .kicker{color:var(--mute);margin:0 0 2.2rem;max-width:720px}
  .grid{display:grid;gap:1rem}
  .g3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
@@ -278,6 +320,43 @@ const HOME_CSS = `
  .crumb{color:var(--mute);font-size:.9rem;margin-bottom:1rem}.crumb a{color:var(--mute)}
  .win{border-left:3px solid #e0b23a}
  .money{border-left:3px solid var(--green)}
+ .trust{display:flex;gap:1.4rem;justify-content:center;flex-wrap:wrap;margin-top:1.6rem;color:var(--mute);font-size:.9rem}
+ .trust b{color:#fff}
+ .ba{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem}
+ .ba .side{border-radius:18px;padding:2rem 1.6rem}
+ .ba .before{background:#15151f;border:1px solid var(--line)}
+ .ba .after{background:#0f5132;border:1px solid #1d7a4f}
+ .ba .lab{font-size:.85rem;font-weight:700;color:var(--mute);text-align:center}
+ .ba .after .lab{color:#b9f0d3}
+ .ba h3{font-size:clamp(1.6rem,3.5vw,2.3rem);font-weight:900;text-align:center;margin:.3rem 0 1.4rem;line-height:1.1;letter-spacing:-.02em}
+ .ba ul{list-style:none;padding:0;margin:0}
+ .ba li{display:flex;justify-content:space-between;gap:1rem;padding:.75rem 0;border-top:1px solid rgba(255,255,255,.08);font-size:.92rem;text-transform:uppercase;letter-spacing:.03em}
+ .ba li span.m{font-weight:900}
+ .ba .before li span.m{color:#ef6b6b}.ba .after li span.m{color:#7ff0b4}
+ .act-wrap{display:grid;grid-template-columns:minmax(260px,330px) 1fr;gap:1.2rem;background:#2b2f8f;border-radius:20px;padding:1.2rem}
+ .act-tabs{background:var(--bg);border-radius:14px;padding:1.2rem}
+ .act-tabs h3{font-size:1.5rem;font-weight:900;margin:0 0 .8rem}
+ .act-tab{display:block;width:100%;text-align:left;background:none;border:0;color:var(--text);padding:.8rem .7rem;border-radius:10px;cursor:pointer;font:inherit}
+ .act-tab small{display:block;color:var(--mute);font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem}
+ .act-tab.on{background:#1c1c2b}
+ .act-stage{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:1.4rem;align-items:center;padding:.6rem}
+ .phone{background:#000;border-radius:34px;padding:1.2rem .9rem;min-height:440px;border:6px solid #111;box-shadow:0 20px 50px rgba(0,0,0,.4)}
+ .phone .who{color:#fff;font-weight:700;font-size:.9rem;margin:.2rem .3rem 1rem}
+ .bub{border-radius:16px;padding:.55rem .8rem;margin:.45rem 0;font-size:.86rem;max-width:88%;line-height:1.35}
+ .bub.in{background:#26262f;color:#e8e8ef}
+ .bub.out{background:#6b4cf6;color:#fff;margin-left:auto}
+ .bub.sys{background:none;color:#8a8aa2;font-size:.75rem;text-align:center;max-width:100%}
+ .act-note{color:#e6e8ff;font-size:1rem;border-left:2px solid #c9ceff;padding-left:1rem}
+ .act-note b{display:block;font-size:1.25rem;margin-bottom:.4rem;color:#fff}
+ .act-pane{display:none}.act-pane.on{display:contents}
+ .billing{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:.25rem;margin:0 0 1.6rem;position:relative}
+ .billing button{background:none;border:0;color:var(--mute);font:inherit;font-weight:700;padding:.45rem 1.1rem;border-radius:999px;cursor:pointer;letter-spacing:.04em;font-size:.85rem}
+ .billing button.on{background:#fff;color:#0b0b12}
+ .billing .save{position:absolute;top:-1.3rem;right:-.4rem;background:var(--green);color:#06210f;font-size:.72rem;font-weight:800;border-radius:6px;padding:.1rem .45rem}
+ .plan .yr{display:none}.yearly .plan .yr{display:block}.yearly .plan .mo{display:none}
+ .plan .bill{color:var(--mute);font-size:.85rem;margin:.15rem 0 0}
+ .float-cta{position:fixed;right:18px;bottom:18px;z-index:9;background:#f5d90a;color:#14140a;font-weight:800;border-radius:12px;padding:.85rem 1.2rem;text-decoration:none;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+ @media (max-width:900px){.act-wrap,.act-stage{grid-template-columns:1fr}}
  @media (max-width:760px){.links{display:none}.hero{padding:3.5rem 0 2.5rem}section{padding:3rem 0}}
 `;
 
@@ -361,7 +440,8 @@ function planCard(id, contactHref) {
   return `<div class="card plan${best ? ' best' : ''}">
   ${best ? '<span class="badge">Most popular</span>' : ''}
   <h3>${esc(lim.label)}</h3>
-  <p class="price">₹${inr(lim.priceInr)}<small> / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p>
+  <div class="mo"><p class="price">₹${inr(lim.priceInr)}<small> / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p><p class="bill">Billed monthly</p></div>
+  <div class="yr"><p class="price">₹${inr(Math.round((lim.priceInr * 10) / 12))}<small> / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p><p class="bill">₹${inr(lim.priceInr * 10)} billed yearly: 12 months for the price of 10</p></div>
   <p class="ptag">${esc(f.tag)}</p>
   <ul>
     ${limits.map((l) => `<li class="lim">${esc(l)}</li>`).join('')}
@@ -391,6 +471,7 @@ ${landingNav('')}
   <p class="lead">Content Engine turns your videos, or nothing at all, into finished posts with copy, thumbnails, voice and music. You approve. It publishes to every channel, reports what went live and turns comments into leads.</p>
   <div class="cta"><a class="btn" href="${trialHref}">Start the 7-day trial</a><a class="btn ghost" href="#pricing">See pricing</a></div>
   <div class="chips">${CHANNELS.map((c) => `<span class="chip">${esc(c)}</span>`).join('')}</div>
+  <div class="trust"><span><b>✓</b> You approve every post</span><span><b>₹</b> Priced in rupees</span><span><b>↺</b> Cancel any time, one click</span><span><b>◷</b> Dates and times in IST</span></div>
 </div></header>
 
 <section id="how"><div class="wrap">
@@ -402,6 +483,20 @@ ${landingNav('')}
     <div class="stat"><b>Any number</b><span>of channels your plan allows, from one approval</span></div>
     <div class="stat"><b>3 sizes</b><span>16:9, 9:16 and 4:5, for every platform</span></div>
     <div class="stat"><b>1 email</b><span>a day, after 20:00 IST</span></div>
+  </div>
+</div></section>
+
+<section id="before-after"><div class="wrap">
+  <div class="ba">
+    <div class="side before"><div class="lab">Before Content Engine</div><h3>All making,<br>no posting</h3><ul>${BEFORE.map((t) => `<li>${esc(t)}<span class="m">✗</span></li>`).join('')}</ul></div>
+    <div class="side after"><div class="lab">With Content Engine</div><h3>Posts made,<br>leads in</h3><ul>${AFTER.map((t) => `<li>${esc(t)}<span class="m">✓</span></li>`).join('')}</ul></div>
+  </div>
+</div></section>
+
+<section id="action"><div class="wrap">
+  <div class="act-wrap">
+    <div class="act-tabs"><h3>See it in action</h3>${SCENES.map((sc, i) => `<button type="button" class="act-tab${i ? '' : ' on'}" data-i="${i}" onclick="actShow(${i})">${esc(sc.tab)}<small>See it ›</small></button>`).join('')}</div>
+    <div class="act-stage">${SCENES.map((sc, i) => `<div class="act-pane${i ? '' : ' on'}" data-i="${i}"><div class="phone"><div class="who">‹ ${esc(sc.who)}</div>${sc.chat.map(([k, t]) => `<div class="bub ${k}">${esc(t)}</div>`).join('')}</div><div class="act-note"><b>${esc(sc.note[0])}</b>${esc(sc.note[1])}</div></div>`).join('')}</div>
   </div>
 </div></section>
 
@@ -419,6 +514,7 @@ ${landingNav('')}
 
 <section id="pricing"><div class="wrap">
   <h2>Pricing</h2>
+  <div class="billing"><span class="save">2 months free</span><button type="button" class="on" data-b="mo" onclick="bill('mo')">MONTHLY</button><button type="button" data-b="yr" onclick="bill('yr')">YEARLY</button></div>
   <p class="kicker">One post means one post on all its channels. AI is included on Starter and Growth.</p>
   <div class="grid plans">${['starter', 'growth', 'agency'].map((id) => planCard(id, contactHref)).join('')}</div>
   <p class="fine">All plans: over the limit, ₹999 for 30 more posts and ₹349 per extra AI video. Pay yearly: 10 months, get 12. Start with a 7-day trial of Starter. Prices in Indian rupees, per workspace.</p>
@@ -438,6 +534,11 @@ ${compareSection()}
   <div class="cta"><a class="btn" href="${trialHref}">Start the 7-day trial</a><a class="btn ghost" href="${LOGIN_PATH}">Sign in</a></div>
 </div></section>
 
+<a class="float-cta" href="${trialHref}">Start the 7-day trial ›</a>
+<script>
+function actShow(i){document.querySelectorAll('.act-tab,.act-pane').forEach(function(e){e.classList.toggle('on',e.getAttribute('data-i')==String(i));});}
+function bill(b){document.getElementById('pricing').classList.toggle('yearly',b==='yr');document.querySelectorAll('.billing button').forEach(function(e){e.classList.toggle('on',e.getAttribute('data-b')===b);});}
+</script>
 ${landingFooter(email)}`;
 }
 
