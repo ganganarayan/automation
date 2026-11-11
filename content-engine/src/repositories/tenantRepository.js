@@ -74,11 +74,17 @@ export async function create({ id, name }) {
 /** Every tenant with its subscription details (the super admin's Tenants list). */
 export async function listWithSubscription() {
   const { rows } = await query(
-    `SELECT id, name, status, plan, parent_id, owner_email, phone, COALESCE(subscribed_at, created_at) AS subscribed_at, expires_at
+    `SELECT id, name, status, plan, parent_id, owner_email, phone, COALESCE(subscribed_at, created_at) AS subscribed_at, expires_at, cancelled_at
        FROM tenants ORDER BY (id = $1) DESC, COALESCE(parent_id, id) ASC, (parent_id IS NOT NULL) ASC, created_at ASC`,
     ['default'],
   );
   return rows;
+}
+
+/** Mark a tenant cancelled (a Date) or renewing again (null). */
+export async function setCancelled(tenantId, at) {
+  const { rowCount } = await query('UPDATE tenants SET cancelled_at = $2 WHERE id = $1', [tenantId, at]);
+  return rowCount > 0;
 }
 
 /** Set (or clear, with null) a tenant's expiry date. */
@@ -112,4 +118,4 @@ export async function setPlan(tenantId, plan) {
   if (!rowCount) throw new Error('tenant not found');
 }
 
-export default { createNew, setPlan, setStatus, isActive, activeIds, findById, childrenOf, countChildren, list, create, listWithSubscription, setExpiry };
+export default { setCancelled, createNew, setPlan, setStatus, isActive, activeIds, findById, childrenOf, countChildren, list, create, listWithSubscription, setExpiry };

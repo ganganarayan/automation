@@ -8,8 +8,8 @@ describe('admin menu', () => {
   });
 
   it('lists setup panels; Tenants only for the super admin; no tracking-bridge', () => {
-    expect(setupItems().map((i) => i.label)).toEqual(['Funnels', 'Keys and credit', 'Settings', 'Users']);
-    expect(setupItems({ superAdmin: true }).map((i) => i.id)).toEqual(['funnels', 'api-keys', 'content-engine', 'users', 'tenants']);
+    expect(setupItems().map((i) => i.label)).toEqual(['Funnels', 'Keys and credit', 'Settings', 'Users', 'Plan']);
+    expect(setupItems({ superAdmin: true }).map((i) => i.id)).toEqual(['funnels', 'api-keys', 'content-engine', 'users', 'plan', 'tenants']);
     expect(setupItems({ superAdmin: true }).some((i) => i.id === 'tracking-bridge')).toBe(false);
   });
 

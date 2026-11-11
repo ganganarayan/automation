@@ -22,6 +22,7 @@ import { notFound, errorHandler } from './middleware/errorHandler.js';
 import * as tenantSettings from './core/tenantSettings.js';
 import * as publicPages from './utils/publicPages.js';
 import * as comparePages from './utils/comparePages.js';
+import * as planCancel from './modules/planCancel.js';
 
 import * as approvalService from './services/approvalService.js';
 
@@ -138,6 +139,7 @@ export function createApp() {
     .add({ name: 'config-ui', enabled: settings.modules.admin, register: configUi.register })
     .add({ name: 'work-pages', enabled: settings.modules.admin, register: workPages.register })
     .add({ name: 'agency-pages', enabled: settings.modules.admin, register: agencyPages.register })
+    .add({ name: 'plan-cancel', enabled: settings.modules.admin, register: planCancel.register })
     .add({ name: 'connect-page', enabled: settings.modules.admin, register: connectPage.register })
     .add({ name: 'festival', enabled: settings.modules.admin, register: festivalPage.register })
     .add({ name: 'admin', enabled: settings.modules.admin, register: admin.register });

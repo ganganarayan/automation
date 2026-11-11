@@ -497,7 +497,7 @@ export function refundPage({ email = '' } = {}) {
 <h2>No refunds</h2>
 <p>Payments are not refunded, in full or in part. This covers monthly and yearly plans, the unused part of a period, unused posts or AI videos, upgrades, and extra post or AI video packs.</p>
 <h2>Cancel any time</h2>
-<p>You can cancel whenever you like by writing to ${contactLine(email)}. There is no cancellation fee and no notice period. Cancelling stops the next renewal, so you are not charged again.</p>
+<p>Cancel with one click: in the app, open <b>Plan</b> and press <b>Cancel my plan</b>. You can also write to ${contactLine(email)}. There is no cancellation fee and no notice period. Cancelling stops the next renewal, so you are not charged again. Changed your mind before the period ends? Press <b>Keep my plan</b>.</p>
 <h2>Use it until the end of what you paid for</h2>
 <p>After you cancel, your workspace keeps working, with every feature of your plan, until the last day of the period you have already paid for. On that day it stops posting and is paused. What happens to your data after that is set out in the <a href="/privacy">privacy policy</a>.</p>
 <h2>Trial</h2>

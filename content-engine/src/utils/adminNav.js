@@ -54,6 +54,8 @@ export function setupItems({ superAdmin = false, role = 'admin' } = {}) {
     ...(role === 'admin' ? [{ id: 'api-keys', label: CONFIG_MANIFEST['api-keys'].label }] : []),
     { id: 'content-engine', label: CONFIG_MANIFEST['content-engine'].label },
     { id: 'users', label: 'Users' },
+    // Its own page (not a settings panel): one-click cancel lives there.
+    ...(role === 'admin' ? [{ id: 'plan', label: 'Plan', href: '/api/v1/admin/plan' }] : []),
     ...(superAdmin ? [{ id: 'tenants', label: 'Tenants' }] : []),
   ];
 }
@@ -86,7 +88,9 @@ export function navHtml({ current = '', key = '', tabs = false, superAdmin = fal
     .join('');
 
   const setup = setupItems({ superAdmin: isSuper, role: isSuper ? 'admin' : workspaceRole(session, session && session.tenantId) })
-    .map((it) => (tabs
+    .map((it) => (it.href
+      ? `<a class="nv${current === it.id ? ' on' : ''}" href="${esc(withKey(it.href, key))}"><span class="nvi"></span>${esc(it.label)}</a>`
+      : tabs
       ? `<button type="button" class="nv nav" data-target="${esc(it.id)}" onclick="show('${esc(it.id)}')"><span class="nvi"></span>${esc(it.label)}</button>`
       : `<a class="nv" href="${esc(withKey(SETTINGS_PATH, key))}#${esc(it.id)}"><span class="nvi"></span>${esc(it.label)}</a>`))
     .join('');
