@@ -19,8 +19,8 @@ week of real posts on Log and cost before publishing prices.
 | | Starter | Growth | Agency |
 |---|---|---|---|
 | Price a month | ₹2,499 | ₹8,999 | ₹14,999 + their own AI keys |
-| Funnels (brands) | 1 | 3 | 10 |
-| Channels per funnel | 5 | 6 | 10 |
+| Funnels (brands) | 1 | 3 | 10 clients, each its own workspace and login |
+| Channels per funnel | 5 | 6 | no cap |
 | Posts a month (one post = all its channels) | 30 | 90 | 300 |
 | AI videos a month | none | 4 | as their keys allow |
 | Users | 1 | 3 | 10 |
