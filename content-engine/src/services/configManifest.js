@@ -214,6 +214,7 @@ export const CONFIG_MANIFEST = {
         fields: [
           { key: 'notify_email', label: 'Notification email', help: 'The daily email (every post, its status and approval link) and alerts go here whenever a funnel has no approval email of its own.' },
           { key: 'report_email', label: 'Report email', help: 'Where the daily delivery reports are sent.' },
+          { key: 'public_email', label: 'Public contact email', help: 'Shown to visitors on the website, buy page and policies (trial and contact links). Empty = the notification email.' },
         ],
       },
       {

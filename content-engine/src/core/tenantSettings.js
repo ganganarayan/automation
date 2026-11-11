@@ -347,6 +347,8 @@ export async function forTenant(tenantId = 'default') {
       approvalGita: pick('approval_email_gita', env.emails.approvalGita),
       approvalVidapulse: pick('approval_email_vidapulse', env.emails.approvalVidapulse),
       report: pick('report_email', env.emails.report),
+      // The address visitors see on the public pages (default workspace only).
+      public: pick('public_email', ''),
     },
     links: {
       gitaAssessment: pick('gita_assessment_link', env.links.gitaAssessment),

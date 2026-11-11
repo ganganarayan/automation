@@ -33,7 +33,7 @@ export const OWNER_ONLY = [
   'drive.gitaFolder', 'drive.stripFile', 'drive.voiceoverFolder', 'drive.reelsFolder',
   'drive.factoryGptFolder', 'drive.factoryGeminiFolder',
   'postforme.gitaAccounts', 'postforme.vidapulseAccounts', 'postforme.gitaVideoAccounts', 'postforme.accountMap',
-  'emails.notify', 'emails.approvalGita', 'emails.approvalVidapulse', 'emails.report',
+  'emails.notify', 'emails.approvalGita', 'emails.approvalVidapulse', 'emails.report', 'emails.public',
   'links.gitaAssessment', 'links.gitaSimpleAssessment',
   'instagram.automationUrl', 'instagram.contactEmail', 'instagram.commentWebhookUrl',
   'smtp.host', 'smtp.user', 'smtp.pass', 'smtp.from',

@@ -75,7 +75,10 @@ export function createApp() {
   // Public pages (no sign-in): the bare domain is a home page whose Sign in
   // button opens the app; /privacy and /terms are the links Google's OAuth
   // consent screen needs. The contact is the default tenant's notification email.
-  const contactEmail = async () => (await tenantSettings.forTenant('default').catch(() => null))?.emails?.notify || '';
+  const contactEmail = async () => {
+    const e = (await tenantSettings.forTenant('default').catch(() => null))?.emails || {};
+    return e.public || e.notify || '';
+  };
   app.get('/', async (req, res) => res.type('html').send(publicPages.homePage({ email: await contactEmail(), cur: currencyOf(req) })));
   app.get('/compare', async (req, res) => res.type('html').send(comparePages.compareIndexPage({ email: await contactEmail(), cur: currencyOf(req) })));
   app.get('/compare/:page', async (req, res, next) => {
