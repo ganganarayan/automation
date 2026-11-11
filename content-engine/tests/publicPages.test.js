@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { homePage, privacyPage, termsPage, inr, CHANNELS, LOGIN_PATH, UPDATED } from '../src/utils/publicPages.js';
+import { homePage, privacyPage, termsPage, refundPage, shippingPage, inr, CHANNELS, LOGIN_PATH, UPDATED } from '../src/utils/publicPages.js';
 import { PLANS } from '../src/utils/planSpec.js';
 
 describe('public pages', () => {
@@ -40,6 +40,26 @@ describe('public pages', () => {
     expect(p).toContain('mailto:a@b.co');
     expect(p).toContain(UPDATED);
     expect(UPDATED).toMatch(/^\d{2}-\d{2}-\d{4}$/);
+  });
+  it('refund: no refunds, cancel any time, use until the paid period ends', () => {
+    const r = refundPage({ email: 'a@b.co' });
+    expect(r).toContain('No refunds');
+    expect(r).toContain('Cancel any time');
+    expect(r).toContain('until the last day of the period you have already paid for');
+    expect(r).toContain('mailto:a@b.co');
+    expect(r).toContain(UPDATED);
+  });
+  it('shipping: digital service, nothing shipped', () => {
+    const s = shippingPage();
+    expect(s).toContain('Nothing is shipped');
+    expect(s).toContain('no shipping or delivery charges');
+    expect(s).toContain('the site owner');
+  });
+  it('every policy page and the home footer link all four policies', () => {
+    for (const h of [homePage(), privacyPage(), termsPage(), refundPage(), shippingPage()]) {
+      for (const href of ['/privacy', '/terms', '/refund', '/shipping']) expect(h).toContain(`href="${href}"`);
+      expect(h).not.toContain(String.fromCharCode(0x2014));
+    }
   });
   it('escapes the contact and falls back without one', () => {
     expect(termsPage({ email: '<x>' })).toContain('&lt;x&gt;');

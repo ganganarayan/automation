@@ -1,5 +1,6 @@
 /**
- * Public pages (no sign-in): home, privacy policy, terms of service.
+ * Public pages (no sign-in): home, privacy policy, terms of service,
+ * refund and cancellation policy, shipping and delivery policy.
  *
  * Purpose:      What the bare domain shows before sign-in, and the two policy
  *               pages Google's OAuth consent screen (Branding) links to, so the
@@ -8,7 +9,7 @@
  * Responsibility: Pure HTML rendering (no settings / DB / I/O).
  * Dependencies: utils/planSpec (plan limits and prices), utils/compareData (competitors), both pure.
  *
- * Routes (app.js): GET /  ·  GET /privacy  ·  GET /terms
+ * Routes (app.js): GET /  ·  GET /privacy  ·  GET /terms  ·  GET /refund  ·  GET /shipping
  */
 
 import { PLANS } from './planSpec.js';
@@ -38,7 +39,7 @@ function shell(title, inner) {
 </style></head><body><div class="wrap">
 <header><a class="brand" href="/">Content Engine</a><a class="btn" href="${LOGIN_PATH}">Sign in</a></header>
 ${inner}
-<footer><span>Content Engine</span><a href="/compare">Compare</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a></footer>
+<footer><span>Content Engine</span><a href="/compare">Compare</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a><a href="/refund">Refund policy</a><a href="/shipping">Shipping policy</a></footer>
 </div></body></html>`;
 }
 
@@ -306,7 +307,7 @@ export function landingNav(base = '') {
 
 /** Footer and the closing tags. */
 export function landingFooter(email = '') {
-  return `<footer><div class="wrap"><span>Content Engine</span><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a>${email ? `<a href="mailto:${esc(email)}">Contact</a>` : ''}</div></footer>
+  return `<footer><div class="wrap"><span>Content Engine</span><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a><a href="/refund">Refund policy</a><a href="/shipping">Shipping policy</a>${email ? `<a href="mailto:${esc(email)}">Contact</a>` : ''}</div></footer>
 </body></html>`;
 }
 
@@ -479,10 +480,47 @@ export function termsPage({ email = '' } = {}) {
 </ul>
 <h2>Service</h2>
 <p>The service is provided as is, without warranties. It depends on third-party services (AI providers, Google, Post for Me, social networks) and may change, pause or stop at any time. We are not liable for lost posts, data or revenue to the extent the law allows.</p>
+<h2>Payment</h2>
+<p>Plans are paid in advance and are not refunded. You can cancel any time and keep using your plan until the end of the period you paid for (see the <a href="/refund">refund and cancellation policy</a>). Nothing is shipped (see the <a href="/shipping">shipping policy</a>).</p>
 <h2>Access</h2>
 <p>The owner may remove access at any time. You may stop using it at any time and ask for your data to be deleted (see the <a href="/privacy">privacy policy</a>).</p>
 <h2>Contact</h2>
 <p>${contactLine(email)}</p>`);
 }
 
-export default { UPDATED, LOGIN_PATH, CHANNELS, PLAN_FEATURES, inr, homePage, privacyPage, termsPage };
+/** The refund and cancellation policy: no refunds, cancel any time, use until the paid period ends. */
+export function refundPage({ email = '' } = {}) {
+  return shell('Refund and cancellation policy: Content Engine', `
+<h1>Refund and cancellation policy</h1>
+<p class="sub">Last updated ${UPDATED}</p>
+<p>Content Engine is a subscription, paid in advance for a month or a year. This page explains what happens when you pay, cancel or stop.</p>
+<h2>No refunds</h2>
+<p>Payments are not refunded, in full or in part. This covers monthly and yearly plans, the unused part of a period, unused posts or AI videos, upgrades, and extra post or AI video packs.</p>
+<h2>Cancel any time</h2>
+<p>You can cancel whenever you like by writing to ${contactLine(email)}. There is no cancellation fee and no notice period. Cancelling stops the next renewal, so you are not charged again.</p>
+<h2>Use it until the end of what you paid for</h2>
+<p>After you cancel, your workspace keeps working, with every feature of your plan, until the last day of the period you have already paid for. On that day it stops posting and is paused. What happens to your data after that is set out in the <a href="/privacy">privacy policy</a>.</p>
+<h2>Trial</h2>
+<p>The 7-day Starter trial is free. If you do not continue after it, nothing is charged.</p>
+<h2>Billing mistakes</h2>
+<p>If you were charged twice for the same period, or charged after you had cancelled, write to ${contactLine(email)} and the mistaken charge is returned to the account it came from. This is a correction of an error, not a refund of a payment you meant to make.</p>
+<h2>Contact</h2>
+<p>${contactLine(email)}</p>`);
+}
+
+/** The shipping and delivery policy: nothing is shipped, the service is delivered online. */
+export function shippingPage({ email = '' } = {}) {
+  return shell('Shipping and delivery policy: Content Engine', `
+<h1>Shipping and delivery policy</h1>
+<p class="sub">Last updated ${UPDATED}</p>
+<h2>Nothing is shipped</h2>
+<p>Content Engine is software used online. It is a digital service, so there are no physical goods, nothing is sent by post or courier, and there are no shipping or delivery charges.</p>
+<h2>How you receive it</h2>
+<p>Once your workspace is set up, you are sent your sign-in details by email and use the service in your web browser. Everything it makes (posts, pictures, videos, reports) is delivered inside the app, to your connected social accounts and to your email.</p>
+<h2>Where it is available</h2>
+<p>It works anywhere you can open the website. There is no delivery address and no delivery area.</p>
+<h2>Did not get access?</h2>
+<p>If you paid and have not received your sign-in details, write to ${contactLine(email)}.</p>`);
+}
+
+export default { UPDATED, LOGIN_PATH, CHANNELS, PLAN_FEATURES, inr, homePage, privacyPage, termsPage, refundPage, shippingPage };
