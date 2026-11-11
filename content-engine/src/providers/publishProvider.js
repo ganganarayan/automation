@@ -26,6 +26,16 @@ const PAGE = 100;
 const MAX_PAGES = 50;
 const OWNED_TTL_MS = 60_000;
 
+/** Post for Me's own words for a refusal, short and on one line ('' when it gave none). */
+export function pfmReason(res) {
+  const d = res && res.data;
+  let m = d && (d.message ?? d.error ?? '');
+  if (Array.isArray(m)) m = m.join('; ');
+  if (m && typeof m === 'object') m = m.message || JSON.stringify(m);
+  if (!m && res && typeof res.text === 'string' && !res.text.trim().startsWith('<')) m = res.text;
+  return String(m || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
 /** Not this tenant's: never retried, never shown with another tenant's details. */
 export class NotYourAccountError extends ExternalAPIError {
   constructor(what = 'account') {
@@ -206,11 +216,18 @@ export function createPostForMeProvider(cfg, log) {
      */
     async authUrl({ platform, permissionOverrides, externalId }) {
       const body = { platform };
-      if (permissionOverrides && permissionOverrides.length) body.platform_data = { [platform]: { permission_overrides: permissionOverrides } };
+      const data = {};
+      if (permissionOverrides && permissionOverrides.length) data.permission_overrides = permissionOverrides;
+      // Post for Me requires the login type for Instagram: Instagram login (its default).
+      if (platform === 'instagram') data.connection_type = 'instagram';
+      if (Object.keys(data).length) body.platform_data = { [platform]: data };
       const ext = connectExternalId(scope, externalId);
       if (ext) body.external_id = ext;
       const res = await request(`${BASE}/social-accounts/auth-url`, { method: 'POST', headers: requireKey(), body, label: 'postforme.authUrl', log, retries: 1 });
-      if (!res.ok || !res.data?.url) throw new ExternalAPIError(`Post for Me connect link failed (${res.status})`, { details: res.text?.slice(0, 300) });
+      if (!res.ok || !res.data?.url) {
+        const why = pfmReason(res);
+        throw new ExternalAPIError(`Post for Me connect link failed (${res.status})${why ? `: ${why}` : ''}`, { details: res.text?.slice(0, 300) });
+      }
       return res.data;
     },
 

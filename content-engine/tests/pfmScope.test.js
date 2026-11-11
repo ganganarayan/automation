@@ -14,7 +14,7 @@ const {
   scopeFor, ownsAccount, filterAccounts, connectExternalId, ownsPost, tenantOfExternalId,
   hookTenant, webhookMayAct, planShare, usageMonth, monthLabel,
 } = await import('../src/utils/pfmScope.js');
-const { createPostForMeProvider, NotYourAccountError } = await import('../src/providers/publishProvider.js');
+const { createPostForMeProvider, NotYourAccountError, pfmReason } = await import('../src/providers/publishProvider.js');
 const { usageBox } = await import('../src/utils/pfmUsageView.js');
 
 const ACCOUNTS = [
@@ -163,6 +163,21 @@ describe('publishProvider under a tenant scope', () => {
     expect(out.echo.external_id).toBe('acme');
     const re = await pfm().authUrl({ platform: 'threads', externalId: 'zeta' });
     expect(re.echo.external_id).toBe('acme');
+  });
+
+  it('an Instagram connect link says which login to use', async () => {
+    const out = await pfm().authUrl({ platform: 'instagram' });
+    expect(out.echo.platform_data).toEqual({ instagram: { connection_type: 'instagram' } });
+    const th = await pfm().authUrl({ platform: 'threads', permissionOverrides: ['a'] });
+    expect(th.echo.platform_data).toEqual({ threads: { permission_overrides: ['a'] } });
+    expect((await pfm().authUrl({ platform: 'x' })).echo.platform_data).toBeUndefined();
+  });
+
+  it("a refusal carries Post for Me's reason", () => {
+    expect(pfmReason({ data: { message: ['platform_data.instagram.connection_type must be one of'] } })).toBe('platform_data.instagram.connection_type must be one of');
+    expect(pfmReason({ data: { error: 'Bad Request' } })).toBe('Bad Request');
+    expect(pfmReason({ text: '<html>oops</html>' })).toBe('');
+    expect(pfmReason(null)).toBe('');
   });
 
   it('an own key is not filtered', async () => {
