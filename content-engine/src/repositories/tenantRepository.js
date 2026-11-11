@@ -100,10 +100,16 @@ export async function createNew({ id, name, ownerEmail, phone = '', plan = 'cust
   return rows[0];
 }
 
+/** Set a tenant's status: active | suspended | archived. */
+export async function setStatus(tenantId, status) {
+  const { rowCount } = await query('UPDATE tenants SET status = $2 WHERE id = $1', [tenantId, status]);
+  if (!rowCount) throw new Error('tenant not found');
+}
+
 /** Change a tenant's plan. */
 export async function setPlan(tenantId, plan) {
   const { rowCount } = await query('UPDATE tenants SET plan = $2 WHERE id = $1', [tenantId, plan]);
   if (!rowCount) throw new Error('tenant not found');
 }
 
-export default { createNew, setPlan, isActive, activeIds, findById, childrenOf, countChildren, list, create, listWithSubscription, setExpiry };
+export default { createNew, setPlan, setStatus, isActive, activeIds, findById, childrenOf, countChildren, list, create, listWithSubscription, setExpiry };

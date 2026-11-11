@@ -31,6 +31,9 @@ export const WORK_ITEMS = [
   { id: 'log', label: 'Log and cost', icon: '🧾', href: '/api/v1/admin/log' },
 ];
 
+/** The agency's Clients page (menu entry for an agency's admins only). */
+export const CLIENTS_ITEM = { id: 'clients', label: 'Clients', icon: '🏢', href: '/api/v1/admin/clients' };
+
 // Old `current` ids still passed by some pages → the menu entry they live under.
 const CURRENT_ALIAS = { instances: 'library', prepare: 'library', dashboard: 'today' };
 
@@ -74,7 +77,9 @@ export function navHtml({ current = '', key = '', tabs = false, superAdmin = fal
   const on = workItemFor(current);
   const isSuper = superAdmin || !!(session && session.role === 'super_admin');
 
-  const work = WORK_ITEMS
+  // An agency's admins get their Clients page first, in every workspace they open.
+  const items = session && session.agencyId ? [CLIENTS_ITEM, ...WORK_ITEMS] : WORK_ITEMS;
+  const work = items
     .map((it) => `<a class="nv${on === it.id ? ' on' : ''}" href="${esc(withKey(it.href, key))}"><span class="nvi">${it.icon}</span>${esc(it.label)}</a>`)
     .join('');
 
@@ -161,4 +166,4 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export default { WORK_ITEMS, HOME_PATH, workItemFor, setupItems, roleLabel, navHtml, switcherHtml, navSlot, fillNav, NAV_CSS, NAV_SHELL_CSS };
+export default { WORK_ITEMS, CLIENTS_ITEM, HOME_PATH, workItemFor, setupItems, roleLabel, navHtml, switcherHtml, navSlot, fillNav, NAV_CSS, NAV_SHELL_CSS };

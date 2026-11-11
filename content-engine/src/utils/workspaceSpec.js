@@ -11,6 +11,9 @@
  *               - clientProblem({ parent, clients, limit }): '' or why a new client is refused
  *               - planChangeProblem({ tenant, plan, clients }): '' or why a plan change is refused
  *               - combineLive(own, parent): a client is live only while its agency is
+ *               - agencyAdminOf(workspaces, home): the agency a person runs, or null
+ *               - templateTenantKey / templateFunnelKey: what Add client copies
+ *               - teamRole / teamProblem: agency staff
  * Dependencies: none.
  */
 
@@ -28,7 +31,14 @@ export function mergeWorkspaces(rows = [], home = '') {
     if (!id) continue;
     const prev = byId.get(id);
     if (!prev || (prev.via !== 'member' && r.via === 'member')) {
-      byId.set(id, { id, name: String(r.name || id), parentId: r.parent_id ? String(r.parent_id) : null, via: r.via === 'agency' ? 'agency' : 'member' });
+      byId.set(id, {
+        id,
+        name: String(r.name || id),
+        parentId: r.parent_id ? String(r.parent_id) : null,
+        plan: String(r.plan || ''),
+        role: String(r.role || 'admin'),
+        via: r.via === 'agency' ? 'agency' : 'member',
+      });
     }
   }
   const list = [...byId.values()];
@@ -87,4 +97,47 @@ export function combineLive(own, parent = null) {
   return { live: true, reason: '', by: '' };
 }
 
-export default { AGENCY_PLAN, mergeWorkspaces, mayEnter, pickWorkspace, clientProblem, planChangeProblem, combineLive };
+/**
+ * The agency a person runs: their home workspace when it is a top-level Agency
+ * workspace and they are its admin (not staff). null otherwise.
+ */
+export function agencyAdminOf(workspaces = [], home = '') {
+  const w = (workspaces || []).find((x) => x && x.id === String(home || ''));
+  if (!w || w.parentId || w.plan !== AGENCY_PLAN || w.role !== 'admin') return null;
+  return w.id;
+}
+
+// Add client copies the agency's house rules, never anything that points at the
+// agency's own accounts, files, people or pages.
+const TENANT_TEMPLATE = [/^system_prompt_[a-z_]+$/, /^short_music_url$/, /^music_volume$/];
+const FUNNEL_NEVER = /(sheet|drive|folder|account|webhook|email|_link$|_url$|url$|landing|leads?$|_id$)/;
+
+/** Is this tenant_config key copied from the agency to a new client? */
+export function templateTenantKey(key = '') {
+  return TENANT_TEMPLATE.some((re) => re.test(String(key)));
+}
+
+/** Is this funnel_config key copied from the agency's template funnel? */
+export function templateFunnelKey(key = '') {
+  const k = String(key || '');
+  return !!k && !FUNNEL_NEVER.test(k);
+}
+
+export const TEAM_ROLES = ['admin', 'staff'];
+
+/** A team role from a form value ('admin' unless it says staff). */
+export function teamRole(v) {
+  return String(v || '') === 'staff' ? 'staff' : 'admin';
+}
+
+/** Why a team change is refused ('' = allowed). Nobody demotes the last admin or themselves. */
+export function teamProblem({ team = [], email = '', role = 'admin', me = '' } = {}) {
+  const who = (team || []).find((t) => t.email === email);
+  if (!who) return 'That person is not on your team.';
+  if (role === 'staff' && email === me) return 'You cannot make yourself staff. Ask another admin.';
+  const admins = (team || []).filter((t) => (t.tenant_role || 'admin') === 'admin' && t.email !== email).length;
+  if (role === 'staff' && admins < 1) return 'The agency needs at least one admin.';
+  return '';
+}
+
+export default { agencyAdminOf, templateTenantKey, templateFunnelKey, TEAM_ROLES, teamRole, teamProblem, AGENCY_PLAN, mergeWorkspaces, mayEnter, pickWorkspace, clientProblem, planChangeProblem, combineLive };

@@ -1,6 +1,6 @@
 # Agency build plan (content-engine)
 
-Written 11-11-2026. Phases 1 and 2 built on staging 11-11-2026, not tried with a real agency yet.
+Written 11-11-2026. Phases 1, 2 and 3 built on staging 11-11-2026, not tried with a real agency yet.
 
 Goal: an Agency account runs up to 10 clients. Each client is its own workspace
 with its own logins, social accounts, Drive, schedule and digest. The agency
@@ -90,7 +90,7 @@ services/planService.js.
   Me key (already supported, "off your bill"), or the posts cap stays the
   brake. Decide before selling; see docs/pricing-plan.md.
 
-## Phase 3: agency dashboard and Add client
+## Phase 3: agency dashboard and Add client (🟢 on staging 11-11-2026)
 
 Code: new modules/agencyPages.js, services/agencyService.js.
 
@@ -105,6 +105,13 @@ Code: new modules/agencyPages.js, services/agencyService.js.
   waker and the count of 10.
 - Staff assignment: an agency staff member is given a list of clients; they see
   only those in the switcher and on the dashboard.
+- Built: the Clients page (menu entry for an agency's admins, in every workspace
+  they open) at /api/v1/admin/clients, modules/agencyPages.js and
+  services/agencyService.js. users.tenant_role (migration 027): admin opens every
+  client, staff only the ticked ones (tenant_members). Everyone added through
+  Users starts as admin; change them to staff on the Clients page. The template
+  copies system_prompt_*, the Music box and one chosen funnel's style and times.
+  Staff still have full rights inside their own agency workspace until phase 4.
 
 ## Phase 4: client logins and connecting accounts
 

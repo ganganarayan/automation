@@ -100,6 +100,32 @@ export async function calendarInstances({ tenantId = 'default', fromUtc, toUtc }
   return rows;
 }
 
+/**
+ * One row per workspace for an agency's Clients page: posts today, waiting on a
+ * person, failed in the last 24 hours, posts this IST month and the AI cost
+ * this IST month (deleted runs included). Workspaces with nothing are missing.
+ */
+export async function clientStats({ tenantIds = [], dayFromUtc, dayToUtc, monthFromUtc, monthToUtc, needsYou = [] }) {
+  if (!tenantIds.length) return [];
+  const { rows } = await query(
+    `SELECT tenant_id,
+            count(*) FILTER (WHERE status IN ('posted', 'partial') AND posted_at >= $2 AND posted_at < $3)::int AS posted_today,
+            count(*) FILTER (WHERE status = 'scheduled' AND scheduled_for >= $2 AND scheduled_for < $3)::int AS scheduled_today,
+            count(*) FILTER (WHERE status = ANY($6::text[]))::int AS needs_you,
+            count(*) FILTER (WHERE status = 'failed' AND updated_at > now() - interval '24 hours')::int AS failed_24h,
+            count(*) FILTER (WHERE status NOT IN ('failed', 'superseded') AND title <> 'SAMPLE: delete me'
+                               AND scheduled_for >= $4 AND scheduled_for < $5)::int AS posts_month,
+            (COALESCE(sum(cost_usd) FILTER (WHERE created_at >= $4 AND created_at < $5), 0)
+              + COALESCE((SELECT sum(d.cost_usd) FROM deleted_instances d
+                           WHERE d.tenant_id = i.tenant_id AND d.created_at >= $4 AND d.created_at < $5), 0))::float AS cost_month
+       FROM instances i
+      WHERE tenant_id = ANY($1::text[])
+      GROUP BY tenant_id`,
+    [tenantIds, dayFromUtc, dayToUtc, monthFromUtc, monthToUtc, needsYou],
+  );
+  return rows;
+}
+
 /** Total real AI cost and run count since `fromUtc`, deleted runs included. */
 export async function costSince({ tenantId = 'default', fromUtc }) {
   const { rows } = await query(
@@ -158,7 +184,7 @@ export async function commentsForPosts({ tenantId = 'default', refs = [] }) {
   return rows;
 }
 
-export default { wastedTotal, needsYou, pendingImageApprovals, liveCounts, readyLeft, routerDays, calendarInstances, costSince, deletedRows, deletedTotal, commentsForPosts };
+export default { clientStats, wastedTotal, needsYou, pendingImageApprovals, liveCounts, readyLeft, routerDays, calendarInstances, costSince, deletedRows, deletedTotal, commentsForPosts };
 
 /**
  * USD the app recorded for one provider since fromUtc, from every cost entry on

@@ -45,6 +45,7 @@ import * as authModule from './modules/auth.js';
 import * as cleanHooks from './modules/cleanHooks.js';
 import * as admin from './modules/admin.js';
 import * as workPages from './modules/workPages.js';
+import * as agencyPages from './modules/agencyPages.js';
 import * as festivalPage from './modules/festival.js';
 
 export function createApp() {
@@ -133,6 +134,7 @@ export function createApp() {
     .add({ name: 'clean-hooks', enabled: settings.modules.admin, register: cleanHooks.register })
     .add({ name: 'config-ui', enabled: settings.modules.admin, register: configUi.register })
     .add({ name: 'work-pages', enabled: settings.modules.admin, register: workPages.register })
+    .add({ name: 'agency-pages', enabled: settings.modules.admin, register: agencyPages.register })
     .add({ name: 'festival', enabled: settings.modules.admin, register: festivalPage.register })
     .add({ name: 'admin', enabled: settings.modules.admin, register: admin.register });
 

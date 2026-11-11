@@ -19,7 +19,7 @@
 import * as auth from '../repositories/authRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import * as membership from '../repositories/membershipRepository.js';
-import { mergeWorkspaces, mayEnter, pickWorkspace } from '../utils/workspaceSpec.js';
+import { mergeWorkspaces, mayEnter, pickWorkspace, agencyAdminOf } from '../utils/workspaceSpec.js';
 import { settings } from '../settings/index.js';
 import { hashPassword, verifyPassword, passwordProblem, newToken, hashToken, safeEqual } from '../utils/passwordSpec.js';
 
@@ -102,7 +102,11 @@ export async function switchWorkspace(req, tenantId) {
   return { ok: true, tenantId: id };
 }
 
-/** The signed-in session ({ email, role, tenantId, homeTenantId, workspaces, mustChange, tokenHash }) or null. Cached per request. */
+/**
+ * The signed-in session ({ email, role, tenantId, homeTenantId, workspaces,
+ * agencyId, mustChange, tokenHash }) or null. Cached per request. tenantId is
+ * the workspace this browser works in; agencyId is set for an agency's admins.
+ */
 export async function currentSession(req) {
   if (req._session !== undefined) return req._session;
   let session = null;
@@ -115,13 +119,14 @@ export async function currentSession(req) {
         const row = await auth.findSession(tokenHash);
         if (row) {
           const home = row.tenant_id || 'default';
-          session = { email: row.email, role: row.role, tenantId: home, homeTenantId: home, workspaces: [], mustChange: row.must_change, tokenHash };
+          session = { email: row.email, role: row.role, tenantId: home, homeTenantId: home, workspaces: [], agencyId: null, mustChange: row.must_change, tokenHash };
           auth.touchSession(tokenHash).catch(() => {});
           // The workspace this browser works in: the switcher's pick while the
           // person may still enter it, else home. A failed read keeps home.
           if (row.role !== 'super_admin') {
             session.workspaces = await workspacesOf(row.email, home).catch(() => []);
             session.tenantId = pickWorkspace({ home, active: row.active_tenant_id, workspaces: session.workspaces });
+            session.agencyId = agencyAdminOf(session.workspaces, home);
           }
         }
         req._sessionError = false;
