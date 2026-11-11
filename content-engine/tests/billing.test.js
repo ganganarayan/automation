@@ -15,15 +15,15 @@ const DASH = String.fromCharCode(0x2014);
 describe('prices by where the business is billed', () => {
   it('India pays rupees with 18% GST added, in paise, per funnel', () => {
     const q = quote({ plan: 'brand', bill: 'mo', country: 'IN' });
-    expect(q).toMatchObject({ currency: 'INR', units: 1, users: 0, base: 3099, gst: 558, total: 3657, amount: 365700 });
+    expect(q).toMatchObject({ currency: 'INR', units: 1, users: 0, base: 3199, gst: 576, total: 3775, amount: 377500 });
     const y = quote({ plan: 'brand', bill: 'yr', country: 'IN', units: 3, users: 2 });
-    const base = (3099 * 3 + 100 * 2) * 10;
+    const base = (3199 * 3 + 100 * 2) * 10;
     expect(y).toMatchObject({ currency: 'INR', units: 3, users: 2, base, total: withGst(base), amount: withGst(base) * 100 });
   });
   it('outside India pays US dollars, no GST, in cents (an extra user is $1.50)', () => {
-    expect(quote({ plan: 'brand', bill: 'mo', country: 'XX' })).toMatchObject({ currency: 'USD', base: 36, gst: 0, total: 36, amount: 3600 });
-    expect(quote({ plan: 'agency', bill: 'mo', country: 'XX', units: 4, users: 1 })).toMatchObject({ total: 181.5, amount: 18150 });
-    expect(quote({ plan: 'agency', bill: 'yr', country: 'US', units: 2 })).toMatchObject({ currency: 'USD', total: 45 * 2 * 10 });
+    expect(quote({ plan: 'brand', bill: 'mo', country: 'XX' })).toMatchObject({ currency: 'USD', base: 37, gst: 0, total: 37, amount: 3700 });
+    expect(quote({ plan: 'agency', bill: 'mo', country: 'XX', units: 4, users: 1 })).toMatchObject({ total: 189.5, amount: 18950 });
+    expect(quote({ plan: 'agency', bill: 'yr', country: 'US', units: 2 })).toMatchObject({ currency: 'USD', total: 47 * 2 * 10 });
   });
   it('only the per-funnel plan and Agency are on sale; Solo is chargeable but not buyable; counts are checked', () => {
     expect(BUYABLE).toEqual(['brand', 'agency']);
@@ -39,7 +39,7 @@ describe('prices by where the business is billed', () => {
   });
   it('a price change makes a new Razorpay plan key that reads back, and money reads right', () => {
     const q = quote({ plan: 'agency', country: 'IN', units: 3, users: 1 });
-    expect(planKey(q)).toBe('agency:mo:INR:1392000:3:1');
+    expect(planKey(q)).toBe('agency:mo:INR:1427400:3:1');
     expect(readPlanKey(planKey(q))).toMatchObject({ plan: 'agency', units: 3, users: 1 });
     expect(readPlanKey('junk').plan).toBe('');
     expect(currencyFor('in')).toBe('INR');
@@ -47,14 +47,14 @@ describe('prices by where the business is billed', () => {
     expect(money(117882, 'INR')).toBe('₹1,17,882');
     expect(money(1690, 'USD')).toBe('$1,690');
     expect(money(181.5, 'USD')).toBe('$181.50');
-    expect(describeQuote(quote({ plan: 'brand', country: 'IN', units: 2 }))).toBe('Always-On Brand (2 funnels), monthly: ₹7,314 (₹6,198 + ₹1,116 GST)');
+    expect(describeQuote(quote({ plan: 'brand', country: 'IN', units: 2 }))).toBe('Always-On Brand (2 funnels), monthly: ₹7,550 (₹6,398 + ₹1,152 GST)');
   });
   it('limits scale with what was bought; a workspace without units keeps its flat plan', () => {
     expect(limitsForTenant('brand', { units: 3, extraUsers: 2 })).toMatchObject({ funnels: 3, channels: 10, posts: 90, users: 3 });
     expect(limitsForTenant('agency', { units: 4 })).toMatchObject({ clients: 4, posts: 120, users: 5, channels: 10 });
     expect(limitsForTenant('agency')).toMatchObject({ clients: 10, posts: 300 });
     expect(limitsForTenant('starter', { extraUsers: 1 }).users).toBe(2);
-    expect(monthlyPrice('brand', { units: 2, extraUsers: 1 }, 'USD')).toBe(73.5);
+    expect(monthlyPrice('brand', { units: 2, extraUsers: 1 }, 'USD')).toBe(75.5);
     expect(overLimit('brand', 'funnels', 1, 1)).toMatch(/Add a funnel/);
     expect(overLimit('brand', 'funnels', 2, 1, limitsForTenant('brand', { units: 3 }))).toBe('');
   });
@@ -77,7 +77,7 @@ describe('buyer checks', () => {
     expect(buyerProblem(b)).toBe('');
   });
   it('an Indian phone cannot be billed outside India (no dodging GST)', () => {
-    expect(buyerProblem(cleanBuyer({ ...ok, country: 'XX' }))).toMatch(/Choose India/);
+    expect(buyerProblem(cleanBuyer({ ...ok, country: 'XX' }))).toMatch(/another currency/);
     expect(buyerProblem(cleanBuyer({ ...ok, country: 'XX', phone: '+1 415 555 0100' }))).toBe('');
   });
   it('checks the GSTIN, only for India', () => {
@@ -116,29 +116,39 @@ describe('signatures and webhooks', () => {
 });
 
 describe('pages', () => {
-  it('the buy page carries both currencies, picks India by time zone, and is closed without keys', () => {
-    const open = buyPage({ plan: 'agency', units: '3', ready: true });
-    expect(open).toContain('"brand":{"inr":3099,"usd":36,"per":"funnel"');
-    expect(open).toContain('"agency":{"inr":3899,"usd":45,"per":"client"');
+  it('the buy page carries one currency from the IP, no picker, no Solo, and is closed without keys', () => {
+    const open = buyPage({ plan: 'agency', units: '3', ready: true, cur: 'inr' });
+    expect(open).toContain('"brand":{"p":3199,"per":"funnel"}');
+    expect(open).toContain('"agency":{"p":3999,"per":"client"}');
+    expect(open).toContain('<input type="hidden" name="country" id="country" value="IN">');
+    expect(open).toContain('GSTIN');
+    expect(open).not.toContain('"solo"');
     expect(open).toContain('name="units" id="units" type="number" min="1" max="50" value="3"');
     expect(open).toContain('<option value="agency" selected>');
     expect(open).not.toContain('<option value="solo"');
     expect(open).toContain('checkout.razorpay.com/v1/checkout.js');
-    expect(open).toContain('Asia\\/(Kolkata|Calcutta)');
+    expect(open).not.toContain('Kolkata');
     expect(open).not.toContain('Online payment opens soon');
     const closed = buyPage({ ready: false, email: 'o@x.co' });
     expect(closed).toContain('Online payment opens soon');
     expect(closed).toContain('disabled>Pay');
-    expect(buyPage({ cur: 'usd' })).toContain('<option value="XX" selected>');
+    const usd = buyPage({ cur: 'usd', ready: true });
+    expect(usd).toContain('value="XX"');
+    expect(usd).toContain('"brand":{"p":37,"per":"funnel"}');
+    for (const hint of ['₹', 'GST', 'India', '\\u20b9', '+91']) expect(usd).not.toContain(hint);
     for (const h of [open, closed]) expect(h).not.toContain(DASH);
   });
-  it('plan cards link to the buy page with the chosen billing and currency', () => {
-    const h = homePage();
+  it('plan cards link to the buy page with the chosen billing; no currency switch', () => {
+    const h = homePage({ cur: 'usd' });
     for (const id of ['brand', 'agency']) expect(h).toContain(`data-buy="${id}" href="/buy?plan=${id}"`);
-    expect(h).toContain("a.href='/buy?plan='+a.getAttribute('data-buy')+'&bill='+B+'&cur='+C");
-    expect(h).toContain('$36<small> / month');
+    expect(h).toContain("a.href='/buy?plan='+a.getAttribute('data-buy')+'&bill='+B;");
+    expect(h).not.toContain('aria-label="Currency"');
+    expect(h).toContain('$37<small> / month');
+    for (const hint of ['₹', 'GST', 'India', 'rupee', 'IST']) expect(h).not.toContain(hint);
     expect(h.indexOf('class="toggles"')).toBeLessThan(h.indexOf('class="grid plans'));
-    expect(refundPage()).toContain('US dollars, with no GST');
+    expect(refundPage({ cur: 'usd' })).toContain('paid in US dollars');
+    expect(refundPage({ cur: 'usd' })).not.toContain('GST');
+    expect(refundPage({ cur: 'inr' })).toContain('18% GST');
   });
   it('a workspace paid online cannot press Keep my plan once cancelled; the owner sees the Payments box', () => {
     const t = { id: 'asha-1', name: 'Asha', cancelled_at: new Date(), billing_sub_id: 'sub_1', expires_at: new Date() };
@@ -230,7 +240,7 @@ describe('billing service', () => {
   it('India: a rupee plan with GST; then confirm makes the workspace once and shows a one-time password', async () => {
     await svc.saveKeys({ keyId: 'rzp_live_abc', keySecret: 'ks', webhookSecret: 'ws' });
     const s = await svc.start(buyer);
-    expect(calls[0][1].item).toMatchObject({ amount: withGst(3099 * 2 + 100) * 100, currency: 'INR' });
+    expect(calls[0][1].item).toMatchObject({ amount: withGst(3199 * 2 + 100) * 100, currency: 'INR' });
     expect(calls[0][1].item.name).toBe('Content Engine Always-On Brand, 2 funnels, 1 extra user (monthly)');
     expect(calls[1][1]).toMatchObject({ total_count: 120, notes: { plan: 'brand', units: 2, users: 1, country: 'IN' } });
     await expect(svc.start({ ...buyer, email: 'solo@x.co', plan: 'solo' })).rejects.toThrow(/Pick a plan/);
@@ -241,7 +251,7 @@ describe('billing service', () => {
     expect(r.tenant).toMatch(/^asha-foods-/);
     expect(r.tempPassword).toBeTruthy();
     expect(db.tenants.get(r.tenant)).toMatchObject({ plan: 'brand', units: 2, extraUsers: 1, billing_sub_id: s.subscriptionId, billing_currency: 'INR' });
-    expect(db.payments.get('pay_1')).toMatchObject({ currency: 'INR', base: 6298, gst: withGst(6298) - 6298 });
+    expect(db.payments.get('pay_1')).toMatchObject({ currency: 'INR', base: 6498, gst: withGst(6498) - 6498 });
     const again = await svc.confirm({ paymentId: 'pay_1', subscriptionId: s.subscriptionId, signature: sig });
     expect(again.tenant).toBe(r.tenant);
     expect(db.tenants.size).toBe(1);
@@ -252,7 +262,7 @@ describe('billing service', () => {
   it('outside India: dollars; the webhook can make the workspace first, renewals extend, a stop cancels', async () => {
     await svc.saveKeys({ keyId: 'rzp_live_abc', keySecret: 'ks', webhookSecret: 'ws' });
     const s = await svc.start({ ...buyer, email: 'bob@x.co', phone: '+14155550100', country: 'XX', bill: 'yr', plan: 'agency', units: 3, users: 0 });
-    expect(calls[0][1]).toMatchObject({ period: 'yearly', item: { amount: 45 * 3 * 1000, currency: 'USD' } });
+    expect(calls[0][1]).toMatchObject({ period: 'yearly', item: { amount: 47 * 3 * 1000, currency: 'USD' } });
     const body = { event: 'subscription.charged', payload: { subscription: { entity: { id: s.subscriptionId, current_end: 1798761600 } }, payment: { entity: { id: 'pay_9' } } } };
     const raw = Buffer.from(JSON.stringify(body));
     expect((await svc.webhook(raw, 'bad', body)).ok).toBe(false);

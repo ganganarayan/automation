@@ -8,7 +8,7 @@ describe('QA pricing margins', () => {
       expect(UNIT_COST_INR[plan]).toBeGreaterThan(0);
       for (const cur of ['INR', 'USD']) expect(lowestMargin(plan, cur)).toBeGreaterThanOrEqual(0.5);
     }
-    expect(lowestMargin('brand', 'INR')).toBeCloseTo(0.512, 2);
+    expect(lowestMargin('brand', 'INR')).toBeCloseTo(0.527, 2);
     expect(lowestMargin('agency', 'INR')).toBeGreaterThan(0.6);
   });
 });

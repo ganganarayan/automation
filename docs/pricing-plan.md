@@ -154,3 +154,17 @@ in the app for workspaces already on them and are no longer sold.
 - tenants.units holds funnels or clients bought; NULL keeps the flat limits.
   An Agency bought per client has AI included (the owner's keys); a flat Agency
   still brings its own keys.
+
+## Prices from 11-11-2026 (evening): one currency per visitor
+
+- Always-On Brand: ₹3,199 + GST or $37 a month per funnel. Agency: ₹3,999 + GST
+  or $47 a month per client. Solo (cancel page only) and extras unchanged.
+  Lowest margins (yearly): Brand 52.7%, Agency 61.6% INR / 62.0% USD, Solo 50.6%.
+- No currency switch. The visitor's IP picks the currency (offline lookup,
+  geoip-country, the IP never leaves the server): India sees rupees with GST,
+  everyone else sees US dollars with no mention of GST, India, rupees or IST.
+  ?cur=inr or ?cur=usd forces a page for checks only.
+- Checkout bills by the IP's country when it is known, so editing the form
+  cannot dodge GST. Unknown IP: the currency the page showed.
+- The buy page source carries only the visitor's currency and only the plans on
+  sale (Solo is not in it).

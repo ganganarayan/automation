@@ -12,9 +12,13 @@ describe('public pages', () => {
   it('home sells one plan per funnel and Agency per client, with Indian rupee grouping', () => {
     const h = homePage();
     expect(h).toContain('Always-On Brand');
-    expect(h).toContain('₹3,099<small> + GST / month per funnel');
-    expect(h).toContain('₹3,899<small> + GST / month per client');
-    expect(h).toContain('$36<small> / month per funnel');
+    expect(h).toContain('₹3,199<small> + GST / month per funnel');
+    expect(h).toContain('₹3,999<small> + GST / month per client');
+    expect(h).not.toContain('$37<small>');
+    const u = homePage({ cur: 'usd' });
+    expect(u).toContain('$37<small> / month per funnel');
+    expect(u).toContain('$47<small> / month per client');
+    expect(u).not.toContain('₹');
     expect(h).toContain('30 finished posts a month');
     expect(h).toContain('10 channels');
     for (const old of ['Starter Lite', 'data-buy="growth"', 'data-buy="solo"', 'Solo']) expect(h).not.toContain(old);
@@ -34,10 +38,10 @@ describe('public pages', () => {
     const h = homePage();
     expect(h).not.toContain('class="gst"');
     expect(h).not.toContain('.gst{');
-    expect(h).toContain('₹3,657 a month with 18% GST');
+    expect(h).toContain('₹3,775 a month with 18% GST');
     expect(STACK_TOTAL).toEqual({ inr: 21780, usd: 257 });
     expect(h).toContain('₹21,780+');
-    expect(h).toContain('$257+');
+    expect(homePage({ cur: 'usd' })).toContain('$257+');
     expect(h).toContain('Founding price');
     expect(h).toContain('Done-with-you setup');
   });

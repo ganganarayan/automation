@@ -13,7 +13,7 @@
  */
 
 import { PLANS, GST_NOTE, EXTRAS, withGst } from './planSpec.js';
-import { CHECKED_ON, VERDICT, ROWS, US, COMPETITORS } from './compareData.js';
+import { CHECKED_ON, VERDICT, COMPETITORS, usFor, rowsFor, competitorsFor } from './compareData.js';
 
 export const UPDATED = '11-11-2026';
 export const LOGIN_PATH = '/api/v1/admin/today';
@@ -28,6 +28,12 @@ export const escGst = (s) => esc(s);
 
 /** A dollar price. */
 export const usd = (n) => `$${Number(n || 0).toLocaleString('en-US')}`;
+
+/** A dollar price that may carry cents ($1.50). */
+export const usdc = (n) => (Number(n) % 1 ? `$${Number(n).toFixed(2)}` : usd(n));
+
+/** 'inr' or 'usd' (anything else is usd). */
+export const curOf = (c) => (c === 'inr' ? 'inr' : 'usd');
 
 export function shell(title, inner) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -143,7 +149,7 @@ const FEATURE_GROUPS = [
       ['Approve from the app', 'Review and Approve buttons in the Library. Approving runs the Clean check once, then schedules.'],
       ['Disapprove and Remake', 'Give a reason, get a one-minute hold to change your mind, then Remake or send Video corrections. The lane reruns and learns the lesson for next time.'],
       ['Empty reviews refused', 'A script review with nothing in it is refused, so a blank click never approves a bad post.'],
-      ['One daily digest', 'One email per address after 20:00 IST with everything that went live, failed or waits for you, instead of an email per post.'],
+      ['One daily digest', 'One email per address each evening with everything that went live, failed or waits for you, instead of an email per post.'],
     ],
   },
   {
@@ -179,7 +185,7 @@ const FEATURE_GROUPS = [
       ['Key history', 'Every change to a paid key is recorded, so you can see when each key was set or replaced.'],
       ['Workspaces and users', 'Each client is its own workspace with its own accounts, keys and posts, kept apart. Users have roles and plan end dates.'],
       ['Connect from the app', 'Google Drive, Gmail and your social accounts connect from Settings. No setup files, no developer needed.'],
-      ['Indian dates and IST', 'Every date reads DD-MM-YYYY and every time is IST, in the app, emails and exports.'],
+      ['Dates that read right', 'Every date reads day first (DD-MM-YYYY) and every time is 24-hour, in the app, emails and exports.'],
     ],
   },
 ];
@@ -219,9 +225,21 @@ const FAQ = [
   ['What happens when a channel fails?', 'That channel shows ❌ on the Log with the reason. Press Retry failed only and just that channel is sent again.'],
   ['Can I remove a post after it is live?', 'Yes. Tick the channels and press Delete once; the post is taken down from each platform.'],
   ['What can the app see in my Google Drive?', 'Only the files it creates itself (the drive.file permission). Your other files stay private. See the privacy policy.'],
-  ['What if I go over my plan?', 'The app tells you before you go over. Add 30 more posts for ₹2,499 + GST ($29 outside India), an AI video for ₹499 + GST ($6 outside India), or another user for ₹100 + GST ($1.50) a month.'],
-  ['Are prices with GST?', 'In India, prices are shown before GST, with the total beside each one: 18% GST is added and shown on your GST invoice, so a GST-registered business can claim it back. Outside India, prices are in US dollars and no GST is added.'],
 ];
+
+/** The questions that carry a price, in the visitor's currency. */
+function faqFor(cur) {
+  if (cur === 'usd') {
+    return [...FAQ,
+      ['What if I go over my plan?', `The app tells you before you go over. Add 30 more posts for ${usd(EXTRAS.posts30.usd)}, an AI video for ${usd(EXTRAS.aiVideo.usd)}, or another user for ${usdc(EXTRAS.user.usd)} a month.`],
+      ['What currency do I pay in?', 'US dollars, by card, renewing monthly or yearly until you cancel.'],
+    ];
+  }
+  return [...FAQ,
+    ['What if I go over my plan?', `The app tells you before you go over. Add 30 more posts for ₹${inr(EXTRAS.posts30.inr)} + GST, an AI video for ₹${inr(EXTRAS.aiVideo.inr)} + GST, or another user for ₹${inr(EXTRAS.user.inr)} + GST a month.`],
+    ['Are prices with GST?', 'Prices are shown before GST, with the total beside each one: 18% GST is added and shown on your GST invoice, so a GST-registered business can claim it back.'],
+  ];
+}
 
 /** Before and after: our own words for what changes on day one. */
 const BEFORE = [
@@ -253,7 +271,7 @@ const SCENES = [
   },
   {
     tab: 'Nothing in stock today',
-    who: 'The daily router, 19:00 IST',
+    who: 'The daily router, 19:00',
     chat: [['sys', 'No ready video left in this funnel'], ['out', 'Script written from your background'], ['out', 'Pictures drawn, animated and voiced'], ['sys', 'Animation failed? The same post goes out as an image post.'], ['out', 'Posted on all your channels ✓']],
     note: ['A day is never skipped', 'When you have nothing new, the router makes an AI video or an image post instead, so every funnel posts every day.'],
   },
@@ -386,14 +404,11 @@ const HOME_CSS = `
  .where{text-align:center;color:var(--mute);font-size:.9rem;margin:0 0 1.4rem}
  .plan .total{font-size:.9rem;margin:.2rem 0 0}
  .plan .trial{display:block;text-align:center;font-size:.88rem;margin-top:.5rem}
- .cur-usd{display:none}.usd .cur-usd{display:block}.usd .cur-inr{display:none}
- .where .cur-inr,.trust .cur-inr{display:inline}.usd .where .cur-usd,.usd .trust .cur-usd{display:inline}.usd .where .cur-inr,.usd .trust .cur-inr{display:none}
  .stack{width:100%;border-collapse:collapse;margin:0 0 2rem;font-size:.95rem}
  .stack th,.stack td{border-bottom:1px solid var(--line);padding:.7rem .6rem;text-align:left;vertical-align:top}
  .stack th{color:var(--mute);font-weight:700;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
  .stack td:last-child{white-space:nowrap;text-align:right}.stack th:last-child{text-align:right}
  .stack td small{display:block;color:var(--mute);font-size:.78rem}
- .stack .cur-usd{display:none}.usd .stack .cur-usd{display:inline}.usd .stack .cur-inr{display:none}
  .stack .sum td{font-weight:800;text-decoration:line-through;text-decoration-color:rgba(255,255,255,.35)}
  .stack .you td{font-weight:800;font-size:1.15rem;color:var(--green);border-bottom:0}
  .plans.two{grid-template-columns:repeat(auto-fit,minmax(280px,1fr));max-width:820px;margin:0 auto}
@@ -446,11 +461,12 @@ function mark([v, note]) {
 }
 
 /** The full matrix: every row, Content Engine first, then each competitor. */
-export function compareMatrix(list = COMPETITORS) {
+export function compareMatrix(list = COMPETITORS, cur = 'inr') {
+  const us = usFor(cur);
   const head = `<tr><th>Feature</th><th class="us">Content Engine</th>${list.map((c) => `<th><a href="${comparePath(c)}">${esc(c.name)}</a></th>`).join('')}</tr>`;
-  const body = ROWS.map((r) => (r.group
+  const body = rowsFor(cur).map((r) => (r.group
     ? `<tr class="grp"><td colspan="${list.length + 2}">${esc(r.group)}</td></tr>`
-    : `<tr><td>${esc(r.label)}</td><td class="c us">${mark(US[r.key])}</td>${list.map((c) => `<td class="c">${mark(c.rows[r.key] || ['u', 'Not listed.'])}</td>`).join('')}</tr>`)).join('');
+    : `<tr><td>${esc(r.label)}</td><td class="c us">${mark(us[r.key])}</td>${list.map((c) => `<td class="c">${mark(c.rows[r.key] || ['u', 'Not listed.'])}</td>`).join('')}</tr>`)).join('');
   return `<div class="tbl"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>
 <p class="legend"><span class="y">✓</span> yes · <span class="p">◐</span> partly or on higher plans only · <span class="n">✗</span> no, by their own word · <span class="u">?</span> not listed on their website. Read from each company's own website on ${esc(CHECKED_ON)}. Hover a mark for the detail; each name opens the full comparison with sources.</p>`;
 }
@@ -461,31 +477,33 @@ export function compareCards(list = COMPETITORS) {
 }
 
 /** The landing page's comparison section. */
-export function compareSection() {
+export function compareSection(cur = 'inr') {
   return `<section id="compare"><div class="wrap">
   <h2>Content Engine vs the rest</h2>
   <p class="kicker">Most tools schedule the post you made. Content Engine makes it, posts it every day and turns the comments into leads. Here is every feature, side by side.</p>
-  ${compareMatrix()}
+  ${compareMatrix(competitorsFor(curOf(cur)), cur)}
   <h3 class="gt" style="margin:2.4rem 0 1rem">Read a full comparison</h3>
-  ${compareCards()}
+  ${compareCards(competitorsFor(curOf(cur)))}
 </div></section>`;
 }
 
 /**
- * A plan's price, four ways: rupees in India (+ GST, with the total) and US
- * dollars elsewhere (no GST), each monthly and yearly. The page shows one of
- * each pair (classes cur-inr / cur-usd on <html>, yearly on #pricing).
+ * A plan's price in one currency, monthly and yearly (yearly on #pricing).
+ * Rupees: before 18% GST, with the total. Dollars: the price, nothing else.
  */
-export function priceBlock(lim, extra = '') {
+export function priceBlock(lim, extra = '', cur = 'inr') {
+  if (curOf(cur) === 'usd') {
+    const u = lim.priceUsd;
+    return `<div class="mo"><p class="price">${usd(u)}<small> / month${extra}</small></p><p class="bill">Billed monthly in US dollars</p></div>
+  <div class="yr"><p class="price">${usdc(Math.round((u * 10 * 100) / 12) / 100)}<small> / month${extra}</small></p><p class="total">${usd(u * 10)} a year</p><p class="bill">Billed yearly: 12 months for the price of 10</p></div>`;
+  }
   const m = lim.priceInr;
   const yInr = Math.round((m * 10) / 12);
-  const u = lim.priceUsd;
-  const yUsd = Math.round((u * 10) / 12);
-  return `<div class="mo"><div class="cur-inr"><p class="price">₹${inr(m)}<small> ${GST_NOTE} / month${extra}</small></p><p class="total">₹${inr(withGst(m))} a month with 18% GST</p><p class="bill">Billed monthly</p></div><div class="cur-usd"><p class="price">${usd(u)}<small> / month${extra}</small></p><p class="total">No GST outside India</p><p class="bill">Billed monthly in US dollars</p></div></div>
-  <div class="yr"><div class="cur-inr"><p class="price">₹${inr(yInr)}<small> ${GST_NOTE} / month${extra}</small></p><p class="total">₹${inr(m * 10)} ${GST_NOTE} a year, ₹${inr(withGst(m * 10))} with 18% GST</p><p class="bill">Billed yearly: 12 months for the price of 10</p></div><div class="cur-usd"><p class="price">${usd(yUsd)}<small> / month${extra}</small></p><p class="total">${usd(u * 10)} a year, no GST outside India</p><p class="bill">Billed yearly in US dollars: 12 months for the price of 10</p></div></div>`;
+  return `<div class="mo"><p class="price">₹${inr(m)}<small> ${GST_NOTE} / month${extra}</small></p><p class="total">₹${inr(withGst(m))} a month with 18% GST</p><p class="bill">Billed monthly</p></div>
+  <div class="yr"><p class="price">₹${inr(yInr)}<small> ${GST_NOTE} / month${extra}</small></p><p class="total">₹${inr(m * 10)} ${GST_NOTE} a year, ₹${inr(withGst(m * 10))} with 18% GST</p><p class="bill">Billed yearly: 12 months for the price of 10</p></div>`;
 }
 
-function planCard(id, contactHref) {
+function planCard(id, contactHref, cur = 'inr') {
   const lim = PLANS[id];
   const u = lim.unit || lim;
   const f = PLAN_FEATURES[id];
@@ -494,14 +512,14 @@ function planCard(id, contactHref) {
     client ? 'Per client: its own workspace and login' : 'Per funnel (brand)',
     `${u.channels} channels`,
     `${u.posts} finished posts a month`,
-    client ? '1 user per client, plus yours' : '1 user; more at ₹100 + GST ($1.50) a month each',
+    client ? '1 user per client, plus yours' : `1 user; more at ${curOf(cur) === 'usd' ? usdc(EXTRAS.user.usd) : `₹${inr(EXTRAS.user.inr)} + GST`} a month each`,
     'AI included, no keys needed',
   ];
   const best = id === 'brand';
   return `<div class="card plan${best ? ' best' : ''}">
   ${best ? '<span class="badge">Founding price</span>' : ''}
   <h3>${esc(lim.label)}</h3>
-  ${priceBlock({ priceInr: u.priceInr, priceUsd: u.priceUsd }, client ? ' per client' : ' per funnel')}
+  ${priceBlock({ priceInr: u.priceInr, priceUsd: u.priceUsd }, client ? ' per client' : ' per funnel', cur)}
   <p class="ptag">${esc(f.tag)}</p>
   <ul>
     ${limits.map((l) => `<li class="lim">${esc(l)}</li>`).join('')}
@@ -514,13 +532,13 @@ function planCard(id, contactHref) {
 }
 
 /** The value stack: what it solves, and what that costs without us. */
-function stackTable() {
-  const cell = (r, cur) => (r[cur] === null ? 'Included' : cur === 'inr' ? `₹${inr(r.inr)}` : usd(r.usd));
-  const both = (r) => `<span class="cur-inr">${cell(r, 'inr')}</span><span class="cur-usd">${cell(r, 'usd')}</span>`;
+function stackTable(cur = 'inr') {
+  const d = curOf(cur) === 'usd';
+  const cell = (r) => (r[d ? 'usd' : 'inr'] === null ? 'Included' : d ? usd(r.usd) : `₹${inr(r.inr)}`);
   return `<table class="stack"><thead><tr><th>You want</th><th>What we do</th><th>Without us, a month</th></tr></thead><tbody>
-    ${VALUE_STACK.map((r) => `<tr><td><b>${esc(r.want)}</b></td><td>${esc(r.does)}</td><td>${both(r)}${r.costs ? `<small>${esc(r.costs)}</small>` : ''}</td></tr>`).join('')}
-    <tr class="sum"><td colspan="2">What it would cost you a month</td><td><span class="cur-inr">₹${inr(STACK_TOTAL.inr)}+</span><span class="cur-usd">${usd(STACK_TOTAL.usd)}+</span></td></tr>
-    <tr class="you"><td colspan="2">What you pay, per funnel</td><td><span class="cur-inr">₹${inr(PLANS.brand.priceInr)} ${GST_NOTE}</span><span class="cur-usd">${usd(PLANS.brand.priceUsd)}</span></td></tr>
+    ${VALUE_STACK.map((r) => `<tr><td><b>${esc(r.want)}</b></td><td>${esc(r.does)}</td><td>${cell(r)}${r.costs ? `<small>${esc(r.costs)}</small>` : ''}</td></tr>`).join('')}
+    <tr class="sum"><td colspan="2">What it would cost you a month</td><td>${d ? `${usd(STACK_TOTAL.usd)}+` : `₹${inr(STACK_TOTAL.inr)}+`}</td></tr>
+    <tr class="you"><td colspan="2">What you pay, per funnel</td><td>${d ? usd(PLANS.brand.priceUsd) : `₹${inr(PLANS.brand.priceInr)} ${GST_NOTE}`}</td></tr>
   </tbody></table>`;
 }
 
@@ -528,7 +546,9 @@ function stackTable() {
  * The public home (landing) page. `email` is the contact address for the plan
  * buttons ('' = they open sign-in instead, since there is no self sign-up).
  */
-export function homePage({ email = '' } = {}) {
+export function homePage({ email = '', cur = 'inr' } = {}) {
+  const c = curOf(cur);
+  const d = c === 'usd';
   const contactHref = contactHrefFor(email);
   const trialHref = contactHref('7-day trial');
   const cards = (items) => items.map(([t, p]) => `<div class="card"><h3>${esc(t)}</h3><p>${esc(p)}</p></div>`).join('');
@@ -544,7 +564,7 @@ ${landingNav('')}
   <p class="lead">Content Engine turns your videos, or nothing at all, into finished posts with copy, thumbnails, voice and music. You approve. It publishes to every channel, reports what went live and turns comments into leads.</p>
   <div class="cta"><a class="btn" href="${trialHref}">Start the 7-day trial</a><a class="btn ghost" href="#pricing">See pricing</a></div>
   <div class="chips">${CHANNELS.map((c) => `<span class="chip">${esc(c)}</span>`).join('')}</div>
-  <div class="trust"><span><b>✓</b> You approve every post</span><span><b>₹</b> <span class="cur-inr">Priced in rupees, GST invoice</span><span class="cur-usd">Priced in US dollars, no GST outside India</span></span><span><b>↺</b> Cancel any time, one click</span><span><b>◷</b> Dates and times in IST</span></div>
+  <div class="trust"><span><b>✓</b> You approve every post</span>${d ? '<span><b>$</b> One simple price per brand</span>' : '<span><b>₹</b> Priced in rupees, GST invoice</span>'}<span><b>↺</b> Cancel any time, one click</span></div>
 </div></header>
 
 <section id="how"><div class="wrap">
@@ -555,7 +575,7 @@ ${landingNav('')}
     <div class="stat"><b>3 lanes</b><span>so a day is never skipped</span></div>
     <div class="stat"><b>10 channels</b><span>per funnel, from one approval</span></div>
     <div class="stat"><b>3 sizes</b><span>16:9, 9:16 and 4:5, for every platform</span></div>
-    <div class="stat"><b>1 email</b><span>a day, after 20:00 IST</span></div>
+    <div class="stat"><b>1 email</b><span>a day, every evening</span></div>
   </div>
 </div></section>
 
@@ -588,40 +608,38 @@ ${landingNav('')}
 <section id="pricing"><div class="wrap">
   <h2>Always-On Brand</h2>
   <p class="kicker">Your brand posts every day on 10 channels, and comments turn into customers, without you making a single post. One plan, everything in it.</p>
-  ${stackTable()}
+  ${stackTable(c)}
   <div class="toggles">
     <div class="billing" role="group" aria-label="Billing"><span class="save">2 months free</span><button type="button" class="on" data-b="mo" onclick="bill('mo')">MONTHLY</button><button type="button" data-b="yr" onclick="bill('yr')">YEARLY</button></div>
-    <div class="billing curs" role="group" aria-label="Currency"><button type="button" class="on" data-c="inr" onclick="cur('inr',1)">₹ INR</button><button type="button" data-c="usd" onclick="cur('usd',1)">$ USD</button></div>
   </div>
-  <p class="where"><span class="cur-inr">Showing Indian prices: rupees, before 18% GST.</span><span class="cur-usd">Showing prices outside India: US dollars, no GST.</span></p>
-  <div class="grid plans two">${['brand', 'agency'].map((id) => planCard(id, contactHref)).join('')}</div>
+  ${d ? '' : '<p class="where">Prices in rupees, before 18% GST.</p>'}
+  <div class="grid plans two">${['brand', 'agency'].map((id) => planCard(id, contactHref, c)).join('')}</div>
   <div class="bonus">${BONUSES.map(([t, p]) => `<div><b>${esc(t)}</b>${esc(p)}</div>`).join('')}</div>
-  <p class="fine cur-inr">Priced per funnel (brand) with 10 channels each; Agency per client. Add 30 more posts for ₹${inr(EXTRAS.posts30.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.posts30.inr))} with GST), an AI video for ₹${inr(EXTRAS.aiVideo.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.aiVideo.inr))} with GST), another user for ₹${inr(EXTRAS.user.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.user.inr))} with GST) a month. Pay yearly: 10 months, get 12. Prices in Indian rupees, before GST: 18% GST is added to every price and shown on your GST invoice. Costs without us are typical market prices, not quotes.</p>
-  <p class="fine cur-usd">Priced per funnel (brand) with 10 channels each; Agency per client. Add 30 more posts for ${usd(EXTRAS.posts30.usd)}, an AI video for ${usd(EXTRAS.aiVideo.usd)}, another user for $1.50 a month. Pay yearly: 10 months, get 12. Prices in US dollars for customers outside India: no GST is added. Costs without us are typical market prices, not quotes.</p>
+  ${d
+    ? `<p class="fine">Priced per funnel (brand) with 10 channels each; Agency per client. Add 30 more posts for ${usd(EXTRAS.posts30.usd)}, an AI video for ${usd(EXTRAS.aiVideo.usd)}, another user for ${usdc(EXTRAS.user.usd)} a month. Pay yearly: 10 months, get 12. Prices in US dollars. Costs without us are typical market prices, not quotes.</p>`
+    : `<p class="fine">Priced per funnel (brand) with 10 channels each; Agency per client. Add 30 more posts for ₹${inr(EXTRAS.posts30.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.posts30.inr))} with GST), an AI video for ₹${inr(EXTRAS.aiVideo.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.aiVideo.inr))} with GST), another user for ₹${inr(EXTRAS.user.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.user.inr))} with GST) a month. Pay yearly: 10 months, get 12. Prices in Indian rupees, before GST: 18% GST is added to every price and shown on your GST invoice. Costs without us are typical market prices, not quotes.</p>`}
 </div></section>
 
-${compareSection()}
+${compareSection(c)}
 
 <section id="faq"><div class="wrap">
   <h2>Questions</h2>
   <p class="kicker">The short answers.</p>
-  ${FAQ.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${escGst(a)}</p></details>`).join('')}
+  ${faqFor(c).map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${escGst(a)}</p></details>`).join('')}
 </div></section>
 
 <section class="final"><div class="wrap">
   <h2>Stop making posts. Start revenue from posts.</h2>
-  <p class="kicker" style="margin:0 auto 1.6rem">Seven days free, then ₹3,099 + GST a funnel ($36 outside India). Or buy now and your workspace is ready the moment you pay.</p>
+  <p class="kicker" style="margin:0 auto 1.6rem">Seven days free, then ${d ? usd(PLANS.brand.priceUsd) : `₹${inr(PLANS.brand.priceInr)} + GST`} a funnel. Or buy now and your workspace is ready the moment you pay.</p>
   <div class="cta"><a class="btn" href="${trialHref}">Start the 7-day trial</a><a class="btn ghost" href="${LOGIN_PATH}">Sign in</a></div>
 </div></section>
 
 <a class="float-cta" href="${trialHref}">Start the 7-day trial ›</a>
 <script>
 function actShow(i){document.querySelectorAll('.act-tab,.act-pane').forEach(function(e){e.classList.toggle('on',e.getAttribute('data-i')==String(i));});}
-var B='mo',C='inr';
-function links(){document.querySelectorAll('a[data-buy]').forEach(function(a){a.href='/buy?plan='+a.getAttribute('data-buy')+'&bill='+B+'&cur='+C;});}
+var B='mo';
+function links(){document.querySelectorAll('a[data-buy]').forEach(function(a){a.href='/buy?plan='+a.getAttribute('data-buy')+'&bill='+B;});}
 function bill(b){B=b;document.getElementById('pricing').classList.toggle('yearly',b==='yr');document.querySelectorAll('.billing button[data-b]').forEach(function(e){e.classList.toggle('on',e.getAttribute('data-b')===b);});links();}
-function cur(c,keep){C=c;links();document.documentElement.classList.toggle('usd',c==='usd');document.querySelectorAll('.billing button[data-c]').forEach(function(e){e.classList.toggle('on',e.getAttribute('data-c')===c);});if(keep){try{localStorage.setItem('ce_cur',c);}catch(e){}}}
-(function(){var c='';try{c=localStorage.getItem('ce_cur')||'';}catch(e){}if(c!=='inr'&&c!=='usd'){var tz='';try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||'';}catch(e){}c=/^Asia\\/(Kolkata|Calcutta)$/.test(tz)?'inr':'usd';}cur(c);})();
 </script>
 ${landingFooter(email)}`;
 }
@@ -673,7 +691,7 @@ export function termsPage({ email = '' } = {}) {
 }
 
 /** The refund and cancellation policy: no refunds, cancel any time, use until the paid period ends. */
-export function refundPage({ email = '' } = {}) {
+export function refundPage({ email = '', cur = 'inr' } = {}) {
   return shell('Refund and cancellation policy: Content Engine', `
 <h1>Refund and cancellation policy</h1>
 <p class="sub">Last updated ${UPDATED}</p>
@@ -682,8 +700,8 @@ export function refundPage({ email = '' } = {}) {
 <p>Payments are not refunded, in full or in part. This covers monthly and yearly plans, the unused part of a period, unused posts or AI videos, upgrades, and extra post or AI video packs.</p>
 <h2>Cancel any time</h2>
 <p>Cancel with one click: in the app, open <b>Plan</b> and press <b>Cancel my plan</b>. You can also write to ${contactLine(email)}. There is no cancellation fee and no notice period. Cancelling stops the next renewal, so you are not charged again. Changed your mind before the period ends? If you were set up by us, press <b>Keep my plan</b>; if you paid online, buy the plan again from the <a href="/#pricing">pricing</a> when the period ends.</p>
-<h2>Currency and GST</h2>
-<p>Businesses billed in India pay in Indian rupees, with 18% GST added and shown at checkout. Businesses billed outside India pay in US dollars, with no GST. The payment is taken by Razorpay.</p>
+<h2>${curOf(cur) === 'usd' ? 'Currency' : 'Currency and GST'}</h2>
+<p>${curOf(cur) === 'usd' ? 'Plans are paid in US dollars. The amount is shown before you pay.' : 'Plans are paid in Indian rupees, with 18% GST added and shown at checkout.'} The payment is taken by Razorpay.</p>
 <h2>Use it until the end of what you paid for</h2>
 <p>After you cancel, your workspace keeps working, with every feature of your plan, until the last day of the period you have already paid for. On that day it stops posting and is paused. What happens to your data after that is set out in the <a href="/privacy">privacy policy</a>.</p>
 <h2>Trial</h2>

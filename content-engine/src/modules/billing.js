@@ -6,7 +6,7 @@
  * Dependencies: billingService, utils/buyPage, utils/billingSpec.
  *
  * Routes (mounted on the app, outside /api/v1, no sign-in):
- *   GET  /buy              the page (?plan=brand|agency&bill=mo|yr&cur=inr|usd&units=n)
+ *   GET  /buy              the page (?plan=brand|agency&bill=mo|yr&units=n); currency from the IP
  *   POST /buy/start        { plan, bill, units, users, country, name, business, email, phone, gstin } -> Checkout details
  *   POST /buy/confirm      { paymentId, subscriptionId, signature } -> the new workspace's sign-in
  *   POST /buy/webhook      Razorpay webhook (X-Razorpay-Signature over the raw body)
@@ -14,6 +14,7 @@
 import * as billing from '../services/billingService.js';
 import { buyPage } from '../utils/buyPage.js';
 import { BUY_PATH } from '../utils/billingSpec.js';
+import { currencyOf, billingCountry } from '../utils/geo.js';
 
 /** A few purchase starts per address per hour: each one opens a Razorpay subscription. */
 const starts = new Map();
@@ -32,7 +33,7 @@ export function mount(app, { log, contactEmail = async () => '' }) {
       res.set('Cache-Control', 'no-store');
       const q = req.query || {};
       res.type('html').send(buyPage({
-        plan: String(q.plan || ''), bill: String(q.bill || ''), cur: String(q.cur || ''), units: String(q.units || ''),
+        plan: String(q.plan || ''), bill: String(q.bill || ''), cur: currencyOf(req), units: String(q.units || ''),
         ready: await billing.ready().catch(() => false), email: await contactEmail(),
       }));
     } catch (err) {
@@ -43,8 +44,12 @@ export function mount(app, { log, contactEmail = async () => '' }) {
   app.post(`${BUY_PATH}/start`, async (req, res) => {
     try {
       if (tooMany(req.ip || '')) return res.status(429).json({ ok: false, error: 'Too many tries. Wait a while and try again.' });
-      const out = await billing.start(req.body || {});
-      log.info({ sub: out.subscriptionId, plan: req.body && req.body.plan, country: req.body && req.body.country }, 'buy started');
+      // The IP decides the billing country when it is known (no GST dodging by
+      // editing the form); the page's own value only when it is not.
+      const body = { ...(req.body || {}) };
+      body.country = billingCountry(req, body.country);
+      const out = await billing.start(body);
+      log.info({ sub: out.subscriptionId, plan: body.plan, country: body.country }, 'buy started');
       res.json({ ok: true, ...out });
     } catch (err) {
       log.warn({ err: err.message }, 'buy start refused');

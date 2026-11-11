@@ -18,8 +18,8 @@ export const PLANS = {
   // channels), so a cheaper extra funnel would fall under 50% margin. Limits
   // below are for one funnel; limitsForTenant scales them by funnels bought.
   brand: {
-    label: 'Always-On Brand', priceInr: 3099, priceUsd: 36, funnels: 1, channels: 10, posts: 30, aiVideos: 0, users: 1, clients: 0,
-    perUnit: 'funnel', unit: { priceInr: 3099, priceUsd: 36, funnels: 1, channels: 10, posts: 30, aiVideos: 0, clients: 0 },
+    label: 'Always-On Brand', priceInr: 3199, priceUsd: 37, funnels: 1, channels: 10, posts: 30, aiVideos: 0, users: 1, clients: 0,
+    perUnit: 'funnel', unit: { priceInr: 3199, priceUsd: 37, funnels: 1, channels: 10, posts: 30, aiVideos: 0, clients: 0 },
   },
   // Solo: the lean build for 1 funnel and 5 channels, offered only to someone
   // cancelling (Plan page), never on the pricing page.
@@ -36,7 +36,7 @@ export const PLANS = {
   // client at 25% more. A workspace with no units bought keeps these flat limits.
   agency: {
     label: 'Agency', priceInr: 14999, priceUsd: 169, funnels: null, channels: null, posts: 300, aiVideos: null, users: 10, clients: 10,
-    perUnit: 'client', unit: { priceInr: 3899, priceUsd: 45, funnels: null, channels: 10, posts: 30, aiVideos: 0, clients: 1 },
+    perUnit: 'client', unit: { priceInr: 3999, priceUsd: 47, funnels: null, channels: 10, posts: 30, aiVideos: 0, clients: 1 },
   },
   custom: { label: 'Custom (no limits)', priceInr: null, priceUsd: null, funnels: null, channels: null, posts: null, aiVideos: null, users: null, clients: null },
 };

@@ -69,7 +69,7 @@ async function razorpayPlan(k, q) {
       name: `Content Engine ${PLANS[q.plan].label}${countsText(q) ? `, ${countsText(q)}` : ''} (${PERIODS[q.bill].word})`.slice(0, 120),
       amount: q.amount,
       currency: q.currency,
-      description: q.currency === 'INR' ? `${money(q.base, 'INR')} + 18% GST ${money(q.gst, 'INR')}` : 'Billed outside India, no GST',
+      description: q.currency === 'INR' ? `${money(q.base, 'INR')} + 18% GST ${money(q.gst, 'INR')}` : 'Billed in US dollars',
     },
   });
   await repo.savePlanId(key, plan.id);

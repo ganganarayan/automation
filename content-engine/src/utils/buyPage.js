@@ -1,23 +1,33 @@
 /**
  * The buy page (pure HTML).
  *
- * Purpose:      Pick a plan and billing, say where the business is billed, pay
- *               with Razorpay Checkout, and get the new workspace's sign-in.
- *               India: rupees with 18% GST added. Outside India: US dollars, no GST.
+ * Purpose:      Pick a plan and billing, pay with Razorpay Checkout, and get
+ *               the new workspace's sign-in. The currency comes from the
+ *               visitor's IP (utils/geo): rupees with 18% GST in India, US
+ *               dollars elsewhere. There is no currency or country picker.
  * Responsibility: HTML and the page script; modules/billing does the I/O.
  * Dependencies: utils/billingSpec, utils/planSpec, utils/publicPages (shell).
  */
 import { shell, LOGIN_PATH } from './publicPages.js';
 import { PLANS, MAX_UNITS, MAX_EXTRA_USERS } from './planSpec.js';
-import { BUYABLE, PERIODS, COUNTRIES, unitPrices, BUY_PATH } from './billingSpec.js';
+import { BUYABLE, PERIODS, unitPrices, BUY_PATH } from './billingSpec.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-export function buyPage({ plan = 'brand', bill = 'mo', cur = '', units = '', ready = false, email = '' } = {}) {
+/** The prices the page script needs, in one currency, for the plans on sale only. */
+export function pagePrices(india) {
+  const all = unitPrices();
+  const plans = {};
+  for (const id of BUYABLE) plans[id] = { p: india ? all.plans[id].inr : all.plans[id].usd, per: all.plans[id].per };
+  return { plans, user: india ? all.user.inr : all.user.usd, maxUnits: all.maxUnits, maxUsers: all.maxUsers };
+}
+
+export function buyPage({ plan = 'brand', bill = 'mo', cur = 'usd', units = '', ready = false, email = '' } = {}) {
   const p = BUYABLE.includes(plan) ? plan : 'brand';
   const n = Math.min(MAX_UNITS, Math.max(1, Math.floor(Number(units)) || 1));
   const b = PERIODS[bill] ? bill : 'mo';
-  const country = cur === 'usd' ? 'XX' : cur === 'inr' ? 'IN' : '';
+  const india = cur === 'inr';
+  const country = india ? 'IN' : 'XX';
   const opt = (v, label, on) => `<option value="${esc(v)}"${on ? ' selected' : ''}>${esc(label)}</option>`;
   const closed = ready ? '' : `<p class="warn">🟡 Online payment opens soon. ${email ? `Write to <a href="mailto:${esc(email)}">${esc(email)}</a> and we will set up your workspace.` : 'Write to us and we will set up your workspace.'}</p>`;
   return shell('Buy a plan: Content Engine', `
@@ -47,16 +57,16 @@ ${closed}
     <label><span id="unitlab">Funnels (brands), 10 channels each</span><input name="units" id="units" type="number" min="1" max="${MAX_UNITS}" value="${n}" required oninput="sum()"></label>
     <label><span id="userlab">Extra users (1 user is included${p === 'agency' ? ', plus one per client' : ''})</span><input name="users" id="users" type="number" min="0" max="${MAX_EXTRA_USERS}" value="0" oninput="sum()"></label>
   </div>
-  <label>Where is your business billed?<select name="country" id="country" onchange="sum()">${Object.entries(COUNTRIES).map(([v, l]) => opt(v, v === 'IN' ? 'India: rupees, 18% GST added' : 'Outside India: US dollars, no GST', v === country)).join('')}</select></label>
+  <input type="hidden" name="country" id="country" value="${country}">
   <div class="two">
     <label>Your name<input name="name" required maxlength="80" autocomplete="name"></label>
     <label>Business name<input name="business" maxlength="80" autocomplete="organization"></label>
   </div>
   <div class="two">
     <label>Email (your sign-in)<input name="email" type="email" required maxlength="120" autocomplete="email"></label>
-    <label>Phone with country code<input name="phone" required maxlength="20" placeholder="+91 98765 43210" autocomplete="tel"></label>
+    <label>Phone with country code<input name="phone" required maxlength="20" placeholder="${india ? '+91 98765 43210' : '+1 555 123 4567'}" autocomplete="tel"></label>
   </div>
-  <label id="gstrow">GSTIN (optional, for a GST invoice you can claim)<input name="gstin" maxlength="15" placeholder="22AAAAA0000A1Z5"></label>
+  ${india ? '<label id="gstrow">GSTIN (optional, for a GST invoice you can claim)<input name="gstin" maxlength="15" placeholder="22AAAAA0000A1Z5"></label>' : ''}
   <div class="sum" id="sum"></div>
   <p class="hint">By paying you agree to the <a href="/terms">terms</a> and the <a href="/refund">refund policy</a> (no refunds; cancel any time and it stops at the end of the period you paid for).</p>
   <p id="msg" class="err" role="alert"></p>
@@ -64,22 +74,28 @@ ${closed}
 </form>
 </div>
 <script>
-var P=${JSON.stringify(unitPrices()).replace(/</g, '\\u003c')};
+var P=${JSON.stringify(pagePrices(india)).replace(/</g, '\\u003c')};
 var READY=${ready ? 'true' : 'false'};
 function el(id){return document.getElementById(id);}
-(function(){var c=el('country');if(!${country ? 'true' : 'false'}){var s='';try{s=localStorage.getItem('ce_cur')||'';}catch(e){}if(s==='inr')c.value='IN';else if(s==='usd')c.value='XX';else{var tz='';try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||'';}catch(e){}c.value=/^Asia\\/(Kolkata|Calcutta)$/.test(tz)?'IN':'XX';}}sum();})();
-function grp(n){var s=String(Math.round(n));if(s.length<=3)return s;return s.slice(0,-3).replace(/\\B(?=(\\d{2})+(?!\\d))/g,',')+','+s.slice(-3);}
-function cash(n,inr){if(inr)return '\u20b9'+grp(n);var c=Math.round(n*100);return '$'+String(Math.floor(c/100)).replace(/\\B(?=(\\d{3})+(?!\\d))/g,',')+(c%100?'.'+String(c%100).padStart(2,'0'):'');}
+sum();
+${india
+    ? `function grp(n){var s=String(Math.round(n));if(s.length<=3)return s;return s.slice(0,-3).replace(/\\B(?=(\\d{2})+(?!\\d))/g,',')+','+s.slice(-3);}
+function cash(n){return '\\u20b9'+grp(n);}
+function money(m){return Math.round(m);}
+function tax(b){return Math.round(b*1.18)-b;}`
+    : `function cash(n){var c=Math.round(n*100);return '$'+String(Math.floor(c/100)).replace(/\\B(?=(\\d{3})+(?!\\d))/g,',')+(c%100?'.'+String(c%100).padStart(2,'0'):'');}
+function money(m){return Math.round(m*100)/100;}
+function tax(){return 0;}`}
 function whole(id,lo,hi){var v=Math.floor(Number(el(id).value));return v>=lo&&v<=hi?v:lo;}
-function sum(){var pl=P.plans[el('plan').value];if(!pl)return;var inr=el('country').value==='IN';var yr=el('bill').value==='yr';
+function sum(){var pl=P.plans[el('plan').value];if(!pl)return;var yr=el('bill').value==='yr';
  el('userlab').textContent='Extra users (1 user is included'+(pl.per==='client'?', plus one per client)':')');el('unitlab').textContent=pl.per==='client'?'Clients, each its own workspace, 10 channels':'Funnels (brands), 10 channels each';
- var n=whole('units',1,P.maxUnits),u=whole('users',0,P.maxUsers);var unit=inr?pl.inr:pl.usd,user=inr?P.user.inr:P.user.usd;
- var month=unit*n+user*u;var times=yr?10:1;var base=inr?Math.round(month*times):Math.round(month*times*100)/100;var gst=inr?Math.round(base*1.18)-base:0;var total=base+gst;var per=yr?'year':'month';
- var lines=[n+' '+(pl.per==='client'?(n===1?'client':'clients'):(n===1?'funnel':'funnels'))+' x '+cash(unit*times,inr)];
- if(u)lines.push(u+' extra user'+(u===1?'':'s')+' x '+cash(user*times,inr));
- lines.push(inr?'18% GST: '+cash(gst,true):'No GST outside India');
- lines.push('Total: '+cash(total,inr)+' a '+per+', renews '+(yr?'yearly':'monthly'));
- el('sum').innerHTML=lines.map(function(l,i){return '<p'+(i===lines.length-1?' class="tot"':'')+'>'+l+'</p>';}).join('');el('paybtn').textContent='Pay '+cash(total,inr);el('gstrow').style.display=inr?'':'none';}
+ var n=whole('units',1,P.maxUnits),u=whole('users',0,P.maxUsers);var unit=pl.p,user=P.user;
+ var times=yr?10:1;var base=money((unit*n+user*u)*times);var gst=tax(base);var total=base+gst;var per=yr?'year':'month';
+ var lines=[n+' '+(pl.per==='client'?(n===1?'client':'clients'):(n===1?'funnel':'funnels'))+' x '+cash(unit*times)];
+ if(u)lines.push(u+' extra user'+(u===1?'':'s')+' x '+cash(user*times));
+ ${india ? "lines.push('18% GST: '+cash(gst));" : ''}
+ lines.push('Total: '+cash(total)+' a '+per+', renews '+(yr?'yearly':'monthly'));
+ el('sum').innerHTML=lines.map(function(l,i){return '<p'+(i===lines.length-1?' class="tot"':'')+'>'+l+'</p>';}).join('');el('paybtn').textContent='Pay '+cash(total);}
 function loadRzp(){return new Promise(function(ok,bad){if(window.Razorpay)return ok();var s=document.createElement('script');s.src='https://checkout.razorpay.com/v1/checkout.js';s.onload=ok;s.onerror=function(){bad(new Error('The payment window did not load. Check your connection and try again.'));};document.body.appendChild(s);});}
 async function post(u,b){var r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});var j=await r.json().catch(function(){return {ok:false,error:'Something went wrong'};});if(!j.ok)throw new Error(j.error||'Something went wrong');return j;}
 async function go(e){e.preventDefault();var m=el('msg');m.textContent='';if(!READY)return false;var btn=el('paybtn');btn.disabled=true;
@@ -101,4 +117,4 @@ async function done(p,tries){var box=el('buy');
 </script>`);
 }
 
-export default { buyPage };
+export default { buyPage, pagePrices };

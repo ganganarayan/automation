@@ -5,13 +5,15 @@
  *               /compare/content-engine-vs-<slug> page.
  * Responsibility: ROWS (what is compared, in revenue order), US (our answers),
  *               COMPETITORS (their answers, each with a source on their own site).
- * Dependencies: none.
+ * Dependencies: utils/planSpec (our prices).
  *
  * Every competitor cell was read on the competitor's own website on CHECKED_ON.
  * Verdicts: 'y' yes, 'p' partly, 'n' no (they say so), 'u' not listed (we could
  * not find it on their site, which is not the same as no). Re-check before a
  * claim is used in an ad.
  */
+
+import { PLANS, EXTRAS } from './planSpec.js';
 
 export const CHECKED_ON = '11-11-2026';
 
@@ -51,7 +53,7 @@ export const ROWS = [
 export const US = {
   aiCopy: ['y', 'Claude writes caption, hook and picture prompt from the background you paste once.'],
   aiImages: ['y', 'OpenAI draws them with no text; Claude places the headline in the empty space.'],
-  aiVideo: ['y', 'Script, pictures, animation (Kling, Runway or MiniMax) and ElevenLabs voice. ₹499 + GST ($6) per video.'],
+  aiVideo: ['y', `Script, pictures, animation (Kling, Runway or MiniMax) and ElevenLabs voice. ₹${EXTRAS.aiVideo.inr} + GST per video.`],
   rawVideo: ['y', 'Drop videos in Drive: AI copy, thumbnails in every size, end card and a Clean check.'],
   sizes: ['y', 'Thumbnails and image posts in all three sizes, the tall ones drawn as their own picture.'],
   autoDaily: ['y', 'The router triggers once a day and always posts: ready video, then AI video, then image post.'],
@@ -65,7 +67,7 @@ export const US = {
   byoKeys: ['y', 'Agency plan: your OpenAI, Claude, Kling, MiniMax and ElevenLabs keys.'],
   workspaces: ['y', 'A funnel per brand, and a workspace per client with its own keys and accounts.'],
   freePlan: ['p', 'No free plan. 7-day trial.'],
-  entryPrice: ['y', '₹3,099 + GST a month per brand: 30 finished posts on 10 channels, AI included.'],
+  entryPrice: ['y', `₹${PLANS.brand.priceInr.toLocaleString('en-IN')} + GST a month per brand: 30 finished posts on 10 channels, AI included.`],
   inr: ['y', 'Priced and billed in Indian rupees.'],
 };
 
@@ -265,6 +267,15 @@ export const COMPETITORS = [
       'SSO and API access on Enterprise',
     ],
     betterWhen: 'SocialPilot is the better buy for an agency whose clients send the content and want to approve it under the agency\'s own brand, at the lowest rupee price. Pick Content Engine when the agency has to produce the posts, not only schedule them.',
+    // What a visitor outside India reads (dollar prices only).
+    usd: {
+      oneLine: 'An agency-friendly scheduler with client approvals and white-label reports.',
+      lede: 'SocialPilot is a solid, affordable scheduler for agencies: client approvals, white-label reports, bulk scheduling, from $25.50 a month billed yearly. Its AI Pilot writes captions. It does not draw pictures or make videos, and its repeat posts and RSS queues repost what you already have rather than making something new.',
+      price: 'No free plan, 14-day trial. Essentials from $30 a month ($25.50 billed yearly). Extra accounts and users cost more.',
+      rows: { entryPrice: ['y', 'Essentials at $25.50 a month billed yearly, $30 monthly.', 'https://www.socialpilot.co/plans'] },
+      theyWin0: 'A lower entry price',
+      betterWhen: 'SocialPilot is the better buy for an agency whose clients send the content and want to approve it under the agency\'s own brand, at a low price. Pick Content Engine when the agency has to produce the posts, not only schedule them.',
+    },
   },
   {
     slug: 'metricool',
@@ -382,6 +393,39 @@ export const COMPETITORS = [
   },
 ];
 
+/** Our answers in the visitor's currency: dollars, and no rupee row, outside India. */
+export function usFor(cur = 'inr') {
+  if (cur === 'inr') return US;
+  return {
+    ...US,
+    aiVideo: ['y', `Script, pictures, animation (Kling, Runway or MiniMax) and ElevenLabs voice. $${EXTRAS.aiVideo.usd} per video.`],
+    entryPrice: ['y', `$${PLANS.brand.priceUsd} a month per brand: 30 finished posts on 10 channels, AI included.`],
+  };
+}
+
+/** A competitor as a visitor in this currency reads it (its `usd` wording outside India). */
+export function competitorFor(c, cur = 'inr') {
+  if (!c || cur === 'inr' || !c.usd) return c;
+  const u = c.usd;
+  return {
+    ...c,
+    oneLine: u.oneLine || c.oneLine,
+    lede: u.lede || c.lede,
+    price: u.price || c.price,
+    rows: { ...c.rows, ...(u.rows || {}) },
+    theyWin: u.theyWin0 ? [u.theyWin0, ...c.theyWin.slice(1)] : c.theyWin,
+    betterWhen: u.betterWhen || c.betterWhen,
+  };
+}
+
+/** Every competitor in the visitor's currency. */
+export const competitorsFor = (cur = 'inr') => COMPETITORS.map((c) => competitorFor(c, cur));
+
+/** The rows to show: the rupee row only to visitors in India. */
+export function rowsFor(cur = 'inr') {
+  return cur === 'inr' ? ROWS : ROWS.filter((r) => r.key !== 'inr');
+}
+
 export const bySlug = (slug) => COMPETITORS.find((c) => c.slug === slug) || null;
 
 /** How a post turns into money, and which Content Engine feature does each step. */
@@ -393,4 +437,4 @@ export const REVENUE_PATH = [
   ['Margin', 'Every post shows what its AI really cost, so you know what each lead and each client costs you.', 'costPerPost'],
 ];
 
-export default { CHECKED_ON, VERDICT, ROWS, US, COMPETITORS, REVENUE_PATH, bySlug };
+export default { CHECKED_ON, VERDICT, ROWS, US, COMPETITORS, REVENUE_PATH, bySlug, usFor, rowsFor, competitorFor, competitorsFor };

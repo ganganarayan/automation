@@ -22,6 +22,7 @@ import { notFound, errorHandler } from './middleware/errorHandler.js';
 import * as tenantSettings from './core/tenantSettings.js';
 import * as publicPages from './utils/publicPages.js';
 import * as comparePages from './utils/comparePages.js';
+import { currencyOf } from './utils/geo.js';
 import * as planCancel from './modules/planCancel.js';
 import * as billingModule from './modules/billing.js';
 
@@ -75,16 +76,16 @@ export function createApp() {
   // button opens the app; /privacy and /terms are the links Google's OAuth
   // consent screen needs. The contact is the default tenant's notification email.
   const contactEmail = async () => (await tenantSettings.forTenant('default').catch(() => null))?.emails?.notify || '';
-  app.get('/', async (_req, res) => res.type('html').send(publicPages.homePage({ email: await contactEmail() })));
-  app.get('/compare', async (_req, res) => res.type('html').send(comparePages.compareIndexPage({ email: await contactEmail() })));
+  app.get('/', async (req, res) => res.type('html').send(publicPages.homePage({ email: await contactEmail(), cur: currencyOf(req) })));
+  app.get('/compare', async (req, res) => res.type('html').send(comparePages.compareIndexPage({ email: await contactEmail(), cur: currencyOf(req) })));
   app.get('/compare/:page', async (req, res, next) => {
     const c = comparePages.competitorForPage(req.params.page);
     if (!c) return next();
-    return res.type('html').send(comparePages.comparisonPage(c, { email: await contactEmail() }));
+    return res.type('html').send(comparePages.comparisonPage(c, { email: await contactEmail(), cur: currencyOf(req) }));
   });
   app.get('/privacy', async (_req, res) => res.type('html').send(publicPages.privacyPage({ email: await contactEmail() })));
   app.get('/terms', async (_req, res) => res.type('html').send(publicPages.termsPage({ email: await contactEmail() })));
-  app.get('/refund', async (_req, res) => res.type('html').send(publicPages.refundPage({ email: await contactEmail() })));
+  app.get('/refund', async (req, res) => res.type('html').send(publicPages.refundPage({ email: await contactEmail(), cur: currencyOf(req) })));
   app.get('/shipping', async (_req, res) => res.type('html').send(publicPages.shippingPage({ email: await contactEmail() })));
   // Buy a plan: Razorpay in rupees with GST (India) or US dollars (elsewhere).
   billingModule.mount(app, { log: logger, contactEmail });

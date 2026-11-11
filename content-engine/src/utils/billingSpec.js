@@ -9,7 +9,7 @@
  * Dependencies: node:crypto, utils/planSpec (pure).
  *
  * The currency is decided on the server from where the buyer says the business
- * is billed, never from the page's currency switch. An Indian phone number
+ * is billed (the IP when known, utils/geo), never from a page switch. An Indian phone number
  * means India.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -123,7 +123,7 @@ export function countsText(q) {
 export function describe(q) {
   const what = countsText(q);
   const head = `${PLANS[q.plan].label}${what ? ` (${what})` : ''}, ${PERIODS[q.bill].word}: ${money(q.total, q.currency)}`;
-  return q.currency === 'INR' ? `${head} (${money(q.base, 'INR')} + ${money(q.gst, 'INR')} GST)` : `${head}, no GST`;
+  return q.currency === 'INR' ? `${head} (${money(q.base, 'INR')} + ${money(q.gst, 'INR')} GST)` : head;
 }
 
 /** The cached Razorpay plan for this exact price (a price change makes a new plan). */
@@ -162,7 +162,7 @@ export function buyerProblem(b) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(b.email)) return 'Enter a valid email: it is your sign-in';
   if (!/^\+?\d{8,15}$/.test(b.phone)) return 'Enter a phone number with its country code';
   if (b.country !== 'IN' && (/^\+91\d{10}$/.test(b.phone) || /^91\d{10}$/.test(b.phone))) {
-    return 'An Indian phone number is billed in India, in rupees with GST. Choose India.';
+    return 'This phone number is billed in another currency. Write to us and we will set up your workspace.';
   }
   if (b.gstin && b.country !== 'IN') return 'A GSTIN is for businesses billed in India';
   if (!validGstin(b.gstin)) return 'That GSTIN does not look right (15 characters, like 22AAAAA0000A1Z5)';

@@ -11,9 +11,10 @@
  * Routes (app.js): GET /compare  ·  GET /compare/:page
  */
 
-import { CHECKED_ON, VERDICT, ROWS, US, COMPETITORS, REVENUE_PATH, bySlug } from './compareData.js';
+import { CHECKED_ON, VERDICT, COMPETITORS, REVENUE_PATH, bySlug, usFor, rowsFor, competitorFor, competitorsFor } from './compareData.js';
+import { PLANS } from './planSpec.js';
 import {
-  landingHead, landingNav, landingFooter, contactHrefFor, compareMatrix, compareCards, comparePath, LOGIN_PATH, escGst,
+  landingHead, landingNav, landingFooter, contactHrefFor, compareMatrix, compareCards, comparePath, LOGIN_PATH, escGst, inr, usd, curOf,
 } from './publicPages.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -32,17 +33,20 @@ const cell = (v, note, src) => {
   return `<span class="${m.cls}">${m.sym} ${esc(m.word)}</span><small>${escGst(note)}${src ? ` <a href="${esc(src)}" rel="nofollow noopener" target="_blank">source</a>` : ''}</small>`;
 };
 
-function finalCta(email, heading) {
+/** Our price line in the visitor's currency. */
+const entry = (cur) => (curOf(cur) === 'usd' ? `${usd(PLANS.brand.priceUsd)} a funnel` : `₹${inr(PLANS.brand.priceInr)} + GST a funnel`);
+
+function finalCta(email, heading, cur = 'inr') {
   const trial = contactHrefFor(email)('7-day trial');
   return `<section class="final"><div class="wrap">
   <h2>${esc(heading)}</h2>
-  <p class="kicker" style="margin:0 auto 1.6rem">Seven days free, then ₹3,099 + GST a funnel ($36 outside India). Or buy now and your workspace is ready the moment you pay.</p>
+  <p class="kicker" style="margin:0 auto 1.6rem">Seven days free, then ${entry(cur)}. Or buy now and your workspace is ready the moment you pay.</p>
   <div class="cta"><a class="btn" href="${trial}">Start the 7-day trial</a><a class="btn ghost" href="/#pricing">See pricing</a></div>
 </div></section>`;
 }
 
 /** GET /compare */
-export function compareIndexPage({ email = '' } = {}) {
+export function compareIndexPage({ email = '', cur = 'inr' } = {}) {
   const names = COMPETITORS.map((c) => c.name).join(', ');
   return `${landingHead('Content Engine vs other social media tools: feature comparison',
     `Content Engine compared feature by feature with ${names}: who makes the post, who posts every day, and who turns comments into leads.`)}
@@ -55,19 +59,22 @@ ${landingNav('/')}
 <section><div class="wrap">
   <h2>Every feature, side by side</h2>
   <p class="kicker">Rows run in the order a post turns into money: made, posted, converted, paid for.</p>
-  ${compareMatrix()}
+  ${compareMatrix(competitorsFor(curOf(cur)), cur)}
 </div></section>
 <section><div class="wrap">
   <h2>One page per tool</h2>
   <p class="kicker">Each page shows their own words with a source link, what they do better than us, and when you should pick them instead.</p>
-  ${compareCards()}
+  ${compareCards(competitorsFor(curOf(cur)))}
 </div></section>
-${finalCta(email, 'Stop making posts. Start revenue from posts.')}
+${finalCta(email, 'Stop making posts. Start revenue from posts.', cur)}
 ${landingFooter(email)}`;
 }
 
 /** GET /compare/content-engine-vs-<slug>. Returns '' for an unknown competitor. */
-export function comparisonPage(c, { email = '' } = {}) {
+export function comparisonPage(c, { email = '', cur = 'inr' } = {}) {
+  c = competitorFor(c, curOf(cur));
+  const US = usFor(curOf(cur));
+  const ROWS = rowsFor(curOf(cur));
   if (!c) return '';
   const them = (key) => c.rows[key] || ['u', 'Not listed.', ''];
   // Rows where we answer yes and they do not: the gaps a buyer pays for.
@@ -83,7 +90,7 @@ export function comparisonPage(c, { email = '' } = {}) {
     ? `<tr class="grp"><td colspan="3">${esc(r.group)}</td></tr>`
     : `<tr><td>${esc(r.label)}</td><td class="us">${cell(...US[r.key])}</td><td>${cell(...them(r.key))}</td></tr>`)).join('');
 
-  const others = COMPETITORS.filter((o) => o.slug !== c.slug);
+  const others = competitorsFor(curOf(cur)).filter((o) => o.slug !== c.slug);
 
   return `${landingHead(`Content Engine vs ${c.name}: feature comparison`,
     `Content Engine against ${c.name}, feature by feature, from ${c.name}'s own website on ${CHECKED_ON}: what each does, what ${c.name} does better, and which one turns posts into revenue.`)}
@@ -124,7 +131,9 @@ ${landingNav('/')}
 <section><div class="wrap">
   <h2>Price</h2>
   <div class="grid g3">
-    <div class="card"><h3>Content Engine</h3><p>Always-On Brand: ₹3,099 + GST a month per funnel (brand) with 10 channels and 30 finished posts ($36 outside India, no GST). Agency ₹3,899 + GST per client ($45). AI included. 7-day trial. <a href="/#pricing">See plans</a></p></div>
+    <div class="card"><h3>Content Engine</h3><p>${curOf(cur) === 'usd'
+      ? `Always-On Brand: ${usd(PLANS.brand.unit.priceUsd)} a month per funnel (brand) with 10 channels and 30 finished posts. Agency ${usd(PLANS.agency.unit.priceUsd)} per client.`
+      : `Always-On Brand: ₹${inr(PLANS.brand.unit.priceInr)} + GST a month per funnel (brand) with 10 channels and 30 finished posts. Agency ₹${inr(PLANS.agency.unit.priceInr)} + GST per client.`} AI included. 7-day trial. <a href="/#pricing">See plans</a></p></div>
     <div class="card"><h3>${esc(c.name)}</h3><p>${esc(c.price)}</p></div>
   </div>
 </div></section>
@@ -135,7 +144,7 @@ ${landingNav('/')}
   ${compareCards(others)}
 </div></section>
 
-${finalCta(email, `Keep ${c.name} for what it does best. Let Content Engine make the revenue.`)}
+${finalCta(email, `Keep ${c.name} for what it does best. Let Content Engine make the revenue.`, cur)}
 ${landingFooter(email)}`;
 }
 

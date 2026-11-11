@@ -59,9 +59,9 @@ function marginChecks() {
 function quoteChecks() {
   const out = [];
   const cases = [
-    ['1 funnel, India, monthly', { plan: 'brand', country: 'IN' }, 365700, '₹3,657'],
-    ['3 funnels + 2 users, India, yearly', { plan: 'brand', bill: 'yr', country: 'IN', units: 3, users: 2 }, Math.round((3099 * 3 + 200) * 10 * 1.18) * 100, ''],
-    ['4 clients + 1 user, outside India, monthly', { plan: 'agency', country: 'XX', units: 4, users: 1 }, 18150, '$181.50'],
+    ['1 funnel, India, monthly', { plan: 'brand', country: 'IN' }, 377500, '₹3,775'],
+    ['3 funnels + 2 users, India, yearly', { plan: 'brand', bill: 'yr', country: 'IN', units: 3, users: 2 }, Math.round((3199 * 3 + 200) * 10 * 1.18) * 100, ''],
+    ['4 clients + 1 user, outside India, monthly', { plan: 'agency', country: 'XX', units: 4, users: 1 }, 18950, '$189.50'],
     ['Solo, India, monthly', { plan: 'solo', country: 'IN' }, Math.round(1699 * 1.18) * 100, ''],
   ];
   for (const [name, input, amount, text] of cases) {
@@ -181,11 +181,18 @@ async function httpChecks(port) {
         r.status !== 200 ? `answered ${r.status}` : miss.length ? `missing: ${miss.join(' | ')}` : bad.length ? `should not show: ${bad.join(' | ')}` : 'shows the offer'));
     } catch (err) { out.push(check(`Page: ${name}`, 'fail', errText(err))); }
   };
-  await page('home pricing', '/', ['Always-On Brand', '₹3,099<small> + GST / month per funnel', '₹3,899<small> + GST / month per client', '$36<small> / month per funnel', '₹21,780+', '$257+', 'Founding price', 'data-buy="brand"', 'data-buy="agency"'],
-    ['Starter Lite', 'data-buy="growth"', 'data-buy="solo"', String.fromCharCode(0x2014)]);
-  await page('buy page', '/buy?plan=agency&units=3', ['<option value="agency" selected>', 'value="3"', '"brand":{"inr":3099,"usd":36', 'Extra users'], ['<option value="solo"']);
+  // No currency switch: the IP picks it. ?cur= forces one for this check only.
+  const hints = ['₹', 'GST', 'India', 'rupee', 'IST', 'aria-label="Currency"', 'data-buy="solo"', String.fromCharCode(0x2014)];
+  await page('home pricing (India)', '/?cur=inr', ['Always-On Brand', '₹3,199<small> + GST / month per funnel', '₹3,999<small> + GST / month per client', '₹21,780+', 'Prices in rupees', 'Founding price', 'data-buy="brand"', 'data-buy="agency"'],
+    ['Starter Lite', 'data-buy="growth"', 'data-buy="solo"', 'aria-label="Currency"', '$37<small>', String.fromCharCode(0x2014)]);
+  await page('home pricing (outside India)', '/?cur=usd', ['$37<small> / month per funnel', '$47<small> / month per client', '$257+', '$1.50 a month each'], hints);
+  await page('buy page (India)', '/buy?plan=agency&units=3&cur=inr', ['<option value="agency" selected>', 'value="3"', '"brand":{"p":3199,"per":"funnel"}', 'Extra users', 'GSTIN'], ['<option value="solo"', '"solo"', 'name="country" id="country" onchange']);
+  await page('buy page (outside India)', '/buy?plan=brand&cur=usd', ['"brand":{"p":37,"per":"funnel"}', '+1 555'], ['₹', 'GST', 'India', '\\u20b9', '"solo"']);
   await page('buy page ignores Solo', '/buy?plan=solo', ['<option value="brand" selected>'], ['<option value="solo"']);
-  await page('compare', '/compare', ['₹3,099 + GST'], ['Starter Lite ₹999']);
+  await page('compare (India)', '/compare?cur=inr', ['₹3,199 + GST'], ['Starter Lite ₹999']);
+  await page('compare (outside India)', '/compare?cur=usd', ['$37 a funnel'], hints);
+  await page('vs SocialPilot (outside India)', '/compare/content-engine-vs-socialpilot?cur=usd', ['$47 per client', 'Essentials'], hints);
+  await page('refund (outside India)', '/refund?cur=usd', ['US dollars'], ['GST', 'India']);
 
   const open = await billing.ready().catch(() => false);
   if (open) {
