@@ -68,21 +68,52 @@ export function wrapText(text, maxChars = 18, maxLines = 3) {
 
 const xmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
 
+// Advance widths of Noto Sans Bold in em (1000 units), rounded up a little. One
+// flat average (it was 0.62) let wide capitals run off the picture: "DOWNLOADING"
+// is about 0.72 em a letter and W alone about 1.0.
+const GLYPH_EM = {
+  ' ': 0.26, A: 0.70, B: 0.70, C: 0.65, D: 0.74, E: 0.58, F: 0.56, G: 0.74, H: 0.77, I: 0.38, J: 0.34,
+  K: 0.69, L: 0.57, M: 0.93, N: 0.80, O: 0.79, P: 0.66, Q: 0.79, R: 0.69, S: 0.59, T: 0.61, U: 0.76,
+  V: 0.68, W: 1.02, X: 0.69, Y: 0.65, Z: 0.60,
+  a: 0.61, b: 0.65, c: 0.52, d: 0.65, e: 0.61, f: 0.39, g: 0.58, h: 0.67, i: 0.32, j: 0.32, k: 0.63,
+  l: 0.32, m: 1.00, n: 0.67, o: 0.64, p: 0.65, q: 0.65, r: 0.46, s: 0.51, t: 0.44, u: 0.67, v: 0.59,
+  w: 0.87, x: 0.61, y: 0.59, z: 0.50,
+  '.': 0.31, ',': 0.31, ':': 0.31, ';': 0.31, '!': 0.32, '?': 0.49, "'": 0.23, '"': 0.43, '-': 0.34,
+  '&': 0.77, '%': 0.89, '$': 0.58, '+': 0.58, '/': 0.40, '(': 0.35, ')': 0.35, '…': 0.85,
+};
+const DIGIT_EM = 0.58;
+const OTHER_EM = 0.80; // Devanagari and anything not in the table: on the wide side
+const OUTLINE_EM = 0.06; // the black outline drawn round every letter
+
+/** The width of a line of text in em, letter by letter (Noto Sans Bold), plus letter spacing. */
+export function textWidthEm(s, { spacing = 0 } = {}) {
+  let w = 0;
+  let n = 0;
+  for (const ch of String(s || '')) {
+    w += GLYPH_EM[ch] ?? (/[0-9]/.test(ch) ? DIGIT_EM : OTHER_EM);
+    n += 1;
+  }
+  return w + spacing * Math.max(0, n - 1);
+}
+
 /**
  * Wrap `text` into the fewest lines that give the biggest font while every
  * word fits: never clipped. `maxSize` caps the font, `boxW` x `boxH` is the
- * area the block may fill, `glyph` the average glyph width in em.
+ * area the block may fill. Each line is measured letter by letter (textWidthEm),
+ * with room for the outline; `glyph` scales that (1 = Noto Sans Bold).
  */
-export function fitText(text, { boxW, boxH, maxSize, glyph = 0.62, lineH = 1.15 }) {
+export function fitText(text, { boxW, boxH, maxSize, glyph = 1, lineH = 1.15 }) {
   const words = String(text || '').trim().split(/\s+/).filter(Boolean);
   if (!words.length) return { lines: [], size: 0 };
+  // Older callers passed an average letter width (0.5 to 0.8): treat any value under 0.9 as 1.
+  const k = glyph >= 0.9 ? glyph : 1;
   const longestWord = Math.max(...words.map((x) => x.length));
   const total = words.join(' ').length;
   let best = null;
   for (let chars = longestWord; chars <= Math.max(longestWord, total); chars += 1) {
     const lines = wrapText(text, chars, 99);
-    const longest = Math.max(...lines.map((l) => l.length));
-    const size = Math.floor(Math.min(maxSize, boxW / (longest * glyph), boxH / (lines.length * lineH)));
+    const widest = Math.max(...lines.map((l) => textWidthEm(l) * k)) + OUTLINE_EM;
+    const size = Math.floor(Math.min(maxSize, boxW / widest, boxH / (lines.length * lineH)));
     if (!best || size >= best.size) best = { lines, size }; // a tie keeps the wider wrap (fewer lines)
   }
   return best;
@@ -118,7 +149,7 @@ export function thumbArt({ w, h, layout = 'top' }) {
  * outline, sized to fit and never cut, and the sub-head under it in the accent
  * colour.
  */
-export function thumbSvg({ w, h, text, sub = '', layout = 'top', accent = '#FFFFFF', tag = '' }) {
+export function thumbSvg({ w, h, text, sub = '', layout = 'top', accent = '#FFFFFF', tag = '', shrink = 1 }) {
   const box = thumbBox({ w, h, layout });
   const stack = layout === 'stack';
   const maxSize = stack ? w * 0.085 : h * 0.11;
@@ -127,7 +158,7 @@ export function thumbSvg({ w, h, text, sub = '', layout = 'top', accent = '#FFFF
     ? '<stop offset="0" stop-color="#000" stop-opacity=".3"/><stop offset="1" stop-color="#000" stop-opacity=".3"/>'
     : '<stop offset="0" stop-color="#000" stop-opacity=".62"/><stop offset=".65" stop-color="#000" stop-opacity=".45"/><stop offset="1" stop-color="#000" stop-opacity="0"/>';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">${stops}</linearGradient></defs><rect width="${w}" height="${hazeH}" fill="url(#g)"/>
-${textBlock({ box, text, sub, tag, accent, maxSize, align: 'center', color: 'light' })}</svg>`;
+${textBlock({ box, text, sub, tag, accent, maxSize, align: 'center', color: 'light', shrink })}</svg>`;
 }
 
 /**
@@ -151,19 +182,22 @@ const SERIF = 'font-family="Noto Serif, DejaVu Serif, serif"';
  * sub-head under it, all fitted so no word is cut, aligned left, centre or
  * right, and centred in the box's height.
  */
-export function textBlock({ box, text, sub = '', tag = '', accent = '#FFC400', maxSize, align = 'center', color = 'light' }) {
+export function textBlock({ box, text, sub = '', tag = '', accent = '#FFC400', maxSize, align = 'center', color = 'light', shrink = 1 }) {
   const { x0, y0, x1, y1 } = box;
-  const boxW = x1 - x0;
-  const boxH = y1 - y0;
+  // shrink < 1: the drawn text was measured wider than its box, so fit into less.
+  const k = Math.max(0.3, Math.min(1, Number(shrink) || 1));
+  const boxW = (x1 - x0) * k;
+  const boxH = (y1 - y0) * k;
   const brow = eyebrowClean(tag).toUpperCase();
   const browShare = brow ? 0.16 : 0;
-  const head = fitText(text, { boxW, boxH: boxH * ((sub ? 0.64 : 1) - browShare), maxSize, glyph: 0.62 });
-  const size = head.size || Math.round(maxSize * 0.5);
+  const head = fitText(text, { boxW, boxH: boxH * ((sub ? 0.64 : 1) - browShare), maxSize: maxSize * k });
+  const size = head.size || Math.round(maxSize * 0.5 * k);
   const lh = Math.round(size * 1.15);
-  const subFit = fitText(sub, { boxW, boxH: boxH * 0.26, maxSize: size * 0.6, glyph: 0.56, lineH: 1.25 });
+  const subFit = fitText(sub, { boxW, boxH: boxH * 0.26, maxSize: size * 0.6, lineH: 1.25 });
   const subLh = Math.round(subFit.size * 1.25);
   const subGap = subFit.lines.length ? Math.round(size * 0.2) : 0;
-  const browSize = brow ? Math.max(10, Math.floor(Math.min(size * 0.42, boxW / (brow.length * 0.72)))) : 0;
+  // The eyebrow is italic serif capitals with 0.08 em letter spacing: measured the same way.
+  const browSize = brow ? Math.max(10, Math.floor(Math.min(size * 0.42, boxW / (textWidthEm(brow, { spacing: 0.08 }) + OUTLINE_EM)))) : 0;
   const browGap = brow ? Math.round(browSize * 0.55) : 0;
   const block = browSize + browGap + lh * head.lines.length + subGap + subLh * subFit.lines.length;
   const top = y0 + Math.max(0, (boxH - block) / 2);
@@ -240,10 +274,21 @@ function thumbTagSvg({ w, h, layout, tag }) {
  * audience eyebrow, headline and sub-head stacked inside it, aligned as asked.
  * No haze: the box is already a calm part of the picture.
  */
-export function thumbSvgPlaced({ w, h, text, sub = '', tag = '', accent = '#FFFFFF', place }) {
+export function thumbSvgPlaced({ w, h, text, sub = '', tag = '', accent = '#FFFFFF', place, shrink = 1 }) {
   const { align = 'center', color = 'light' } = place;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
-${textBlock({ box: place, text, sub, tag, accent, maxSize: Math.min(w, h) * 0.13, align, color })}</svg>`;
+${textBlock({ box: place, text, sub, tag, accent, maxSize: Math.min(w, h) * 0.13, align, color, shrink })}</svg>`;
+}
+
+/**
+ * The text alone (no haze), for measuring where the letters really land, and the
+ * box they must stay in: the placed box, else the fixed layout's.
+ */
+export function textLayer({ w, h, text, sub = '', tag = '', accent = '#FFFFFF', place = null, layout = 'top', shrink = 1 }) {
+  if (place) return { box: place, svg: thumbSvgPlaced({ w, h, text, sub, tag, accent, place, shrink }) };
+  const box = thumbBox({ w, h, layout });
+  const maxSize = layout === 'stack' ? w * 0.085 : h * 0.11;
+  return { box, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">\n${textBlock({ box, text, sub, tag, accent, maxSize, align: 'center', color: 'light', shrink })}</svg>` };
 }
 
 /** A pill box from thumbTagBox, drawn: solid accent, black bold capitals. */
@@ -293,4 +338,4 @@ export function thumbMedia(videoUrl, thumbUrl) {
   return thumbUrl ? { url: videoUrl, thumbnail_url: thumbUrl } : { url: videoUrl, thumbnail_timestamp_ms: 0 };
 }
 
-export default { THUMB_ART_SIZE, THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, thumbBox, thumbArt, thumbSvg, thumbTagClean, thumbTagFor, thumbTagBox, DEFAULT_THUMB_RULES, THUMB_LAYOUT_ONLY, IMAGE_PROMPT_MAX, thumbImagePrompt, thumbMedia };
+export default { THUMB_ART_SIZE, THUMB_SIZES, PLATFORM_SIZE, THUMB_SPECS, wrapText, fitText, textWidthEm, textLayer, thumbBox, thumbArt, thumbSvg, thumbTagClean, thumbTagFor, thumbTagBox, DEFAULT_THUMB_RULES, THUMB_LAYOUT_ONLY, IMAGE_PROMPT_MAX, thumbImagePrompt, thumbMedia };

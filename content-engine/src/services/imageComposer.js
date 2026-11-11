@@ -11,7 +11,8 @@
  * Dependencies: sharp, wrap util, utils/{thumbSpec,stepDownSpec}.
  */
 import sharp from 'sharp';
-import { thumbSvg, THUMB_ACCENT } from '../utils/thumbSpec.js';
+import { THUMB_ACCENT } from '../utils/thumbSpec.js';
+import { fittedOverlay } from './textPlaceService.js';
 import { stepDownSize } from '../utils/stepDownSpec.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -95,7 +96,7 @@ export async function factoryCaptionBar(imageBuffer, lines, fontSize) {
  */
 export async function headlineImage(imageBuffer, { text, sub = '' }) {
   const { w, h } = stepDownSize(await sharp(imageBuffer).metadata());
-  const svg = thumbSvg({ w, h, text, sub, layout: 'top', accent: THUMB_ACCENT });
+  const svg = await fittedOverlay({ w, h, text, sub, layout: 'top', accent: THUMB_ACCENT });
   return sharp(imageBuffer)
     .resize(w, h, { fit: 'cover' })
     .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])

@@ -52,8 +52,8 @@ import { copySystemPrompt, copyUserPrompt, COPY_SCHEMA, normalizeCopy, keepHidde
 import * as imageShort from './imageShortService.js';
 import { shortTitle } from '../utils/shortSpec.js';
 import { stepDownOf } from '../utils/stepDownSpec.js';
-import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbSvg, thumbSvgPlaced, thumbArt, thumbImagePrompt, eyebrowClean, IMAGE_PROMPT_MAX } from '../utils/thumbSpec.js';
-import { placeText } from './textPlaceService.js';
+import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbArt, thumbImagePrompt, eyebrowClean, IMAGE_PROMPT_MAX } from '../utils/thumbSpec.js';
+import { placeText, fittedOverlay } from './textPlaceService.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
 import sharp from 'sharp';
@@ -749,9 +749,8 @@ async function composeBase(base, spec) {
 
 /** The text over a size's picture: in the box Claude picked, else the fixed layout. */
 async function composeThumb(picture, spec, { text, sub = '', tag = '', place = null }) {
-  const svg = place
-    ? thumbSvgPlaced({ ...spec, accent: THUMB_ACCENT, text, sub, tag, place })
-    : thumbSvg({ ...spec, accent: THUMB_ACCENT, text, sub, tag });
+  // Measured with the real fonts and shrunk until every letter stays in its box.
+  const svg = await fittedOverlay({ w: spec.w, h: spec.h, layout: spec.layout || 'top', accent: THUMB_ACCENT, text, sub, tag, place });
   return sharp(picture).composite([{ input: Buffer.from(svg) }]).jpeg({ quality: 90 }).toBuffer();
 }
 
