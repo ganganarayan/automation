@@ -28,6 +28,7 @@ import * as planService from './planService.js';
 import * as tenantRepo from '../repositories/tenantRepository.js';
 import * as usage from '../repositories/usageRepository.js';
 import * as phases from './qaPhases.js';
+import * as qaAgency from './qaAgency.js';
 import { PLAN_IDS } from '../utils/planSpec.js';
 import { costClaude, costText, costImages } from '../utils/pricing.js';
 import { probeMp4DurationSeconds } from '../utils/videoSpec.js';
@@ -216,6 +217,7 @@ export async function run(tenantId, { paid = false } = {}) {
   checks.push(...(await phases.billingChecks(id, mine, plan)));
   checks.push(...(await phases.sharedChecks(id, mine, owner)));
   checks.push(...(await phases.httpChecks(id, settings.port)));
+  checks.push(...(await qaAgency.agencyChecks(id).catch((err) => [{ group: 'Phase 6 agency', name: 'Agency clients', status: 'fail', detail: String(err.message || err).slice(0, 240) }])));
   checks.push(...(await keyPings(mine)));
   let spent = [];
   if (paid) {

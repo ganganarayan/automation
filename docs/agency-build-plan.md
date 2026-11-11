@@ -169,7 +169,7 @@ Roles in tenant_members:
   days (the owner renews it on Tenants); channels on the agency's own Post for Me
   key must be connected again. Delete a client is not built: Archive covers it.
 
-## QA (phase 6 of the QA check)
+## QA (phase 6 of the QA check) (🟢 on staging 11-11-2026)
 
 Add to the Tenants panel QA, using qa-agency with two children (qa-agency-a,
 qa-agency-b) and a second agency (qa-agency-2):
@@ -182,6 +182,19 @@ qa-agency-b) and a second agency (qa-agency-2):
 - An expired agency makes its clients look-only.
 - An 11th client is refused; posts are counted across all clients.
 - A client page never shows a key value or the plan page.
+
+Built: services/qaAgency.js, run by the QA check after phase 5 as group
+"Phase 6 agency". It runs only on a top-level Agency QA workspace (qa-agency);
+anywhere else it shows one skip row. Fixtures made once, nothing posted or
+paid: qa-agency-c1 and qa-agency-c2, qa-agency2 with qa-agency2-c1, and an
+expired qa-agency-exp with qa-agency-exp-c1; c2 holds one switched-off funnel.
+Checks: agency admin opens its client, another agency's client refused, a client
+cannot open or ask for its sibling, the sibling's funnel by id is "not found",
+client keys never the owner's, client Post for Me scoped to its own accounts,
+one plan with posts counted across the pool, an expired agency's client is
+look-only and out of the daily jobs, client 11 refused, the role rules and the
+Add client template. The session, header and query paths are checked through
+the same decide() rule the guard uses, not through real logins.
 
 ## Order and size
 
