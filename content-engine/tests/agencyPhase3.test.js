@@ -49,7 +49,10 @@ vi.mock('../src/services/planService.js', () => ({
 vi.mock('../src/core/tenantSettings.js', () => ({ invalidate: () => {} }));
 vi.mock('../src/services/accessService.js', () => ({ invalidateWorkspaces: () => {}, keyOk: async () => true, currentSession: async () => null }));
 vi.mock('../src/services/cloudflareWakeService.js', () => ({ syncTimes: async () => ({ ok: true }) }));
-vi.mock('../src/utils/passwordSpec.js', () => ({ hashPassword: async (p) => `hash:${p}` }));
+vi.mock('../src/utils/passwordSpec.js', () => ({ hashPassword: async (p) => `hash:${p}`, hashToken: (t) => `sha:${t}` }));
+const invites = [];
+vi.mock('../src/services/inviteService.js', () => ({ sendInvite: async (a) => { invites.push(a); return { sent: true }; } }));
+vi.mock('../src/settings/index.js', () => ({ settings: { app: { publicBaseUrl: 'https://app.test/' } } }));
 vi.mock('../src/core/logger.js', () => ({ childLogger: () => ({ info() {}, warn() {}, error() {} }) }));
 vi.mock('../src/utils/time.js', async () => {
   const { DateTime } = await import('luxon');
@@ -127,6 +130,8 @@ describe('Add client', () => {
     expect(made.name).toBe('Reels');
     expect(funnelCfg[made.id]).toEqual({ publish_time: '09:00', thumb_tag: 'on' });
     expect(out.copied).toEqual({ settings: 2, funnel: 'Reels' });
+    expect(out.emailed).toBe(true);
+    expect(invites.at(-1)).toMatchObject({ tenantId: 'acme', email: 'owner@acme.com', access: 'owner' });
   });
   it('never copies another agency\'s funnel', async () => {
     const out = await agency.addClient('ag', { id: 'acme', name: 'Acme', owner_email: 'o@acme.com', template: '9' });
@@ -162,6 +167,20 @@ describe('Archive and Bring back', () => {
     delete tenants.c3;
     await agency.setArchived('ag', 'c1', false);
     expect(tenants.c1.status).toBe('active');
+  });
+});
+
+describe('connect link', () => {
+  it('stores only the hash, for its own client, valid 7 days', async () => {
+    tenants.c1 = { id: 'c1', parent_id: 'ag', status: 'active' };
+    const out = await agency.connectLink('ag', 'c1');
+    const token = out.url.split('/connect/')[1];
+    expect(out.url.startsWith('https://app.test/api/v1/connect/')).toBe(true);
+    expect(token.length).toBeGreaterThan(20);
+    const [hash, iso] = config.c1.connect_link.split('|');
+    expect(hash).toBe(`sha:${token}`);
+    expect(new Date(iso) - Date.now()).toBeGreaterThan(6.9 * 86400000);
+    await expect(agency.connectLink('ag', 'x1')).rejects.toThrow('not yours');
   });
 });
 

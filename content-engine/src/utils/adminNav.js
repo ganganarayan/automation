@@ -15,6 +15,7 @@
  * in and the one Sign out button.
  */
 import { CONFIG_MANIFEST } from '../services/configManifest.js';
+import { workspaceRole, ROLE_LABEL } from './workspaceSpec.js';
 
 const SETTINGS_PATH = '/api/v1/admin/settings';
 export const HOME_PATH = '/api/v1/admin/today';
@@ -46,10 +47,11 @@ export function workItemFor(current = '') {
  * The settings panels shown in the menu. tracking-bridge is still a panel on
  * the settings page, reached from inside Settings, not a menu entry.
  */
-export function setupItems({ superAdmin = false } = {}) {
+export function setupItems({ superAdmin = false, role = 'admin' } = {}) {
   return [
     { id: 'funnels', label: 'Funnels' },
-    { id: 'api-keys', label: CONFIG_MANIFEST['api-keys'].label },
+    // Keys are an admin's: staff and a client's own people never see them.
+    ...(role === 'admin' ? [{ id: 'api-keys', label: CONFIG_MANIFEST['api-keys'].label }] : []),
     { id: 'content-engine', label: CONFIG_MANIFEST['content-engine'].label },
     { id: 'users', label: 'Users' },
     ...(superAdmin ? [{ id: 'tenants', label: 'Tenants' }] : []),
@@ -83,14 +85,16 @@ export function navHtml({ current = '', key = '', tabs = false, superAdmin = fal
     .map((it) => `<a class="nv${on === it.id ? ' on' : ''}" href="${esc(withKey(it.href, key))}"><span class="nvi">${it.icon}</span>${esc(it.label)}</a>`)
     .join('');
 
-  const setup = setupItems({ superAdmin: isSuper })
+  const setup = setupItems({ superAdmin: isSuper, role: isSuper ? 'admin' : workspaceRole(session, session && session.tenantId) })
     .map((it) => (tabs
       ? `<button type="button" class="nv nav" data-target="${esc(it.id)}" onclick="show('${esc(it.id)}')"><span class="nvi"></span>${esc(it.label)}</button>`
       : `<a class="nv" href="${esc(withKey(SETTINGS_PATH, key))}#${esc(it.id)}"><span class="nvi"></span>${esc(it.label)}</a>`))
     .join('');
 
+  const here = session && Array.isArray(session.workspaces) && session.role !== 'super_admin' ? workspaceRole(session, session.tenantId) : '';
+  const roleText = here && here !== 'admin' ? ROLE_LABEL[here] : (session && session.role ? roleLabel(session.role) : '');
   const who = session && session.email
-    ? `<div class="nvwho">${esc(session.email)}${session.role ? `<span>${esc(roleLabel(session.role))}</span>` : ''}</div>`
+    ? `<div class="nvwho">${esc(session.email)}${roleText ? `<span>${esc(roleText)}</span>` : ''}</div>`
     : '';
 
   return `<div class="brand">⚙️ automation</div>${switcherHtml(session)}

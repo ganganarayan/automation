@@ -57,10 +57,10 @@ describe('which workspaces a person may work in', () => {
     { id: 'c1', name: 'Client One', parent_id: 'ag', via: 'member' },
     { id: 'c2', name: 'Alpha', parent_id: 'ag', via: 'agency' },
   ];
-  it('home first, each workspace once, a direct membership wins', () => {
+  it('home first, each workspace once, reaching it as the agency admin wins', () => {
     const list = ws.mergeWorkspaces(rows, 'ag');
     expect(list.map((w) => w.id)).toEqual(['ag', 'c2', 'c1']);
-    expect(list.find((w) => w.id === 'c1').via).toBe('member');
+    expect(list.find((w) => w.id === 'c1').via).toBe('agency');
   });
   it('the switcher pick holds only while it may be entered', () => {
     const list = ws.mergeWorkspaces(rows, 'ag');

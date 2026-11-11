@@ -38,8 +38,17 @@ export async function set(tenantId, key, value) {
 }
 
 /** Delete a config override (reverts the key to its env default). */
+/** The workspace whose connect link has this token hash: { tenant_id, value } or null. */
+export async function findConnectLink(hash) {
+  const { rows } = await query(
+    "SELECT tenant_id, value FROM tenant_config WHERE key = 'connect_link' AND split_part(value, '|', 1) = $1 LIMIT 1",
+    [String(hash || '')],
+  );
+  return rows[0] || null;
+}
+
 export async function del(tenantId, key) {
   await query('DELETE FROM tenant_config WHERE tenant_id = $1 AND key = $2', [tenantId, key]);
 }
 
-export default { getAll, get, set, del };
+export default { findConnectLink, getAll, get, set, del };

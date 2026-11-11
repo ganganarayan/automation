@@ -17,6 +17,7 @@
  *         POST /api/v1/admin/clients/add       { id, name, owner_email, daily_time, template }
  *         POST /api/v1/admin/clients/archive   { client, archived }
  *         POST /api/v1/admin/clients/team      { email, role, clients[] }
+ *         POST /api/v1/admin/clients/connect-link { client }: a 7-day link to connect channels
  */
 import * as agency from '../services/agencyService.js';
 import { keyOk, currentSession } from '../services/accessService.js';
@@ -70,6 +71,7 @@ export function register(ctx) {
 
   router.post('/admin/clients/add', action((agencyId, b) => agency.addClient(agencyId, b)));
   router.post('/admin/clients/archive', action((agencyId, b) => agency.setArchived(agencyId, String(b.client || ''), b.archived === true || b.archived === 'true')));
+  router.post('/admin/clients/connect-link', action((agencyId, b) => agency.connectLink(agencyId, String(b.client || ''))));
   router.post('/admin/clients/team', action((agencyId, b, session) => agency.setTeam(agencyId, session ? session.email : '', b)));
 
   log.info('agency clients page registered');
@@ -109,6 +111,7 @@ export function clientsPage(data, session = null) {
       <td>${esc(n.cost)}</td>
       <td class="acts">
         <form method="post" action="/api/v1/admin/workspace" style="display:inline;margin:0"><input type="hidden" name="workspace" value="${esc(c.id)}"><button class="act primary" type="submit"${archived ? ' title="Archived: look only"' : ''}>Open</button></form>
+        ${archived ? '' : `<button class="act" type="button" onclick="connectLink('${esc(c.id)}')" title="A link the client opens to connect its own channels, no password shared">Connect link</button>`}
         <button class="act" type="button" onclick="archive('${esc(c.id)}', ${archived ? 'false' : 'true'})">${archived ? 'Bring back' : 'Archive'}</button>
       </td>
     </tr>`;
@@ -170,8 +173,15 @@ export function clientsPage(data, session = null) {
         try {
           const j = await post('${CLIENTS_PATH}/add', { name: v('nc-name'), id: v('nc-id'), owner_email: v('nc-email'), daily_time: v('nc-time'), template: v('nc-template') });
           st.style.color = '#5bd08a';
-          st.textContent = '🟢 Added ' + j.tenant + '. Sign-in: ' + j.email + ', one-time password: ' + j.tempPassword + '. Copy it now: it is not shown again.' + (j.copied && j.copied.funnel ? ' Funnel copied: ' + j.copied.funnel + '.' : '');
+          st.textContent = '🟢 Added ' + j.tenant + '. ' + (j.emailed ? 'An invite email went to ' + j.email + '. ' : 'No invite email went out (' + (j.emailError || 'mail is not set up') + '): send it yourself. ') + 'Sign-in: ' + j.email + ', one-time password: ' + j.tempPassword + '. It is not shown again.' + (j.copied && j.copied.funnel ? ' Funnel copied: ' + j.copied.funnel + '.' : '');
         } catch (e) { st.style.color = '#ff9a9a'; st.textContent = '🔴 ' + e.message; }
+      }
+      async function connectLink(client) {
+        try {
+          const j = await post('${CLIENTS_PATH}/connect-link', { client });
+          try { await navigator.clipboard.writeText(j.url); } catch (e) { /* show it instead */ }
+          prompt('Send this link to ' + client + '. It works until ' + j.expires + ' and replaces any older link. (Copied.)', j.url);
+        } catch (e) { alert(e.message); }
       }
       async function archive(client, archived) {
         if (archived && !confirm('Archive ' + client + '? It stops posting and can only be looked at. You can bring it back later.')) return;

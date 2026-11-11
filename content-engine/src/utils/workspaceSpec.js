@@ -14,15 +14,23 @@
  *               - agencyAdminOf(workspaces, home): the agency a person runs, or null
  *               - templateTenantKey / templateFunnelKey: what Add client copies
  *               - teamRole / teamProblem: agency staff
+ *               - workspaceRole(session, tenantId): admin | staff | owner | viewer
+ *               - roleGate({ role, method, path, body }): '' or why it is refused
+ *               - accessChoices / accessRole: what Users may add in a workspace
  * Dependencies: none.
+ *
+ * Roles (docs/agency-build-plan.md, phase 4): admin does everything; staff
+ * (an agency's, in its own or an assigned client's workspace) and owner (a
+ * client's own people) work but never change keys, plans, QA or the waker;
+ * viewer only looks.
  */
 
 export const AGENCY_PLAN = 'agency';
 
 /**
  * Rows from membershipRepository.workspacesFor ({ id, name, parent_id, via })
- * as one list: the home workspace first, then by name, each id once (a direct
- * membership wins over reaching it through the agency).
+ * as one list: the home workspace first, then by name, each id once (reaching
+ * it as the agency's admin wins over a direct membership: it carries more rights).
  */
 export function mergeWorkspaces(rows = [], home = '') {
   const byId = new Map();
@@ -30,7 +38,7 @@ export function mergeWorkspaces(rows = [], home = '') {
     const id = String((r && r.id) || '').trim();
     if (!id) continue;
     const prev = byId.get(id);
-    if (!prev || (prev.via !== 'member' && r.via === 'member')) {
+    if (!prev || (prev.via !== 'agency' && r.via === 'agency')) {
       byId.set(id, {
         id,
         name: String(r.name || id),
@@ -140,4 +148,66 @@ export function teamProblem({ team = [], email = '', role = 'admin', me = '' } =
   return '';
 }
 
-export default { agencyAdminOf, templateTenantKey, templateFunnelKey, TEAM_ROLES, teamRole, teamProblem, AGENCY_PLAN, mergeWorkspaces, mayEnter, pickWorkspace, clientProblem, planChangeProblem, combineLive };
+export const ROLE_LABEL = { admin: 'admin', staff: 'agency staff', owner: 'client owner', viewer: 'client viewer' };
+
+/**
+ * What the signed-in person is in the workspace they work in. No session (the
+ * machine key, public pages) is left to each route. A workspace missing from
+ * the list (it could not be read) is look-only: fail closed.
+ */
+export function workspaceRole(session = null, tenantId = '') {
+  if (!session) return 'admin';
+  if (session.role === 'super_admin') return 'admin';
+  // A session built without a workspace list (older callers, the QA check) keeps its rights.
+  if (!Array.isArray(session.workspaces)) return 'admin';
+  const w = session.workspaces.find((x) => x && x.id === String(tenantId || ''));
+  if (!w) return 'viewer';
+  if (w.via === 'agency') return 'admin';
+  if (w.role === 'staff') return 'staff';
+  if (w.role === 'viewer') return 'viewer';
+  return w.parentId ? 'owner' : 'admin';
+}
+
+const OPEN = /^\/admin\/(login|logout|password|signout|reset|workspace)(\/|$)/;
+const ADMIN_ONLY = /^\/admin\/(tenants|qa|users\/(role|plan)|credit|cloudflare-wake|wake-schedule|router\/rerun|clients)(\/|$)/;
+
+/** '' when `role` may make this request, else the reason a person reads. */
+export function roleGate({ role = 'admin', method = 'GET', path = '', body = null } = {}) {
+  if (role === 'admin') return '';
+  const p = String(path || '').replace(/^\/api\/v1/, '');
+  if (!p.startsWith('/admin/')) return '';
+  const m = String(method || 'GET').toUpperCase();
+  if (m === 'GET' || m === 'HEAD' || OPEN.test(p)) return '';
+  if (role === 'viewer') return 'You can look around this workspace but not change anything. Ask its owner.';
+  if (ADMIN_ONLY.test(p)) return 'Only an admin can do that.';
+  const app = body && typeof body === 'object' ? String(body.app || '') : '';
+  if (p === '/admin/settings/save' && app === 'api-keys') return 'Only an admin changes keys.';
+  if (p === '/admin/users/add' && role === 'staff') return 'Ask an agency admin to add people.';
+  return '';
+}
+
+/**
+ * What a person may give someone they add in Users: [] = the old plain user
+ * form (a standalone workspace). kind: 'agency' | 'client' | 'standalone'.
+ */
+export function accessChoices(kind = 'standalone', role = 'admin') {
+  if (kind === 'client') return role === 'admin' ? ['owner', 'viewer'] : role === 'owner' ? ['viewer'] : [];
+  if (kind === 'agency') return role === 'admin' ? ['admin', 'staff'] : [];
+  return [];
+}
+
+/** The tenant_role to store for a picked access ('' = not allowed). */
+export function accessRole(kind, role, picked) {
+  const choices = accessChoices(kind, role);
+  if (!choices.length) return kind === 'standalone' ? 'admin' : '';
+  return choices.includes(String(picked || '')) ? String(picked) : '';
+}
+
+/** A workspace row's kind. */
+export function kindOf(row) {
+  if (!row) return 'standalone';
+  if (row.parent_id) return 'client';
+  return String(row.plan || '') === AGENCY_PLAN ? 'agency' : 'standalone';
+}
+
+export default { ROLE_LABEL, workspaceRole, roleGate, accessChoices, accessRole, kindOf, agencyAdminOf, templateTenantKey, templateFunnelKey, TEAM_ROLES, teamRole, teamProblem, AGENCY_PLAN, mergeWorkspaces, mayEnter, pickWorkspace, clientProblem, planChangeProblem, combineLive };

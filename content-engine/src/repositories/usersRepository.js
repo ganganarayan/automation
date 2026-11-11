@@ -21,7 +21,7 @@ export const ROLES = ['user', 'admin', 'super_admin'];
  */
 export async function list({ tenantId = null } = {}) {
   const { rows } = await query(
-    `SELECT email, role, tenant_id, plan_ends_at, last_login_at, created_at
+    `SELECT email, role, tenant_id, tenant_role, plan_ends_at, last_login_at, created_at
        FROM users
       WHERE ($1::text IS NULL OR tenant_id = $1)
       ORDER BY (role = 'super_admin') DESC, created_at DESC`,
@@ -52,14 +52,14 @@ export async function ensure({ email, role = 'user' }) {
  * tenant who must choose a new password at first sign-in. Refuses an email
  * that already has an account.
  */
-export async function createForTenant({ email, tenantId, role = 'admin', passwordHash }) {
+export async function createForTenant({ email, tenantId, role = 'admin', passwordHash, tenantRole = 'admin' }) {
   const normalized = String(email).trim().toLowerCase();
   const { rows } = await query(
-    `INSERT INTO users (email, role, tenant_id, password_hash, must_change_password)
-     VALUES ($1, $2, $3, $4, true)
+    `INSERT INTO users (email, role, tenant_id, password_hash, must_change_password, tenant_role)
+     VALUES ($1, $2, $3, $4, true, $5)
      ON CONFLICT (email) DO NOTHING
-     RETURNING email, role, tenant_id`,
-    [normalized, role, tenantId, passwordHash],
+     RETURNING email, role, tenant_id, tenant_role`,
+    [normalized, role, tenantId, passwordHash, tenantRole || 'admin'],
   );
   if (!rows[0]) throw new Error('that email already has an account');
   return rows[0];

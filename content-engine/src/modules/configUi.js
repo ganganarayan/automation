@@ -60,7 +60,11 @@ import { settings } from '../settings/index.js';
 import { listReadyVideos } from '../services/readyPostService.js';
 import { parseDriveFolderId } from '../utils/readyPostSpec.js';
 import { keyOk, superOk, gateState, currentSession, invalidateWorkspaces } from '../services/accessService.js';
-import { AGENCY_PLAN, planChangeProblem } from '../utils/workspaceSpec.js';
+import { AGENCY_PLAN, planChangeProblem, kindOf, accessChoices, accessRole, ROLE_LABEL } from '../utils/workspaceSpec.js';
+import { sendInvite } from '../services/inviteService.js';
+
+// How Users names each access in the Add a user picker.
+const ACCESS_TEXT = { admin: 'Admin: every client', staff: 'Staff: ticked clients only', owner: 'Client owner: runs this workspace', viewer: 'Client viewer: looks only' };
 import * as wakeSchedule from '../services/wakeScheduleService.js';
 import * as cloudflareWake from '../services/cloudflareWakeService.js';
 import { DAILY_KEY, dailyTimeOf } from '../utils/cloudflareWake.js';
@@ -110,7 +114,7 @@ export function register(ctx) {
       }
       const aiCosts = superAdmin ? await usageRepo.monthCosts({ months: 3 }).catch(() => null) : null;
       res.type('html').send(
-        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', session, key: '', saved: req.query.saved, superAdmin, tenantList, postUsage, ownKeyIds, aiCosts, keyOwners, keyHistories }),
+        page({ tenantId, configMap, userList, funnelList, funnelConfigs, me: session ? session.email : '', session, key: '', kind: kindOf(await tenantRepo.findById(tenantId).catch(() => null)), myRole: superAdmin ? 'admin' : (req.workspaceRole || 'admin'), saved: req.query.saved, superAdmin, tenantList, postUsage, ownKeyIds, aiCosts, keyOwners, keyHistories }),
       );
     } catch (err) {
       next(err);
@@ -474,14 +478,21 @@ export function register(ctx) {
         tenantId = asked;
       }
       const email = String(req.body?.email || '').trim().toLowerCase();
-      const role = req.body?.role === 'admin' ? 'admin' : 'user';
+      // An agency or client workspace adds people with an access (admin, staff,
+      // owner, viewer); they all sign in, so their user role is admin.
+      const kind = kindOf(await tenantRepo.findById(tenantId));
+      const access = accessRole(kind, isSuper ? 'admin' : (req.workspaceRole || 'admin'), req.body?.access);
+      if (!access) return res.status(403).json({ ok: false, error: 'You cannot give that access here.' });
+      const role = kind !== 'standalone' ? 'admin' : (req.body?.role === 'admin' ? 'admin' : 'user');
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('That email is not valid');
       if (await users.findByEmail(email)) throw new Error('That email already has an account');
       const why = await planService.limitReason(tenantId, 'users', { used: await users.countForTenant(tenantId) });
       if (why) return res.status(402).json({ ok: false, error: why });
       const tempPassword = randomBytes(9).toString('base64url');
-      await users.createForTenant({ email, tenantId, role, passwordHash: await hashPassword(tempPassword) });
-      res.json({ ok: true, email, role, tenant: tenantId, tempPassword });
+      await users.createForTenant({ email, tenantId, role, passwordHash: await hashPassword(tempPassword), tenantRole: access });
+      invalidateWorkspaces(email);
+      const invite = kind !== 'standalone' ? await sendInvite({ tenantId, email, tempPassword, access }) : { sent: false, error: '' };
+      res.json({ ok: true, email, role, access: kind !== 'standalone' ? (ROLE_LABEL[access] || access) : '', tenant: tenantId, tempPassword, emailed: invite.sent, emailError: invite.error || '' });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -781,7 +792,7 @@ function creditPanel() {
   </fieldset>`;
 }
 
-function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, session = null, key, saved, superAdmin = false, tenantList = [], postUsage = null, ownKeyIds = [], aiCosts = null, keyOwners = {}, keyHistories = {} }) {
+function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, session = null, key, saved, kind = 'standalone', myRole = 'admin', superAdmin = false, tenantList = [], postUsage = null, ownKeyIds = [], aiCosts = null, keyOwners = {}, keyHistories = {} }) {
   const menu = navHtml({ key, tabs: true, superAdmin, session });
 
   // Said once, on the two panels with plain config fields (not under every panel).
@@ -794,7 +805,9 @@ function page({ tenantId, configMap, userList, funnelList, funnelConfigs, me, se
         <p class="hint" style="margin:0"><a href="#tracking-bridge" onclick="show('tracking-bridge');return false">Tracking bridge →</a> Razorpay → Meta CAPI purchases and daily ad insights.</p>
       </fieldset>`,
   };
+  // Keys are an admin's: staff and a client's own people never see the panel.
   const appSections = APPS
+    .filter((a) => myRole === 'admin' || a !== 'api-keys')
     .map((a) => (hasFlow(a) ? flowSection(a, tenantId, configMap, key, extras[a]) : appSection(a, tenantId, configMap, key, extras[a])))
     .join('');
 
@@ -888,7 +901,7 @@ ${NAV_CSS}
     <div id="flash-error" class="flash err" style="display:none"></div>
 
     ${superAdmin ? tenantsPanel({ tenantList, postUsage, ownKeyIds, aiCosts, keyOwners, keyHistories }) : ''}
-    ${usersPanel({ userList, me, tenantId })}
+    ${usersPanel({ userList, me, tenantId, kind, myRole })}
     ${funnelsPanel({ funnelList, funnelConfigs, tenantId, key })}
     ${appSections}
   </main>
@@ -1237,7 +1250,9 @@ function wakerBox() {
   </fieldset>`;
 }
 
-function usersPanel({ userList, me, tenantId = 'default' }) {
+function usersPanel({ userList, me, tenantId = 'default', kind = 'standalone', myRole = 'admin' }) {
+  const choices = accessChoices(kind, myRole);
+  const people = kind !== 'standalone';
   const rows = (userList || [])
     .map((u, i) => {
       const isSuper = u.email === users.SUPER_ADMIN_EMAIL;
@@ -1246,8 +1261,8 @@ function usersPanel({ userList, me, tenantId = 'default' }) {
         .join('');
       const lastLogin = formatIst(u.last_login_at);
       return `<tr>
-        <td>${esc(u.email)}</td>
-        <td><select onchange="saveRole(${i}, '${escJs(u.email)}', this)"${isSuper ? ' disabled title="protected"' : ''}>${roleSel}</select></td>
+        <td>${esc(u.email)}${people ? `<div class="hint">${esc(ROLE_LABEL[(kind === 'client' && (u.tenant_role || 'admin') === 'admin') ? 'owner' : (u.tenant_role || 'admin')] || u.tenant_role || '')}</div>` : ''}</td>
+        <td><select onchange="saveRole(${i}, '${escJs(u.email)}', this)"${isSuper || people ? ' disabled title="' + (people ? 'access is set below or on the Clients page' : 'protected') + '"' : ''}>${roleSel}</select></td>
         <td>${esc(lastLogin)}<span id="flag-${i}" class="saveflag">saved</span></td>
       </tr>`;
     })
@@ -1266,7 +1281,9 @@ function usersPanel({ userList, me, tenantId = 'default' }) {
     <fieldset><legend>Add a user</legend>
       <div class="row">
         <input id="nu-email" type="email" placeholder="name@example.com" style="min-width:16rem">
-        <select id="nu-role"><option value="user">user</option><option value="admin">admin</option></select>
+        ${people
+    ? `<select id="nu-access">${choices.map((c) => `<option value="${c}">${esc(ACCESS_TEXT[c] || c)}</option>`).join('')}</select><input type="hidden" id="nu-role" value="admin">`
+    : '<select id="nu-role"><option value="user">user</option><option value="admin">admin</option></select>'}
         <button type="button" class="act" onclick="addUser()">Add user</button>
       </div>
       <p id="nu-st" class="hint">Your plan sets how many users this workspace may have.</p>
@@ -1274,10 +1291,10 @@ function usersPanel({ userList, me, tenantId = 'default' }) {
         async function addUser(){
           const st=document.getElementById('nu-st'); st.textContent='Adding…';
           try{
-            const r=await fetch('/api/v1/admin/users/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenant:'${escJs(tenantId)}',email:document.getElementById('nu-email').value,role:document.getElementById('nu-role').value})});
+            const r=await fetch('/api/v1/admin/users/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenant:'${escJs(tenantId)}',email:document.getElementById('nu-email').value,role:document.getElementById('nu-role').value,access:(document.getElementById('nu-access')||{}).value||''})});
             const j=await r.json();
             if(!j.ok){ st.textContent='🔴 '+(j.error||'Could not add'); return; }
-            st.textContent='🟢 Added '+j.email+' ('+j.role+'). One-time password: '+j.tempPassword+' . Send it to them now; it is not shown again.';
+            st.textContent='🟢 Added '+j.email+' ('+(j.access||j.role)+'). '+(j.emailed?'An invite email with the sign-in link went to them. ':'No invite email went out ('+(j.emailError||'mail is not set up')+'). ')+'One-time password: '+j.tempPassword+' . It is not shown again.';
           }catch(e){ st.textContent='🔴 '+e.message; }
         }
       </script>

@@ -19,6 +19,7 @@
 import { currentSession, adminKeyOk } from '../services/accessService.js';
 import * as ownership from '../repositories/ownershipRepository.js';
 import { tenantInfo } from '../services/planService.js';
+import { workspaceRole, roleGate } from '../utils/workspaceSpec.js';
 
 const OWNER = 'default';
 
@@ -122,6 +123,15 @@ export async function bindTenant(req, res, next) {
       if (liveGate({ method: req.method, path: req.path, live: info.live }) === 'refuse') {
         const when = info.expiresAt && info.reason === 'expired' ? ` on ${istDate(info.expiresAt)}` : '';
         return res.status(402).json({ ok: false, error: `Your plan ended${when} (${info.reason}). You can still look around; ask the owner to renew to make changes.` });
+      }
+    }
+    // What this person is here (admin, staff, owner, viewer) and what that allows.
+    req.workspaceRole = session && !d.superAdmin ? workspaceRole(session, d.tenantId) : 'admin';
+    if (session && !d.superAdmin) {
+      const why = roleGate({ role: req.workspaceRole, method: req.method, path: req.path, body: req.body });
+      if (why) {
+        if (req.accepts(['json', 'html']) === 'html' && !req.is('application/json')) return res.status(403).type('html').send(`<p>${why}</p><p><a href="javascript:history.back()">Back</a></p>`);
+        return res.status(403).json({ ok: false, error: why });
       }
     }
     // Routes that read ?tenant= / body.tenant see the session's tenant too.

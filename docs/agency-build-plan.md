@@ -1,6 +1,6 @@
 # Agency build plan (content-engine)
 
-Written 11-11-2026. Phases 1, 2 and 3 built on staging 11-11-2026, not tried with a real agency yet.
+Written 11-11-2026. Phases 1 to 4 built on staging 11-11-2026, not tried with a real agency yet.
 
 Goal: an Agency account runs up to 10 clients. Each client is its own workspace
 with its own logins, social accounts, Drive, schedule and digest. The agency
@@ -113,7 +113,7 @@ Code: new modules/agencyPages.js, services/agencyService.js.
   copies system_prompt_*, the Music box and one chosen funnel's style and times.
   Staff still have full rights inside their own agency workspace until phase 4.
 
-## Phase 4: client logins and connecting accounts
+## Phase 4: client logins and connecting accounts (🟢 on staging 11-11-2026)
 
 Code: modules/auth.js, utils/authPages.js, accessService, takeDownService and
 publishProvider (connect links), the Gmail API mail path.
@@ -136,6 +136,18 @@ Roles in tenant_members:
   rest on the platform itself; nobody shares a password.
 - A client never sees: the agency's keys, the plan or billing page, the
   Tenants panel, other clients, or the switcher.
+- Built: the role per workspace comes from the session (utils/workspaceSpec.js
+  workspaceRole) and one gate in middleware/tenantGuard.js (roleGate) refuses
+  what it may not do: a viewer every change; staff and owners the keys panel,
+  plans, QA, credit, the waker, router rerun and the Clients page. Keys and
+  credit is hidden from them in the menu and on Settings. users.tenant_role
+  holds owner or viewer (an existing client user counts as owner). Users in an
+  agency or client workspace has an Access picker; the invite email
+  (services/inviteService.js) goes on the workspace's own mail, else the
+  agency's, and the one-time password is still shown once. The connect link
+  (modules/connectPage.js, Connect link on the Clients page) is
+  /api/v1/connect/<token>, valid 7 days, only its sha256 kept, a new one
+  replaces the old.
 
 ## Phase 5: reports, digests, leaving
 

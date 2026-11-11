@@ -27,7 +27,10 @@ import * as planService from './planService.js';
 import * as tenantSettings from '../core/tenantSettings.js';
 import { invalidateWorkspaces } from './accessService.js';
 import * as cloudflareWake from './cloudflareWakeService.js';
-import { hashPassword } from '../utils/passwordSpec.js';
+import { hashPassword, hashToken } from '../utils/passwordSpec.js';
+import { sendInvite } from './inviteService.js';
+import { settings } from '../settings/index.js';
+import { formatIst } from '../utils/time.js';
 import { limitsFor, validTenantId } from '../utils/planSpec.js';
 import { AGENCY_PLAN, templateTenantKey, templateFunnelKey, teamRole, teamProblem } from '../utils/workspaceSpec.js';
 import { DAILY_KEY, dailyTimeOf } from '../utils/cloudflareWake.js';
@@ -134,8 +137,9 @@ export async function addClient(agencyId, b = {}) {
   const copied = await copyTemplate(agency.id, tenant.id, b.template ? String(b.template) : null)
     .catch((err) => { log.warn({ err: err.message, client: tenant.id }, 'template not copied'); return { settings: 0, funnel: null }; });
   afterChange();
-  log.info({ agency: agency.id, client: tenant.id, copied }, 'client added');
-  return { tenant: tenant.id, email, tempPassword, copied };
+  const invite = await sendInvite({ tenantId: tenant.id, email, tempPassword, access: 'owner' });
+  log.info({ agency: agency.id, client: tenant.id, copied, emailed: invite.sent }, 'client added');
+  return { tenant: tenant.id, email, tempPassword, copied, emailed: invite.sent, emailError: invite.error || '' };
 }
 
 /** Archive (look-only, no jobs, not counted in the 10) or bring a client back. */
@@ -169,6 +173,23 @@ export async function setTeam(agencyId, me, b = {}) {
   return { ok: true, role, clients: role === 'staff' ? picked : [] };
 }
 
+const CONNECT_DAYS = 7;
+
+/**
+ * A link the client opens without signing in to connect its own channels
+ * (each platform's own sign-in; nobody shares a password). Only the token's
+ * sha256 is kept; a new link replaces the old one. Valid 7 days.
+ */
+export async function connectLink(agencyId, clientId) {
+  const agency = await agencyRow(agencyId);
+  const client = await clientOf(agency.id, clientId);
+  const token = randomBytes(24).toString('base64url');
+  const expires = new Date(Date.now() + CONNECT_DAYS * 86400000);
+  await tenantConfig.set(String(client.id), 'connect_link', `${hashToken(token)}|${expires.toISOString()}`);
+  const base = String(settings.app.publicBaseUrl || '').replace(/\/+$/, '');
+  return { url: `${base}/api/v1/connect/${token}`, expires: formatIst(expires) };
+}
+
 function afterChange() {
   tenantSettings.invalidate();
   planService.invalidate();
@@ -176,4 +197,4 @@ function afterChange() {
   cloudflareWake.syncTimes().catch((err) => log.warn({ err: err.message }, 'daily times not synced to Cloudflare (the next daily run syncs it)'));
 }
 
-export default { overview, copyTemplate, addClient, setArchived, setTeam };
+export default { overview, copyTemplate, addClient, setArchived, setTeam, connectLink };
