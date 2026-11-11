@@ -14,13 +14,13 @@
 export const PLANS = {
   // Starter Lite: the lean build (lean: true). One 9:16 picture per post with the
   // 4:5 cut from it, and ElevenLabs' low-cost Flash voice, so 15 posts cost little.
-  lite: { label: 'Starter Lite', priceInr: 999, funnels: 1, channels: 5, posts: 15, aiVideos: 0, users: 1, clients: 0, lean: true },
-  starter: { label: 'Starter', priceInr: 2499, funnels: 1, channels: 5, posts: 30, aiVideos: 0, users: 1, clients: 0 },
-  growth: { label: 'Growth', priceInr: 8999, funnels: 3, channels: 6, posts: 90, aiVideos: 4, users: 3, clients: 0 },
+  lite: { label: 'Starter Lite', priceInr: 999, priceUsd: 12, funnels: 1, channels: 5, posts: 15, aiVideos: 0, users: 1, clients: 0, lean: true },
+  starter: { label: 'Starter', priceInr: 2499, priceUsd: 29, funnels: 1, channels: 5, posts: 30, aiVideos: 0, users: 1, clients: 0 },
+  growth: { label: 'Growth', priceInr: 8999, priceUsd: 99, funnels: 3, channels: 6, posts: 90, aiVideos: 4, users: 3, clients: 0 },
   // Agency: 10 clients, each its own workspace and logins, no cap on funnels or
   // channels per client; posts are counted across the agency and its clients.
-  agency: { label: 'Agency', priceInr: 14999, funnels: null, channels: null, posts: 300, aiVideos: null, users: 10, clients: 10 },
-  custom: { label: 'Custom (no limits)', priceInr: null, funnels: null, channels: null, posts: null, aiVideos: null, users: null, clients: null },
+  agency: { label: 'Agency', priceInr: 14999, priceUsd: 169, funnels: null, channels: null, posts: 300, aiVideos: null, users: 10, clients: 10 },
+  custom: { label: 'Custom (no limits)', priceInr: null, priceUsd: null, funnels: null, channels: null, posts: null, aiVideos: null, users: null, clients: null },
 };
 
 export const PLAN_IDS = Object.keys(PLANS);
@@ -37,6 +37,14 @@ export function isLean(plan) {
 
 /** Every rupee price a person reads is shown before GST, which is added on top. */
 export const GST_NOTE = '+ GST';
+/** GST on software in India. */
+export const GST_RATE = 0.18;
+/** A rupee price with GST added, to the rupee. */
+export function withGst(inr) {
+  return Math.round((Number(inr) || 0) * (1 + GST_RATE));
+}
+/** Add-ons: 30 more posts, one more AI video. Rupees before GST; dollars outside India. */
+export const EXTRAS = { posts30: { inr: 999, usd: 12 }, aiVideo: { inr: 349, usd: 4 } };
 
 /** Rupees to the dollar for the cost report (docs/pricing-plan.md). */
 export const USD_INR = 88;
@@ -86,4 +94,4 @@ export function validTenantId(id) {
   return /^[a-z0-9][a-z0-9-]{1,30}$/.test(String(id || '')) && !String(id).includes(':');
 }
 
-export default { USD_INR, PLANS, PLAN_IDS, LEAN_VOICE_MODEL, FULL_VOICE_MODEL, GST_NOTE, isLean, limitsFor, planLabel, overLimit, tenantLive, validTenantId };
+export default { USD_INR, PLANS, PLAN_IDS, LEAN_VOICE_MODEL, FULL_VOICE_MODEL, GST_NOTE, GST_RATE, EXTRAS, withGst, isLean, limitsFor, planLabel, overLimit, tenantLive, validTenantId };

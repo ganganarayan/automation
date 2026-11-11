@@ -23,6 +23,7 @@ import * as tenantSettings from './core/tenantSettings.js';
 import * as publicPages from './utils/publicPages.js';
 import * as comparePages from './utils/comparePages.js';
 import * as planCancel from './modules/planCancel.js';
+import * as billingModule from './modules/billing.js';
 
 import * as approvalService from './services/approvalService.js';
 
@@ -85,6 +86,8 @@ export function createApp() {
   app.get('/terms', async (_req, res) => res.type('html').send(publicPages.termsPage({ email: await contactEmail() })));
   app.get('/refund', async (_req, res) => res.type('html').send(publicPages.refundPage({ email: await contactEmail() })));
   app.get('/shipping', async (_req, res) => res.type('html').send(publicPages.shippingPage({ email: await contactEmail() })));
+  // Buy a plan: Razorpay in rupees with GST (India) or US dollars (elsewhere).
+  billingModule.mount(app, { log: logger, contactEmail });
   app.get('/health', (_req, res) => res.json({ status: 'ok', service: settings.service }));
   app.get('/live', (_req, res) => res.json({ status: 'alive' }));
   // Running build identity: lets a deploy be verified against the pushed commit.

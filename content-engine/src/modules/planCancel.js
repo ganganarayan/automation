@@ -22,6 +22,7 @@ import { cancelProblem, exitLink, validExitUrl, EXIT_KEY, OWNER_TENANT } from '.
 import { planBody, PLAN_PATH } from '../utils/planPage.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst } from '../utils/time.js';
+import * as billing from '../services/billingService.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const day = (v) => (v ? formatIst(v, { withTime: false }) : '');
@@ -47,7 +48,13 @@ export function register(ctx) {
       res.set('Cache-Control', 'no-store');
       const w = await who(req);
       const base = w.superAdmin ? await exitBase() : '';
-      res.type('html').send(shell('Plan', planBody({ ...w, base, flash: String(req.query.done || ''), day }), w.session));
+      let pay = null;
+      if (w.superAdmin) {
+        const k = await billing.keys().catch(() => ({ keyId: '', keySecret: '', webhookSecret: '' }));
+        pay = { keyId: k.keyId, secretSet: !!k.keySecret, webhookSet: !!k.webhookSecret };
+      }
+      const origin = `${req.protocol}://${req.get('host')}`;
+      res.type('html').send(shell('Plan', planBody({ ...w, base, flash: String(req.query.done || ''), day, pay, origin }), w.session));
     } catch (err) {
       next(err);
     }
@@ -59,6 +66,15 @@ export function register(ctx) {
       const w = await who(req);
       const why = cancelProblem(w);
       if (why) return res.status(403).type('html').send(shell('Plan', `<h1>Plan</h1><p class="hint">${esc(why)}</p><p><a class="act" href="${PLAN_PATH}">Back</a></p>`, w.session));
+      if (w.tenant.billing_sub_id && !w.tenant.cancelled_at) {
+        // Paid online: stop the Razorpay renewal first, so "not charged again" is true.
+        try {
+          await billing.stopRenewal(w.tenant);
+        } catch (err) {
+          log.error({ tenant: w.tenant.id, err: err.message }, 'razorpay cancel failed');
+          return res.status(502).type('html').send(shell('Plan', `<h1>Plan</h1><p class="hint">🟡 The renewal could not be stopped just now (${esc(err.message)}). Nothing was changed. Try again in a minute, or write to us.</p><p><a class="act" href="${PLAN_PATH}">Back</a></p>`, w.session));
+        }
+      }
       if (!w.tenant.cancelled_at) await tenantRepo.setCancelled(w.tenant.id, new Date());
       log.info({ tenant: w.tenant.id, by: w.session && w.session.email }, 'plan cancelled');
       const link = exitLink(await exitBase(), { tenantId: w.tenant.id, plan: w.tenant.plan || '' });
@@ -74,11 +90,26 @@ export function register(ctx) {
       const w = await who(req);
       const why = cancelProblem(w);
       if (why) return res.status(403).type('html').send(shell('Plan', `<h1>Plan</h1><p class="hint">${esc(why)}</p><p><a class="act" href="${PLAN_PATH}">Back</a></p>`, w.session));
+      if (w.tenant.billing_sub_id) return res.status(409).type('html').send(shell('Plan', `<h1>Plan</h1><p class="hint">The online renewal is already stopped. Buy the plan again from <a href="/#pricing">pricing</a> when the period ends.</p><p><a class="act" href="${PLAN_PATH}">Back</a></p>`, w.session));
       await tenantRepo.setCancelled(w.tenant.id, null);
       log.info({ tenant: w.tenant.id, by: w.session && w.session.email }, 'plan kept');
       return res.redirect(303, `${PLAN_PATH}?done=kept`);
     } catch (err) {
       next(err);
+    }
+  });
+
+  router.post('/admin/plan/billing-keys', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'Sign in first.' });
+      const session = await currentSession(req);
+      if (!session || session.role !== 'super_admin') return res.status(403).json({ ok: false, error: 'Only the owner sets this.' });
+      const b = req.body || {};
+      const out = await billing.saveKeys({ keyId: String(b.keyId || ''), keySecret: String(b.keySecret || ''), webhookSecret: String(b.webhookSecret || '') });
+      log.info({ by: session.email, live: out.live }, 'razorpay keys saved');
+      return res.json({ ok: true, ...out });
+    } catch (err) {
+      return res.status(400).json({ ok: false, error: err.message });
     }
   });
 
@@ -115,6 +146,9 @@ ${NAV_CSS}
  .act{background:#2a2a44;color:#fff;border:0;border-radius:8px;padding:.5rem .95rem;cursor:pointer;font-size:.88rem;text-decoration:none;display:inline-block}
  .act.primary{background:#2d6cdf}.act.danger{background:#7a1f2b}
  .inl{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+ .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.6rem;margin:.8rem 0}
+ .grid2 label{display:grid;gap:.25rem;font-size:.84rem;color:#9a9ab0}
+ .grid2 input{background:#13131f;border:1px solid #2a2a44;color:#e8e8ef;border-radius:8px;padding:.5rem .6rem}
  input[type=url]{flex:1;min-width:260px;background:#13131f;border:1px solid #2a2a44;color:#e8e8ef;border-radius:8px;padding:.5rem .6rem}
  a{color:#7aa2ff}
 </style>

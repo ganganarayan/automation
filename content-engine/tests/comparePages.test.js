@@ -62,8 +62,9 @@ describe('comparison pages', () => {
     expect(home).toContain('href="/compare"');
     expect(home).toContain('Start revenue from posts');
   });
-  it('our entry price fades its + GST on every comparison page', () => {
+  it('our entry price says + GST in normal text on every comparison page', () => {
     const h = comparisonPage(COMPETITORS[0]);
-    expect(h).toContain('<span class="gst">+ GST</span>');
+    expect(h).toContain('+ GST');
+    expect(h).not.toContain('class="gst"');
   });
 });

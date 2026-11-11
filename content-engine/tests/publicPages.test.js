@@ -27,15 +27,15 @@ describe('public pages', () => {
     expect(h).toContain('See it in action');
     expect(h).toContain('Cancel any time, one click');
     expect(h).toContain(`₹${inr(Math.round((PLANS.starter.priceInr * 10) / 12))}`);
-    expect(h).toContain(`₹${inr(PLANS.starter.priceInr * 10)} <span class="gst">+ GST</span> billed yearly`);
+    expect(h).toContain(`₹${inr(PLANS.starter.priceInr * 10)} + GST a year`);
     expect(h).toContain('class="float-cta"');
   });
-  it('every + GST beside a price is faded, and Starter Lite says it is the lean build', () => {
+  it('+ GST is normal text with the total beside it, and Starter Lite says it is the lean build', () => {
     const h = homePage();
-    expect(h).toContain('.gst{');
-    expect(h).toContain(`₹${inr(PLANS.lite.priceInr)}<small> <span class="gst">+ GST</span> / month`);
-    // outside hover titles, no + GST is left unfaded
-    expect(h.replace(/<span class="gst">\+ GST<\/span>/g, '').replace(/title="[^"]*"/g, '')).not.toMatch(/\+ GST/);
+    expect(h).not.toContain('class="gst"');
+    expect(h).not.toContain('.gst{');
+    expect(h).toContain(`₹${inr(PLANS.lite.priceInr)}<small> + GST / month`);
+    expect(h).toContain('₹1,179 a month with 18% GST');
     expect(h).toContain('One picture per post, cut to 9:16, 4:5 and 16:9');
     expect(h).toContain('ElevenLabs Flash');
   });

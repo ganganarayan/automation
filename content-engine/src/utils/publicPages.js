@@ -12,7 +12,7 @@
  * Routes (app.js): GET /  ·  GET /privacy  ·  GET /terms  ·  GET /refund  ·  GET /shipping
  */
 
-import { PLANS, GST_NOTE } from './planSpec.js';
+import { PLANS, GST_NOTE, EXTRAS, withGst } from './planSpec.js';
 import { CHECKED_ON, VERDICT, ROWS, US, COMPETITORS } from './compareData.js';
 
 export const UPDATED = '11-11-2026';
@@ -20,13 +20,16 @@ export const LOGIN_PATH = '/api/v1/admin/today';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-/** "+ GST" beside a price, faded so the price reads first (class gst). */
-export const GST_HTML = `<span class="gst">${GST_NOTE}</span>`;
+/** "+ GST" beside a price, in the same text as the price. */
+export const GST_HTML = GST_NOTE;
 
-/** Escape text, then fade every "+ GST" in it. */
-export const escGst = (s) => esc(s).split(GST_NOTE).join(GST_HTML);
+/** Escape text ("+ GST" reads as normal text). */
+export const escGst = (s) => esc(s);
 
-function shell(title, inner) {
+/** A dollar price. */
+export const usd = (n) => `$${Number(n || 0).toLocaleString('en-US')}`;
+
+export function shell(title, inner) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
 <style>
@@ -216,7 +219,7 @@ const FAQ = [
   ['Can I remove a post after it is live?', 'Yes. Tick the channels and press Delete once; the post is taken down from each platform.'],
   ['What can the app see in my Google Drive?', 'Only the files it creates itself (the drive.file permission). Your other files stay private. See the privacy policy.'],
   ['What if I go over my plan?', 'The app tells you before you go over. Add 30 more posts for ₹999 + GST, or an extra AI video for ₹349 + GST.'],
-  ['Are prices with GST?', 'Prices are shown before GST. 18% GST is added to every price, and your invoice shows it, so a GST-registered business can claim it back.'],
+  ['Are prices with GST?', 'In India, prices are shown before GST, with the total beside each one: 18% GST is added and shown on your GST invoice, so a GST-registered business can claim it back. Outside India, prices are in US dollars and no GST is added.'],
 ];
 
 /** Before and after: our own words for what changes on day one. */
@@ -376,7 +379,13 @@ const HOME_CSS = `
  .billing .save{position:absolute;top:-1.3rem;right:-.4rem;background:var(--green);color:#06210f;font-size:.72rem;font-weight:800;border-radius:6px;padding:.1rem .45rem}
  .plan .yr{display:none}.yearly .plan .yr{display:block}.yearly .plan .mo{display:none}
  .plan .bill{color:var(--mute);font-size:.85rem;margin:.15rem 0 0}
- .gst{color:var(--mute);opacity:.55;font-weight:400;font-size:.85em;white-space:nowrap}
+ .toggles{display:flex;flex-wrap:wrap;justify-content:center;gap:1rem;margin:1.6rem 0 .6rem}
+ .toggles .billing{margin:0}
+ .where{text-align:center;color:var(--mute);font-size:.9rem;margin:0 0 1.4rem}
+ .plan .total{font-size:.9rem;margin:.2rem 0 0}
+ .plan .trial{display:block;text-align:center;font-size:.88rem;margin-top:.5rem}
+ .cur-usd{display:none}.usd .cur-usd{display:block}.usd .cur-inr{display:none}
+ .where .cur-inr,.trust .cur-inr{display:inline}.usd .where .cur-usd,.usd .trust .cur-usd{display:inline}.usd .where .cur-inr,.usd .trust .cur-inr{display:none}
  .float-cta{position:fixed;right:18px;bottom:18px;z-index:9;background:#f5d90a;color:#14140a;font-weight:800;border-radius:12px;padding:.85rem 1.2rem;text-decoration:none;box-shadow:0 10px 30px rgba(0,0,0,.35)}
  @media (max-width:900px){.act-wrap,.act-stage{grid-template-columns:1fr}}
  @media (max-width:760px){.links{display:none}.hero{padding:3.5rem 0 2.5rem}section{padding:3rem 0}}
@@ -447,6 +456,20 @@ export function compareSection() {
 </div></section>`;
 }
 
+/**
+ * A plan's price, four ways: rupees in India (+ GST, with the total) and US
+ * dollars elsewhere (no GST), each monthly and yearly. The page shows one of
+ * each pair (classes cur-inr / cur-usd on <html>, yearly on #pricing).
+ */
+export function priceBlock(lim, extra = '') {
+  const m = lim.priceInr;
+  const yInr = Math.round((m * 10) / 12);
+  const u = lim.priceUsd;
+  const yUsd = Math.round((u * 10) / 12);
+  return `<div class="mo"><div class="cur-inr"><p class="price">₹${inr(m)}<small> ${GST_NOTE} / month${extra}</small></p><p class="total">₹${inr(withGst(m))} a month with 18% GST</p><p class="bill">Billed monthly</p></div><div class="cur-usd"><p class="price">${usd(u)}<small> / month${extra}</small></p><p class="total">No GST outside India</p><p class="bill">Billed monthly in US dollars</p></div></div>
+  <div class="yr"><div class="cur-inr"><p class="price">₹${inr(yInr)}<small> ${GST_NOTE} / month${extra}</small></p><p class="total">₹${inr(m * 10)} ${GST_NOTE} a year, ₹${inr(withGst(m * 10))} with 18% GST</p><p class="bill">Billed yearly: 12 months for the price of 10</p></div><div class="cur-usd"><p class="price">${usd(yUsd)}<small> / month${extra}</small></p><p class="total">${usd(u * 10)} a year, no GST outside India</p><p class="bill">Billed yearly in US dollars: 12 months for the price of 10</p></div></div>`;
+}
+
 function planCard(id, contactHref) {
   const lim = PLANS[id];
   const f = PLAN_FEATURES[id];
@@ -463,15 +486,15 @@ function planCard(id, contactHref) {
   return `<div class="card plan${best ? ' best' : ''}">
   ${best ? '<span class="badge">Most popular</span>' : ''}
   <h3>${esc(lim.label)}</h3>
-  <div class="mo"><p class="price">₹${inr(lim.priceInr)}<small> ${GST_HTML} / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p><p class="bill">Billed monthly</p></div>
-  <div class="yr"><p class="price">₹${inr(Math.round((lim.priceInr * 10) / 12))}<small> ${GST_HTML} / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p><p class="bill">₹${inr(lim.priceInr * 10)} ${GST_HTML} billed yearly: 12 months for the price of 10</p></div>
+  ${priceBlock(lim, id === 'agency' ? ' + your own AI keys' : '')}
   <p class="ptag">${esc(f.tag)}</p>
   <ul>
     ${limits.map((l) => `<li class="lim">${esc(l)}</li>`).join('')}
     ${f.lead ? `<li class="head">${esc(f.lead)}</li>` : ''}
     ${f.lines.map((l) => `<li>${esc(l)}</li>`).join('')}
   </ul>
-  <a class="btn${best ? '' : ' ghost'}" href="${contactHref(lim.label)}">${id === 'starter' ? 'Start the 7-day trial' : `Choose ${esc(lim.label)}`}</a>
+  <a class="btn${best ? '' : ' ghost'}" data-buy="${id}" href="/buy?plan=${id}">Buy ${esc(lim.label)}</a>
+  ${id === 'starter' ? `<a class="trial" href="${contactHref(lim.label)}">or start the 7-day trial</a>` : ''}
 </div>`;
 }
 
@@ -494,7 +517,7 @@ ${landingNav('')}
   <p class="lead">Content Engine turns your videos, or nothing at all, into finished posts with copy, thumbnails, voice and music. You approve. It publishes to every channel, reports what went live and turns comments into leads.</p>
   <div class="cta"><a class="btn" href="${trialHref}">Start the 7-day trial</a><a class="btn ghost" href="#pricing">See pricing</a></div>
   <div class="chips">${CHANNELS.map((c) => `<span class="chip">${esc(c)}</span>`).join('')}</div>
-  <div class="trust"><span><b>✓</b> You approve every post</span><span><b>₹</b> Priced in rupees</span><span><b>↺</b> Cancel any time, one click</span><span><b>◷</b> Dates and times in IST</span></div>
+  <div class="trust"><span><b>✓</b> You approve every post</span><span><b>₹</b> <span class="cur-inr">Priced in rupees, GST invoice</span><span class="cur-usd">Priced in US dollars, no GST outside India</span></span><span><b>↺</b> Cancel any time, one click</span><span><b>◷</b> Dates and times in IST</span></div>
 </div></header>
 
 <section id="how"><div class="wrap">
@@ -537,10 +560,15 @@ ${landingNav('')}
 
 <section id="pricing"><div class="wrap">
   <h2>Pricing</h2>
-  <div class="billing"><span class="save">2 months free</span><button type="button" class="on" data-b="mo" onclick="bill('mo')">MONTHLY</button><button type="button" data-b="yr" onclick="bill('yr')">YEARLY</button></div>
   <p class="kicker">One post means one post on all its channels. AI is included on Starter Lite, Starter and Growth.</p>
+  <div class="toggles">
+    <div class="billing" role="group" aria-label="Billing"><span class="save">2 months free</span><button type="button" class="on" data-b="mo" onclick="bill('mo')">MONTHLY</button><button type="button" data-b="yr" onclick="bill('yr')">YEARLY</button></div>
+    <div class="billing curs" role="group" aria-label="Currency"><button type="button" class="on" data-c="inr" onclick="cur('inr',1)">₹ INR</button><button type="button" data-c="usd" onclick="cur('usd',1)">$ USD</button></div>
+  </div>
+  <p class="where"><span class="cur-inr">Showing Indian prices: rupees, before 18% GST.</span><span class="cur-usd">Showing prices outside India: US dollars, no GST.</span></p>
   <div class="grid plans">${['lite', 'starter', 'growth', 'agency'].map((id) => planCard(id, contactHref)).join('')}</div>
-  <p class="fine">All plans: over the limit, ₹999 ${GST_HTML} for 30 more posts and ₹349 ${GST_HTML} per extra AI video. Pay yearly: 10 months, get 12. Start with a 7-day trial of Starter. Prices in Indian rupees, per workspace, before GST: 18% GST is added to every price.</p>
+  <p class="fine cur-inr">All plans: over the limit, ₹${inr(EXTRAS.posts30.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.posts30.inr))} with GST) for 30 more posts and ₹${inr(EXTRAS.aiVideo.inr)} ${GST_NOTE} (₹${inr(withGst(EXTRAS.aiVideo.inr))} with GST) per extra AI video. Pay yearly: 10 months, get 12. Start with a 7-day trial of Starter. Prices in Indian rupees, per workspace, before GST: 18% GST is added to every price and shown on your GST invoice.</p>
+  <p class="fine cur-usd">All plans: over the limit, ${usd(EXTRAS.posts30.usd)} for 30 more posts and ${usd(EXTRAS.aiVideo.usd)} per extra AI video. Pay yearly: 10 months, get 12. Start with a 7-day trial of Starter. Prices in US dollars, per workspace, for customers outside India: no GST is added.</p>
 </div></section>
 
 ${compareSection()}
@@ -560,7 +588,11 @@ ${compareSection()}
 <a class="float-cta" href="${trialHref}">Start the 7-day trial ›</a>
 <script>
 function actShow(i){document.querySelectorAll('.act-tab,.act-pane').forEach(function(e){e.classList.toggle('on',e.getAttribute('data-i')==String(i));});}
-function bill(b){document.getElementById('pricing').classList.toggle('yearly',b==='yr');document.querySelectorAll('.billing button').forEach(function(e){e.classList.toggle('on',e.getAttribute('data-b')===b);});}
+var B='mo',C='inr';
+function links(){document.querySelectorAll('a[data-buy]').forEach(function(a){a.href='/buy?plan='+a.getAttribute('data-buy')+'&bill='+B+'&cur='+C;});}
+function bill(b){B=b;document.getElementById('pricing').classList.toggle('yearly',b==='yr');document.querySelectorAll('.billing button[data-b]').forEach(function(e){e.classList.toggle('on',e.getAttribute('data-b')===b);});links();}
+function cur(c,keep){C=c;links();document.documentElement.classList.toggle('usd',c==='usd');document.querySelectorAll('.billing button[data-c]').forEach(function(e){e.classList.toggle('on',e.getAttribute('data-c')===c);});if(keep){try{localStorage.setItem('ce_cur',c);}catch(e){}}}
+(function(){var c='';try{c=localStorage.getItem('ce_cur')||'';}catch(e){}if(c!=='inr'&&c!=='usd'){var tz='';try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||'';}catch(e){}c=/^Asia\\/(Kolkata|Calcutta)$/.test(tz)?'inr':'usd';}cur(c);})();
 </script>
 ${landingFooter(email)}`;
 }
@@ -620,7 +652,9 @@ export function refundPage({ email = '' } = {}) {
 <h2>No refunds</h2>
 <p>Payments are not refunded, in full or in part. This covers monthly and yearly plans, the unused part of a period, unused posts or AI videos, upgrades, and extra post or AI video packs.</p>
 <h2>Cancel any time</h2>
-<p>Cancel with one click: in the app, open <b>Plan</b> and press <b>Cancel my plan</b>. You can also write to ${contactLine(email)}. There is no cancellation fee and no notice period. Cancelling stops the next renewal, so you are not charged again. Changed your mind before the period ends? Press <b>Keep my plan</b>.</p>
+<p>Cancel with one click: in the app, open <b>Plan</b> and press <b>Cancel my plan</b>. You can also write to ${contactLine(email)}. There is no cancellation fee and no notice period. Cancelling stops the next renewal, so you are not charged again. Changed your mind before the period ends? If you were set up by us, press <b>Keep my plan</b>; if you paid online, buy the plan again from the <a href="/#pricing">pricing</a> when the period ends.</p>
+<h2>Currency and GST</h2>
+<p>Businesses billed in India pay in Indian rupees, with 18% GST added and shown at checkout. Businesses billed outside India pay in US dollars, with no GST. The payment is taken by Razorpay.</p>
 <h2>Use it until the end of what you paid for</h2>
 <p>After you cancel, your workspace keeps working, with every feature of your plan, until the last day of the period you have already paid for. On that day it stops posting and is paused. What happens to your data after that is set out in the <a href="/privacy">privacy policy</a>.</p>
 <h2>Trial</h2>
