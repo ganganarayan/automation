@@ -18,6 +18,8 @@
  *         POST /api/v1/admin/clients/archive   { client, archived }
  *         POST /api/v1/admin/clients/team      { email, role, clients[] }
  *         POST /api/v1/admin/clients/connect-link { client }: a 7-day link to connect channels
+ *         GET  /api/v1/admin/clients/costs.csv?month=YYYY-MM   the cost CSV
+ *         POST /api/v1/admin/clients/detach    { client, plan }: move a client out
  */
 import * as agency from '../services/agencyService.js';
 import { keyOk, currentSession } from '../services/accessService.js';
@@ -69,6 +71,19 @@ export function register(ctx) {
     }
   };
 
+  router.get('/admin/clients/costs.csv', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).send('Sign in first.');
+      const agencyId = await agencyFor(req);
+      if (!agencyId) return res.status(403).send("Only an agency's admins can do this.");
+      const out = await agency.costCsvFor(agencyId, String(req.query.month || ''));
+      res.set('Cache-Control', 'no-store');
+      res.attachment(out.filename).type('text/csv; charset=utf-8').send(`\ufeff${out.csv}`);
+    } catch (err) {
+      res.status(400).send(err.message);
+    }
+  });
+  router.post('/admin/clients/detach', action((agencyId, b) => agency.detachClient(agencyId, String(b.client || ''), String(b.plan || 'starter'))));
   router.post('/admin/clients/add', action((agencyId, b) => agency.addClient(agencyId, b)));
   router.post('/admin/clients/archive', action((agencyId, b) => agency.setArchived(agencyId, String(b.client || ''), b.archived === true || b.archived === 'true')));
   router.post('/admin/clients/connect-link', action((agencyId, b) => agency.connectLink(agencyId, String(b.client || ''))));
@@ -96,7 +111,7 @@ function nums(s) {
 
 /** The Clients page body (pure, for tests). */
 export function clientsPage(data, session = null) {
-  const { agency: a, clients = [], own = null, active = 0, limit = null, posts = null, postsLimit = null, funnels = [], team = [] } = data || {};
+  const { agency: a, clients = [], own = null, active = 0, limit = null, posts = null, postsLimit = null, funnels = [], team = [], month = '' } = data || {};
   const cur = session ? String(session.tenantId || '') : '';
   const row = (c) => {
     const n = nums(c.stats);
@@ -112,6 +127,7 @@ export function clientsPage(data, session = null) {
       <td class="acts">
         <form method="post" action="/api/v1/admin/workspace" style="display:inline;margin:0"><input type="hidden" name="workspace" value="${esc(c.id)}"><button class="act primary" type="submit"${archived ? ' title="Archived: look only"' : ''}>Open</button></form>
         ${archived ? '' : `<button class="act" type="button" onclick="connectLink('${esc(c.id)}')" title="A link the client opens to connect its own channels, no password shared">Connect link</button>`}
+        <button class="act" type="button" onclick="moveOut('${esc(c.id)}')" title="It becomes its own workspace on its own plan">Move out</button>
         <button class="act" type="button" onclick="archive('${esc(c.id)}', ${archived ? 'false' : 'true'})">${archived ? 'Bring back' : 'Archive'}</button>
       </td>
     </tr>`;
@@ -141,6 +157,7 @@ export function clientsPage(data, session = null) {
           <td class="acts"><form method="post" action="/api/v1/admin/workspace" style="display:inline;margin:0"><input type="hidden" name="workspace" value="${esc(a ? a.id : '')}"><button class="act" type="submit">Open</button></form></td></tr>
       </tbody>
     </table>
+    <p class="row" style="margin:.6rem 0"><label class="hint">Cost CSV for <input id="cm" type="month" value="${esc(month)}"></label> <a class="act" id="cmlink" href="${CLIENTS_PATH}/costs.csv?month=${esc(month)}" onclick="this.href='${CLIENTS_PATH}/costs.csv?month='+document.getElementById('cm').value">⬇ Download</a> <span class="hint">One row per post, every client and your own, dates in IST, to bill your clients.</span></p>
     <p class="hint">Open moves you into that client's workspace (the switcher at the top of the menu does the same). An archived client can still be looked at, posts nothing and does not count toward your ${limit === null ? '' : limit + ' '}clients.</p>
 
     <h2>Add a client</h2>
@@ -182,6 +199,11 @@ export function clientsPage(data, session = null) {
           try { await navigator.clipboard.writeText(j.url); } catch (e) { /* show it instead */ }
           prompt('Send this link to ' + client + '. It works until ' + j.expires + ' and replaces any older link. (Copied.)', j.url);
         } catch (e) { alert(e.message); }
+      }
+      async function moveOut(client) {
+        const plan = prompt('Move ' + client + ' out of your agency? It becomes its own workspace with its own bill, keeps its funnels, posts and people, and stops using your keys. Channels connected on your own Post for Me key must be connected again.\n\nIts plan: type starter or growth.', 'starter');
+        if (!plan) return;
+        try { const j = await post('${CLIENTS_PATH}/detach', { client, plan: plan.trim().toLowerCase() }); alert(client + ' is now its own workspace on ' + j.plan + ' until ' + j.expires + '. The owner renews it on Tenants.'); location.reload(); } catch (e) { alert(e.message); }
       }
       async function archive(client, archived) {
         if (archived && !confirm('Archive ' + client + '? It stops posting and can only be looked at. You can bring it back later.')) return;

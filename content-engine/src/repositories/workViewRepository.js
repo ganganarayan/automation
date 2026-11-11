@@ -126,6 +126,21 @@ export async function clientStats({ tenantIds = [], dayFromUtc, dayToUtc, monthF
   return rows;
 }
 
+/** Every run of these workspaces made in [fromUtc, toUtc), deleted ones too, for the agency cost CSV. */
+export async function costRows({ tenantIds = [], fromUtc, toUtc }) {
+  if (!tenantIds.length) return [];
+  const { rows } = await query(
+    `SELECT tenant_id, title, funnel_name, status, created_at, posted_at, cost_usd, steps, false AS deleted
+       FROM instances WHERE tenant_id = ANY($1::text[]) AND created_at >= $2 AND created_at < $3
+     UNION ALL
+     SELECT tenant_id, title, funnel_name, status, created_at, NULL, cost_usd, steps, true
+       FROM deleted_instances WHERE tenant_id = ANY($1::text[]) AND created_at >= $2 AND created_at < $3
+     ORDER BY tenant_id, created_at`,
+    [tenantIds, fromUtc, toUtc],
+  );
+  return rows;
+}
+
 /** Total real AI cost and run count since `fromUtc`, deleted runs included. */
 export async function costSince({ tenantId = 'default', fromUtc }) {
   const { rows } = await query(
@@ -184,7 +199,7 @@ export async function commentsForPosts({ tenantId = 'default', refs = [] }) {
   return rows;
 }
 
-export default { clientStats, wastedTotal, needsYou, pendingImageApprovals, liveCounts, readyLeft, routerDays, calendarInstances, costSince, deletedRows, deletedTotal, commentsForPosts };
+export default { costRows, clientStats, wastedTotal, needsYou, pendingImageApprovals, liveCounts, readyLeft, routerDays, calendarInstances, costSince, deletedRows, deletedTotal, commentsForPosts };
 
 /**
  * USD the app recorded for one provider since fromUtc, from every cost entry on

@@ -1,6 +1,6 @@
 # Agency build plan (content-engine)
 
-Written 11-11-2026. Phases 1 to 4 built on staging 11-11-2026, not tried with a real agency yet.
+Written 11-11-2026. Phases 1 to 5 built on staging 11-11-2026, not tried with a real agency yet.
 
 Goal: an Agency account runs up to 10 clients. Each client is its own workspace
 with its own logins, social accounts, Drive, schedule and digest. The agency
@@ -149,7 +149,7 @@ Roles in tenant_members:
   /api/v1/connect/<token>, valid 7 days, only its sha256 kept, a new one
   replaces the old.
 
-## Phase 5: reports, digests, leaving
+## Phase 5: reports, digests, leaving (🟢 on staging 11-11-2026)
 
 - **Cost per client:** Log and cost in each client, plus an agency CSV export:
   one row per post with client, funnel, date (DD-MM-YYYY HH:MM IST), channels and
@@ -159,6 +159,15 @@ Roles in tenant_members:
 - **Detach a client:** the client becomes a standalone tenant on its own plan,
   keeping its accounts, funnels and history; it stops using the agency's keys.
 - **Delete a client:** the existing delete path, with the cost kept in the log.
+- Built: Cost CSV for a month on the Clients page (/api/v1/admin/clients/costs.csv,
+  utils/agencyReport.js): one row per run of the agency and each client, made and
+  posted dates in IST, channels posted and failed, AI cost, a total per client;
+  a cell starting = + - @ is made plain text. A client's daily digest goes to its
+  own address, else its owner's, on its own mail, else the agency's. The agency's
+  roll-up goes once a day after 20:00 IST to its notification email, else its
+  owner. Move out makes a client its own workspace on Starter or Growth for 7
+  days (the owner renews it on Tenants); channels on the agency's own Post for Me
+  key must be connected again. Delete a client is not built: Archive covers it.
 
 ## QA (phase 6 of the QA check)
 

@@ -31,6 +31,8 @@ import { hashPassword, hashToken } from '../utils/passwordSpec.js';
 import { sendInvite } from './inviteService.js';
 import { settings } from '../settings/index.js';
 import { formatIst } from '../utils/time.js';
+import { monthRange, costCsv, rollupMail, rollupDue } from '../utils/agencyReport.js';
+import { buildProviders } from './providerFactory.js';
 import { limitsFor, validTenantId } from '../utils/planSpec.js';
 import { AGENCY_PLAN, templateTenantKey, templateFunnelKey, teamRole, teamProblem } from '../utils/workspaceSpec.js';
 import { DAILY_KEY, dailyTimeOf } from '../utils/cloudflareWake.js';
@@ -83,6 +85,7 @@ export async function overview(agencyId) {
     postsLimit: lim.posts,
     funnels: await funnelsRepo.listByTenant(agency.id).catch(() => []),
     team: await membership.teamOf(agency.id).catch(() => []),
+    month: month.toFormat('yyyy-MM'),
   };
 }
 
@@ -173,6 +176,66 @@ export async function setTeam(agencyId, me, b = {}) {
   return { ok: true, role, clients: role === 'staff' ? picked : [] };
 }
 
+/** The cost CSV of the agency and every client for one IST month ('YYYY-MM'). */
+export async function costCsvFor(agencyId, ym = '') {
+  const agency = await agencyRow(agencyId);
+  const clients = await tenantRepo.childrenOf(agency.id);
+  const names = { [agency.id]: `${agency.name} (own)` };
+  for (const c of clients) names[c.id] = c.name;
+  const range = monthRange(ym);
+  const rows = await views.costRows({ tenantIds: Object.keys(names), fromUtc: range.fromUtc, toUtc: range.toUtc });
+  return { csv: costCsv(rows, names), filename: `${agency.id}-costs-${range.label}.csv`, rows: rows.length };
+}
+
+// A moved-out client gets a week on its new plan: the owner then renews it on Tenants.
+const MOVE_OUT_DAYS = 7;
+const MOVE_OUT_PLANS = ['starter', 'growth'];
+
+/**
+ * Move a client out: it becomes its own workspace on Starter or Growth, keeps
+ * its funnels, posts, people and history, and stops using the agency's keys.
+ * Channels connected on the agency's own Post for Me key must be connected again.
+ */
+export async function detachClient(agencyId, clientId, plan = 'starter') {
+  const agency = await agencyRow(agencyId);
+  const client = await clientOf(agency.id, clientId);
+  const p = MOVE_OUT_PLANS.includes(String(plan)) ? String(plan) : 'starter';
+  const expires = new Date(Date.now() + MOVE_OUT_DAYS * 86400000);
+  await tenantRepo.detach(client.id, p, expires);
+  await tenantConfig.set(String(client.id), 'connect_link', '').catch(() => {});
+  afterChange();
+  log.info({ agency: agency.id, client: client.id, plan: p }, 'client moved out');
+  return { ok: true, plan: p, expires: formatIst(expires, { withTime: false }) };
+}
+
+/**
+ * Each agency's evening roll-up: once a day after 20:00 IST, to the agency's
+ * notification email, else its owner. Called after the daily emails.
+ */
+export async function rollupAll(now = new Date()) {
+  const list = await tenantRepo.list().catch(() => []);
+  for (const t of list) {
+    const row = await tenantRepo.findById(String(t.id)).catch(() => null);
+    if (!row || row.parent_id || row.plan !== AGENCY_PLAN || row.status !== 'active') continue;
+    await rollupOne(row, now).catch((err) => log.warn({ agency: row.id, err: err.message }, 'agency roll-up not sent'));
+  }
+}
+
+async function rollupOne(agency, now) {
+  const when = rollupDue({ now, lastDay: await tenantConfig.get(agency.id, 'agency_rollup_on').catch(() => '') });
+  if (!when.due) return false;
+  const data = await overview(agency.id);
+  const mail = rollupMail({ agencyName: agency.name, clients: data.clients, stats: data.clients.map((c) => c.stats).filter(Boolean), day: when.label, base: settings.app.publicBaseUrl });
+  if (!mail) { await tenantConfig.set(agency.id, 'agency_rollup_on', when.day); return false; }
+  const providers = await buildProviders(agency.id);
+  const to = (providers.resolved && providers.resolved.emails && providers.resolved.emails.notify) || agency.owner_email || '';
+  if (!to) return false;
+  await providers.mail.send({ to, subject: mail.subject, html: mail.html });
+  await tenantConfig.set(agency.id, 'agency_rollup_on', when.day);
+  log.info({ agency: agency.id, ...mail.counts }, 'agency roll-up sent');
+  return true;
+}
+
 const CONNECT_DAYS = 7;
 
 /**
@@ -197,4 +260,4 @@ function afterChange() {
   cloudflareWake.syncTimes().catch((err) => log.warn({ err: err.message }, 'daily times not synced to Cloudflare (the next daily run syncs it)'));
 }
 
-export default { overview, copyTemplate, addClient, setArchived, setTeam, connectLink };
+export default { overview, copyTemplate, addClient, setArchived, setTeam, connectLink, costCsvFor, detachClient, rollupAll };

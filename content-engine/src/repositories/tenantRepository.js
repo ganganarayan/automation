@@ -112,10 +112,20 @@ export async function setStatus(tenantId, status) {
   if (!rowCount) throw new Error('tenant not found');
 }
 
+/** Move a client out of its agency: its own workspace on `plan`, ending at expiresAt. */
+export async function detach(tenantId, plan, expiresAt) {
+  const { rowCount } = await query(
+    "UPDATE tenants SET parent_id = NULL, plan = $2, expires_at = $3, subscribed_at = now(), status = 'active' WHERE id = $1 AND parent_id IS NOT NULL",
+    [tenantId, plan, expiresAt],
+  );
+  if (!rowCount) throw new Error('not a client');
+  await query('DELETE FROM tenant_members WHERE tenant_id = $1', [tenantId]);
+}
+
 /** Change a tenant's plan. */
 export async function setPlan(tenantId, plan) {
   const { rowCount } = await query('UPDATE tenants SET plan = $2 WHERE id = $1', [tenantId, plan]);
   if (!rowCount) throw new Error('tenant not found');
 }
 
-export default { setCancelled, createNew, setPlan, setStatus, isActive, activeIds, findById, childrenOf, countChildren, list, create, listWithSubscription, setExpiry };
+export default { setCancelled, createNew, setPlan, setStatus, detach, isActive, activeIds, findById, childrenOf, countChildren, list, create, listWithSubscription, setExpiry };

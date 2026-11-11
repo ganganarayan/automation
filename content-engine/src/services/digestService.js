@@ -28,6 +28,7 @@ import * as heartbeat from '../core/heartbeat.js';
 import * as tenantRepo from '../repositories/tenantRepository.js';
 import { RAN_DAILY_KEY } from '../utils/cloudflareWake.js';
 import { childLogger } from '../core/logger.js';
+import { mailMissing } from '../utils/emailHealth.js';
 
 const log = childLogger({ module: 'digest' });
 
@@ -89,7 +90,17 @@ export async function runDue({ tenantId = 'default', now = nowIst(), quiet = !Ob
     ? lowSheets(await import('./funnelStockService.js').then((m) => m.sheetStockForTenant(tenantId)).catch((err) => { log.warn({ err: err.message }, 'could not count sheets'); return []; }))
     : [];
   const providers = await buildProviders(tenantId);
-  const fallback = providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || '';
+  // A client of an agency: its own address, else its owner's; mail goes on its
+  // own mail settings, else its agency's.
+  const row = await tenantRepo.findById(String(tenantId)).catch(() => null);
+  const fallback = providers.resolved?.emails?.notify || providers.resolved?.emails?.approvalGita || (row && row.parent_id ? row.owner_email || '' : '');
+  if (row && row.parent_id) {
+    const own = { ...providers.resolved.mail, smtp: providers.resolved.smtp || {} };
+    if (mailMissing(own).length) {
+      const theirs = await buildProviders(row.parent_id).catch(() => null);
+      if (theirs) providers.mail = theirs.mail;
+    }
+  }
 
   // Each funnel's own approval address, else the tenant's: one email per address.
   const funnelInfo = new Map();
@@ -135,6 +146,8 @@ export async function runDue({ tenantId = 'default', now = nowIst(), quiet = !Ob
 export async function runAllDue() {
   const list = await tenantRepo.list().catch(() => [{ id: 'default' }]);
   for (const t of list) await runDue({ tenantId: t.id }).catch((err) => log.warn({ tenantId: t.id, err: err.message }, 'daily email failed (the next quiet moment tries again)'));
+  // Then each agency's one evening roll-up of all its clients.
+  await import('./agencyService.js').then((m) => m.rollupAll()).catch((err) => log.warn({ err: err.message }, 'agency roll-ups failed (the next quiet moment tries again)'));
 }
 
 export default { runDue, runAllDue };

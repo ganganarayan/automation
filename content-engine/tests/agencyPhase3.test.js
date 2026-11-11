@@ -16,7 +16,11 @@ vi.mock('../src/repositories/tenantRepository.js', () => ({
   countChildren: async (id) => Object.values(tenants).filter((t) => t.parent_id === id && t.status !== 'archived').length,
   createNew: async (row) => { tenants[row.id] = { id: row.id, name: row.name, plan: row.plan, parent_id: row.parentId, status: 'active' }; return tenants[row.id]; },
   setStatus: async (id, status) => { tenants[id].status = status; },
+  detach: async (id, plan, expiresAt) => { tenants[id] = { ...tenants[id], parent_id: null, plan, expires_at: expiresAt }; },
+  list: async () => Object.values(tenants),
 }));
+const sent = [];
+vi.mock('../src/services/providerFactory.js', () => ({ buildProviders: async () => ({ resolved: { emails: { notify: 'boss@ag.com' } }, mail: { send: async (m) => { sent.push(m); return { ok: true }; } } }) }));
 vi.mock('../src/repositories/usersRepository.js', () => ({
   findByEmail: async (e) => userRows[e] || null,
   createForTenant: async (u) => { userRows[u.email] = u; return u; },
@@ -39,6 +43,11 @@ vi.mock('../src/repositories/membershipRepository.js', () => ({
   workspacesFor: async () => [],
 }));
 vi.mock('../src/repositories/workViewRepository.js', () => ({
+  costRows: async ({ tenantIds }) => [
+    { tenant_id: 'c1', title: '=HYPERLINK("x")', funnel_name: 'Reels', status: 'posted', created_at: '2026-11-10T14:30:00Z', posted_at: '2026-11-11T02:32:00Z', cost_usd: 0.25, steps: [{ key: 'publish', artifacts: { channels: [{ platform: 'instagram', state: 'ok' }, { platform: 'x', state: 'failed' }] } }], deleted: false },
+    { tenant_id: 'c1', title: 'Old', funnel_name: 'Reels', status: 'failed', created_at: '2026-11-05T00:00:00Z', posted_at: null, cost_usd: 0.5, steps: [], deleted: true },
+    ...(tenantIds.includes('x1') ? [{ tenant_id: 'x1', title: 'LEAK', cost_usd: 9 }] : []),
+  ],
   clientStats: async () => [{ tenant_id: 'c1', posted_today: 2, scheduled_today: 1, needs_you: 3, failed_24h: 1, posts_month: 12, cost_month: 1.5 }],
 }));
 vi.mock('../src/services/planService.js', () => ({
@@ -181,6 +190,47 @@ describe('connect link', () => {
     expect(hash).toBe(`sha:${token}`);
     expect(new Date(iso) - Date.now()).toBeGreaterThan(6.9 * 86400000);
     await expect(agency.connectLink('ag', 'x1')).rejects.toThrow('not yours');
+  });
+});
+
+describe('cost CSV, move out, roll-up', () => {
+  it('the CSV covers the agency and its own clients only, dates in IST, totals per client, no formulas', async () => {
+    tenants.c1 = { id: 'c1', name: 'Acme', parent_id: 'ag', status: 'active' };
+    const out = await agency.costCsvFor('ag', '2026-11');
+    expect(out.filename).toBe('ag-costs-11-2026.csv');
+    expect(out.csv).not.toContain('LEAK');
+    expect(out.csv).toContain('"10-11-2026 20:00"');
+    expect(out.csv).toContain('"11-11-2026 08:02"');
+    expect(out.csv).toContain('"instagram","x","0.2500"');
+    expect(out.csv).toContain('"failed (deleted)"');
+    expect(out.csv).toContain('"Acme","TOTAL","","","","","","","0.7500"');
+    expect(out.csv).toContain(`"'=HYPERLINK(""x"")"`);
+  });
+  it('moves its own client out onto Starter or Growth for a week, never another agency\'s', async () => {
+    tenants.c1 = { id: 'c1', name: 'Acme', parent_id: 'ag', status: 'active', plan: 'agency' };
+    const out = await agency.detachClient('ag', 'c1', 'growth');
+    expect(tenants.c1).toMatchObject({ parent_id: null, plan: 'growth' });
+    expect(new Date(tenants.c1.expires_at) - Date.now()).toBeGreaterThan(6.9 * 86400000);
+    expect(out.plan).toBe('growth');
+    tenants.c2 = { id: 'c2', parent_id: 'ag', status: 'active' };
+    expect((await agency.detachClient('ag', 'c2', 'agency')).plan).toBe('starter');
+    await expect(agency.detachClient('ag', 'x1')).rejects.toThrow('not yours');
+  });
+  it('one roll-up a day after 20:00 IST to the agency', async () => {
+    tenants.c1 = { id: 'c1', name: 'Acme', parent_id: 'ag', status: 'active', plan: 'agency' };
+    sent.length = 0;
+    await agency.rollupAll(new Date('2026-11-11T13:00:00Z'));
+    expect(sent.length).toBe(0);
+    await agency.rollupAll(new Date('2026-11-11T15:00:00Z'));
+    // One per agency: ag and other (each with one client).
+    expect(sent.length).toBe(2);
+    const mine = sent.find((m) => m.subject.startsWith('Agency:'));
+    expect(mine.to).toBe('boss@ag.com');
+    expect(mine.subject).toContain('Agency: 1 client on 11-11-2026');
+    expect(mine.html).toContain('Acme');
+    expect(mine.html).not.toContain('Not yours');
+    await agency.rollupAll(new Date('2026-11-11T16:00:00Z'));
+    expect(sent.length).toBe(2);
   });
 });
 
