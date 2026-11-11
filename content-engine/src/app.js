@@ -70,7 +70,7 @@ export function createApp() {
   // button opens the app; /privacy and /terms are the links Google's OAuth
   // consent screen needs. The contact is the default tenant's notification email.
   const contactEmail = async () => (await tenantSettings.forTenant('default').catch(() => null))?.emails?.notify || '';
-  app.get('/', (_req, res) => res.type('html').send(publicPages.homePage()));
+  app.get('/', async (_req, res) => res.type('html').send(publicPages.homePage({ email: await contactEmail() })));
   app.get('/privacy', async (_req, res) => res.type('html').send(publicPages.privacyPage({ email: await contactEmail() })));
   app.get('/terms', async (_req, res) => res.type('html').send(publicPages.termsPage({ email: await contactEmail() })));
   app.get('/health', (_req, res) => res.json({ status: 'ok', service: settings.service }));
