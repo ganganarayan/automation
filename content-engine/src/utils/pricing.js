@@ -37,6 +37,8 @@ export const DEFAULT_PRICES = {
   // Text-to-speech: USD per 1,000 characters, by provider.
   tts: {
     elevenlabs: 0.18,
+    // Flash / Turbo models: half a credit a character.
+    elevenlabs_flash: 0.09,
     heygen: 0.3,
     default: 0.18,
   },

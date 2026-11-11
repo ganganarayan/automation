@@ -12,6 +12,9 @@
  */
 
 export const PLANS = {
+  // Starter Lite: the lean build (lean: true). One 9:16 picture per post with the
+  // 4:5 cut from it, and ElevenLabs' low-cost Flash voice, so 15 posts cost little.
+  lite: { label: 'Starter Lite', priceInr: 999, funnels: 1, channels: 5, posts: 15, aiVideos: 0, users: 1, clients: 0, lean: true },
   starter: { label: 'Starter', priceInr: 2499, funnels: 1, channels: 5, posts: 30, aiVideos: 0, users: 1, clients: 0 },
   growth: { label: 'Growth', priceInr: 8999, funnels: 3, channels: 6, posts: 90, aiVideos: 4, users: 3, clients: 0 },
   // Agency: 10 clients, each its own workspace and logins, no cap on funnels or
@@ -21,6 +24,19 @@ export const PLANS = {
 };
 
 export const PLAN_IDS = Object.keys(PLANS);
+
+/** The ElevenLabs model a lean plan voices with (about half the multilingual price). */
+export const LEAN_VOICE_MODEL = 'eleven_flash_v2_5';
+/** The default ElevenLabs model. */
+export const FULL_VOICE_MODEL = 'eleven_multilingual_v2';
+
+/** Does this plan use the lean build? */
+export function isLean(plan) {
+  return !!limitsFor(plan).lean;
+}
+
+/** Every rupee price a person reads is shown before GST, which is added on top. */
+export const GST_NOTE = '+ GST';
 
 /** Rupees to the dollar for the cost report (docs/pricing-plan.md). */
 export const USD_INR = 88;
@@ -70,4 +86,4 @@ export function validTenantId(id) {
   return /^[a-z0-9][a-z0-9-]{1,30}$/.test(String(id || '')) && !String(id).includes(':');
 }
 
-export default { USD_INR, PLANS, PLAN_IDS, limitsFor, planLabel, overLimit, tenantLive, validTenantId };
+export default { USD_INR, PLANS, PLAN_IDS, LEAN_VOICE_MODEL, FULL_VOICE_MODEL, GST_NOTE, isLean, limitsFor, planLabel, overLimit, tenantLive, validTenantId };

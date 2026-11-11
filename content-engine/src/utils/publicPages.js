@@ -12,7 +12,7 @@
  * Routes (app.js): GET /  ·  GET /privacy  ·  GET /terms  ·  GET /refund  ·  GET /shipping
  */
 
-import { PLANS } from './planSpec.js';
+import { PLANS, GST_NOTE } from './planSpec.js';
 import { CHECKED_ON, VERDICT, ROWS, US, COMPETITORS } from './compareData.js';
 
 export const UPDATED = '11-11-2026';
@@ -58,6 +58,18 @@ export const CHANNELS = ['Instagram', 'Facebook', 'YouTube', 'TikTok', 'LinkedIn
 
 /** What each paid plan adds, in the words of docs/pricing-plan.md. Limits come from utils/planSpec. */
 export const PLAN_FEATURES = {
+  lite: {
+    tag: 'Show up every other day, for less',
+    lines: [
+      'Image posts as voiced videos with music, every size',
+      'AI copy and a headline on every picture',
+      'YouTube Shorts from image posts',
+      'Daily router that picks what goes out',
+      'Your link as the first comment',
+      'Approve from the app, one daily digest email',
+      'Connect your accounts from the app',
+    ],
+  },
   starter: {
     tag: 'Post every day, hands off',
     lines: [
@@ -191,11 +203,12 @@ const FAQ = [
   ['Will it really post every day?', 'Yes. The router wakes each workspace once a day at its Daily time and always posts: a ready video first, then an AI video, then an image post if nothing else is in stock.'],
   ['Does anything go out without me?', 'Only what you approve. Every post waits in the Library for Approve, and the daily digest tells you what is waiting.'],
   ['How many channels can I connect?', `As many as your plan allows: any number of accounts across ${CHANNELS.join(', ')}. Each funnel posts to all of its channels from one approval.`],
-  ['Do I need my own AI keys?', 'Not on Starter or Growth: the AI is included. On Agency you bring your own OpenAI, Claude, Kling, MiniMax and ElevenLabs keys and pay those providers directly.'],
+  ['Do I need my own AI keys?', 'Not on Starter Lite, Starter or Growth: the AI is included. On Agency you bring your own OpenAI, Claude, Kling, MiniMax and ElevenLabs keys and pay those providers directly.'],
   ['What happens when a channel fails?', 'That channel shows ❌ on the Log with the reason. Press Retry failed only and just that channel is sent again.'],
   ['Can I remove a post after it is live?', 'Yes. Tick the channels and press Delete once; the post is taken down from each platform.'],
   ['What can the app see in my Google Drive?', 'Only the files it creates itself (the drive.file permission). Your other files stay private. See the privacy policy.'],
-  ['What if I go over my plan?', 'The app tells you before you go over. Add 30 more posts for ₹999, or an extra AI video for ₹349.'],
+  ['What if I go over my plan?', 'The app tells you before you go over. Add 30 more posts for ₹999 + GST, or an extra AI video for ₹349 + GST.'],
+  ['Are prices with GST?', 'Prices are shown before GST. 18% GST is added to every price, and your invoice shows it, so a GST-registered business can claim it back.'],
 ];
 
 /** Before and after: our own words for what changes on day one. */
@@ -279,7 +292,7 @@ const HOME_CSS = `
  .stat{border-left:3px solid var(--blue);padding-left:.9rem}
  .stat b{display:block;font-size:1.6rem}
  .stat span{color:var(--mute);font-size:.9rem}
- .plans{grid-template-columns:repeat(auto-fit,minmax(290px,1fr));align-items:stretch}
+ .plans{grid-template-columns:repeat(auto-fit,minmax(250px,1fr));align-items:stretch}
  .plan{display:flex;flex-direction:column}
  .plan.best{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
  .plan .badge{align-self:flex-start;background:var(--blue);color:#fff;font-size:.75rem;font-weight:700;border-radius:999px;padding:.15rem .6rem;margin-bottom:.6rem}
@@ -441,8 +454,8 @@ function planCard(id, contactHref) {
   return `<div class="card plan${best ? ' best' : ''}">
   ${best ? '<span class="badge">Most popular</span>' : ''}
   <h3>${esc(lim.label)}</h3>
-  <div class="mo"><p class="price">₹${inr(lim.priceInr)}<small> / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p><p class="bill">Billed monthly</p></div>
-  <div class="yr"><p class="price">₹${inr(Math.round((lim.priceInr * 10) / 12))}<small> / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p><p class="bill">₹${inr(lim.priceInr * 10)} billed yearly: 12 months for the price of 10</p></div>
+  <div class="mo"><p class="price">₹${inr(lim.priceInr)}<small> ${GST_NOTE} / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p><p class="bill">Billed monthly</p></div>
+  <div class="yr"><p class="price">₹${inr(Math.round((lim.priceInr * 10) / 12))}<small> ${GST_NOTE} / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p><p class="bill">₹${inr(lim.priceInr * 10)} ${GST_NOTE} billed yearly: 12 months for the price of 10</p></div>
   <p class="ptag">${esc(f.tag)}</p>
   <ul>
     ${limits.map((l) => `<li class="lim">${esc(l)}</li>`).join('')}
@@ -516,9 +529,9 @@ ${landingNav('')}
 <section id="pricing"><div class="wrap">
   <h2>Pricing</h2>
   <div class="billing"><span class="save">2 months free</span><button type="button" class="on" data-b="mo" onclick="bill('mo')">MONTHLY</button><button type="button" data-b="yr" onclick="bill('yr')">YEARLY</button></div>
-  <p class="kicker">One post means one post on all its channels. AI is included on Starter and Growth.</p>
-  <div class="grid plans">${['starter', 'growth', 'agency'].map((id) => planCard(id, contactHref)).join('')}</div>
-  <p class="fine">All plans: over the limit, ₹999 for 30 more posts and ₹349 per extra AI video. Pay yearly: 10 months, get 12. Start with a 7-day trial of Starter. Prices in Indian rupees, per workspace.</p>
+  <p class="kicker">One post means one post on all its channels. AI is included on Starter Lite, Starter and Growth.</p>
+  <div class="grid plans">${['lite', 'starter', 'growth', 'agency'].map((id) => planCard(id, contactHref)).join('')}</div>
+  <p class="fine">All plans: over the limit, ₹999 ${GST_NOTE} for 30 more posts and ₹349 ${GST_NOTE} per extra AI video. Pay yearly: 10 months, get 12. Start with a 7-day trial of Starter. Prices in Indian rupees, per workspace, before GST: 18% GST is added to every price.</p>
 </div></section>
 
 ${compareSection()}

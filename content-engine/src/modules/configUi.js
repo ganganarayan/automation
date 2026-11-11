@@ -1101,7 +1101,7 @@ function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [], aiCosts = 
       const agency = t.parent_id ? (tenantList || []).find((x) => String(x.id) === String(t.parent_id)) : null;
       const planCell = t.parent_id
         ? `<span class="hint">on ${esc(agency ? agency.name : t.parent_id)}'s Agency plan</span>`
-        : `<select onchange="savePlan(${i}, '${escJs(t.id)}', this.value)">${PLAN_IDS.map((p) => '<option value="' + p + '"' + ((t.plan || 'custom') === p ? ' selected' : '') + '>' + esc(PLANS[p].label) + (PLANS[p].priceInr ? ' ₹' + PLANS[p].priceInr.toLocaleString('en-IN') : '') + '</option>').join('')}</select><span id="flag-p${i}" class="saveflag">saved</span>`;
+        : `<select onchange="savePlan(${i}, '${escJs(t.id)}', this.value)">${PLAN_IDS.map((p) => '<option value="' + p + '"' + ((t.plan || 'custom') === p ? ' selected' : '') + '>' + esc(PLANS[p].label) + (PLANS[p].priceInr ? ' ₹' + PLANS[p].priceInr.toLocaleString('en-IN') + ' + GST' : '') + '</option>').join('')}</select><span id="flag-p${i}" class="saveflag">saved</span>`;
       return `<tr>
         <td>${t.parent_id ? '↳ ' : ''}${esc(t.name)}${t.status !== 'active' ? ` <span class="pill">${esc(t.status)}</span>` : ''}${t.cancelled_at ? ` <span class="pill">🟡 cancelled ${esc(formatIst(t.cancelled_at, { withTime: false }))}, do not renew</span>` : ''}${t.parent_id ? `<div class="hint">client of ${esc(agency ? agency.name : t.parent_id)}</div>` : ''}</td>
         <td>${esc(t.owner_email || '-')}</td>

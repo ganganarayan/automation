@@ -145,7 +145,7 @@ export async function hookJob({ ticket }) {
     openaiKey: (r.openai || {}).apiKey || '',
     text: job.text || '',
     voiceId: job.voiceId || '',
-    voiceModel: 'eleven_multilingual_v2',
+    voiceModel: job.voiceModel || 'eleven_multilingual_v2',
     elevenlabsKey: ((r.tts || {}).elevenlabsApiKey) || '',
     // A festival post may pick its own track, or none (job.musicSetting).
     music: pickMusic(await expandMusic(job.musicSetting || r.shortMusic || {})),

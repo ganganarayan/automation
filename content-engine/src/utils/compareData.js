@@ -65,7 +65,7 @@ export const US = {
   byoKeys: ['y', 'Agency plan: your OpenAI, Claude, Kling, MiniMax and ElevenLabs keys.'],
   workspaces: ['y', 'A funnel per brand, and a workspace per client with its own keys and accounts.'],
   freePlan: ['p', 'No free plan. 7-day trial of Starter.'],
-  entryPrice: ['y', '₹2,499 a month for 30 posts on every channel, AI included.'],
+  entryPrice: ['y', '₹999 + GST a month for 15 posts on every channel, AI included; ₹2,499 + GST for 30.'],
   inr: ['y', 'Priced and billed in Indian rupees.'],
 };
 

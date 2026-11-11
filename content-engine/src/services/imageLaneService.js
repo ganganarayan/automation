@@ -52,6 +52,7 @@ import { platformKey } from '../utils/aiCopySpec.js';
 import { createTtsProvider } from '../providers/ttsProvider.js';
 import { costImages, costAnimation, costTts, costClaude } from '../utils/pricing.js';
 import sharp from 'sharp';
+import { LEAN_VOICE_MODEL, FULL_VOICE_MODEL } from '../utils/planSpec.js';
 import { placeText, drawText } from './textPlaceService.js';
 import { eyebrowClean } from '../utils/thumbSpec.js';
 import { SPLIT_SCHEMA, splitSystem, splitUser, splitResult } from '../utils/imageSplitSpec.js';
@@ -205,7 +206,7 @@ async function startOnGithub({ instanceId, f, providers, log = baseLog }) {
   // With Claude set the pictures are made here in two steps (no text, then the words placed);
   // GitHub then only voices them. Their cost is recorded now.
   let drawn = null;
-  if (providers.claude && !(img.festival && img.festival.imageUrl)) {
+  if ((providers.claude || providers.resolved?.lean) && !(img.festival && img.festival.imageUrl)) {
     const d = await drawOnRailway({ instanceId, f, providers, log }, img, inst.round);
     inst = await instanceRepo.get(instanceId);
     steps = instanceService.parseSteps(inst);
@@ -227,6 +228,7 @@ async function startOnGithub({ instanceId, f, providers, log = baseLog }) {
     ...(given ? { imageUrls: Object.fromEntries(sizes.map((s) => [s, img.festival.imageUrl])), subMargins: photoSubMargins(img.festival), subTop: true, title: img.festival.title || '', musicSetting: musicChoice(providers.resolved.shortMusic, img.festival.music, img.festival.musicCredit) } : {}),
     text: script.captionFull || script.captionShort || '',
     voiceId: (img.festival && img.festival.voiceId) || cfg.voice_id || '',
+    voiceModel: voiceModelFor(providers),
     // A festival post may set one level for itself; else the funnel's.
     musicVolume: musicVolumePct(festivalVolume(img.festival) ?? cfg.music_volume),
     name: `${poster.slug(f.name)}-${poster.slug((img.sheet || {}).key || (given ? 'festival' : ''))}-r${inst.round || 1}`,
@@ -252,9 +254,9 @@ export async function githubDone(instanceId, result) {
   });
   const at = new Date().toISOString();
   if (result.made) steps = addCostToSteps(steps, 'images', { ...costImages({ count: result.made, size: '1024x1536' }), at });
-  if (result.chars) steps = addCostToSteps(steps, 'images', { ...costTts({ provider: 'elevenlabs', chars: result.chars }), at });
-  await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
   const ctx = await contextOf(inst, log);
+  if (result.chars) steps = addCostToSteps(steps, 'images', { ...costTts({ provider: voicePriceKey(ctx && ctx.providers), chars: result.chars }), at });
+  await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
   if (ctx) await finishReview(instanceId, ctx.f, log);
 }
 
@@ -271,6 +273,24 @@ export async function githubFailed(instanceId, error) {
     log.warn({ err: err.message }, 'image post not made');
   }
   return null;
+}
+
+/** The ElevenLabs model for this workspace's plan: Flash on a lean plan. */
+export function voiceModelFor(providers) {
+  return providers && providers.resolved && providers.resolved.lean ? LEAN_VOICE_MODEL : FULL_VOICE_MODEL;
+}
+
+/** The price-table key for that voice. */
+export function voicePriceKey(providers) {
+  return voiceModelFor(providers) === LEAN_VOICE_MODEL ? 'elevenlabs_flash' : 'elevenlabs';
+}
+
+/** The 4:5 picture cut from the middle of a 9:16 one (the headline sits clear of the edges). */
+export async function cropFeed(buf) {
+  const { width, height } = await sharp(buf).metadata();
+  const h = Math.min(height, Math.round((width * 5) / 4));
+  const top = Math.max(0, Math.round((height - h) / 2));
+  return sharp(buf).extract({ left: 0, top, width, height: h }).png().toBuffer();
 }
 
 /** Draw the three pictures on Railway (OpenAI, else Gemini) and upload them to Drive. */
@@ -305,10 +325,29 @@ async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
     if (!up || !up.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
     return up;
   };
+  let upload = null;
+  if (providers.resolved?.lean) {
+    // Starter Lite: draw the 9:16 picture once and cut the 4:5 from its middle;
+    // the 16:9 size uses the 4:5 (its video fits it on a blurred copy of itself).
+    const tall = await poster.generate(providers, sizedPrompt(split ? split.picture : img.prompt || '', 'portrait'), imageSpec(IMAGE_VIDEO_SIZES.portrait.gen).size, providers.resolved?.openai?.apiKey ? IMAGE_VIDEO_SIZES.portrait.gen : 'square');
+    made += 1;
+    const cut = await cropFeed(tall);
+    if (split) {
+      pictures.portrait = tall;
+      pictures.feed = cut;
+    } else {
+      for (const [size, buf] of [['feed', cut], ['portrait', tall]]) {
+        const up = await providers.storage.uploadPng(f.driveFolder, name(size), buf);
+        if (!up || !up.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
+        if (size === 'feed') upload = up;
+        sized[size] = up.downloadUrl;
+      }
+    }
+  }
   // The 4:5 one is the preview and the picture-mode post; a size that fails uses it.
-  let upload = await draw('feed');
-  if (upload) sized.feed = upload.downloadUrl;
-  for (const size of ['portrait', 'landscape']) {
+  if (!providers.resolved?.lean) upload = await draw('feed');
+  if (upload && !sized.feed) sized.feed = upload.downloadUrl;
+  for (const size of providers.resolved?.lean ? [] : ['portrait', 'landscape']) {
     try {
       const up = await draw(size);
       if (up) sized[size] = up.downloadUrl;
@@ -406,7 +445,7 @@ async function makeOnRailway(ctx) {
   // Real cost when OpenAI made it (Gemini has no per-image price table here).
   if (providers.resolved?.openai?.apiKey && made) steps = addCostToSteps(steps, 'images', { ...costImages({ count: made, size: '1024x1536' }), at });
   for (const { step, ...c } of drawCosts) steps = addCostToSteps(steps, 'images', { ...c, at });
-  if (chars) steps = addCostToSteps(steps, 'images', { ...costTts({ provider: 'elevenlabs', chars }), at });
+  if (chars) steps = addCostToSteps(steps, 'images', { ...costTts({ provider: voicePriceKey(providers), chars }), at });
   await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
   await finishReview(instanceId, f, log);
 }
@@ -759,7 +798,7 @@ export async function approve(approval) {
       ...(video.subtitleError ? { subtitleError: video.subtitleError } : {}),
     };
     accounts.splice(0, accounts.length, ...(f.accounts || []));
-    if (video.chars) steps = addCostToSteps(steps, 'publish', { ...costTts({ provider: 'elevenlabs', chars: video.chars }), at: new Date().toISOString() });
+    if (video.chars) steps = addCostToSteps(steps, 'publish', { ...costTts({ provider: voicePriceKey(providers), chars: video.chars }), at: new Date().toISOString() });
   }
   // YouTube takes no images: it gets the picture as a Short, on a post of its own.
   const ytAccounts = (f.accounts || []).filter((id) => !accounts.includes(id));
@@ -832,13 +871,13 @@ async function voiceSetup({ funnelId, providers, log, voiceId = '' }) {
   // A festival post may pick one ElevenLabs voice for every funnel.
   if (voiceId) {
     if (!apiKey) return { error: 'no ElevenLabs key: add it on Keys and credit' };
-    return { tts: createTtsProvider({ provider: 'elevenlabs', apiKey, voiceId }, log) };
+    return { tts: createTtsProvider({ provider: 'elevenlabs', apiKey, voiceId, model: voiceModelFor(providers) }, log) };
   }
   const cfg = await funnels.getConfig(funnelId).catch(() => ({}));
   if (!cfg.voice_id) return { error: 'no voice chosen for this funnel: pick one in its lane setup (Lane 2, Voice)' };
   if (!apiKey) return { error: 'no ElevenLabs key: add it on Keys and credit' };
   if (String(cfg.tts_provider || 'elevenlabs').toLowerCase() !== 'elevenlabs') return { error: 'image-post videos need an ElevenLabs voice (this funnel uses another voice provider)' };
-  return { tts: createTtsProvider({ provider: 'elevenlabs', apiKey, voiceId: cfg.voice_id }, log) };
+  return { tts: createTtsProvider({ provider: 'elevenlabs', apiKey, voiceId: cfg.voice_id, model: voiceModelFor(providers) }, log) };
 }
 
 /**

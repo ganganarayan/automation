@@ -12,6 +12,7 @@ import { DEFAULT_MAIL_PROVIDER } from '../utils/mailApis.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import * as tenantRepo from '../repositories/tenantRepository.js';
 import { scopeFor, OWNER_TENANT } from '../utils/pfmScope.js';
+import { isLean } from '../utils/planSpec.js';
 
 const CACHE_TTL_MS = 60_000;
 const cache = new Map();
@@ -355,6 +356,8 @@ export async function forTenant(tenantId = 'default') {
     postformeKey: pfm.key,
     postformeScope: pfm.scope,
     postformeShared: pfm.shared,
+    // Starter Lite: one picture per post and the low-cost voice (utils/planSpec.js).
+    lean: !isOwner && !!meta && isLean(meta.plan),
     // Per provider: 'tenant' (its own key), 'platform' (the owner's) or 'none'.
     get keyOwners() { return keyOwners; },
     keyHistory: hist,

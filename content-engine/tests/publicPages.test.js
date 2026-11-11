@@ -27,7 +27,7 @@ describe('public pages', () => {
     expect(h).toContain('See it in action');
     expect(h).toContain('Cancel any time, one click');
     expect(h).toContain(`₹${inr(Math.round((PLANS.starter.priceInr * 10) / 12))}`);
-    expect(h).toContain(`₹${inr(PLANS.starter.priceInr * 10)} billed yearly`);
+    expect(h).toContain(`₹${inr(PLANS.starter.priceInr * 10)} + GST billed yearly`);
     expect(h).toContain('class="float-cta"');
   });
   it('home plan buttons mail the contact, or open sign-in without one', () => {
