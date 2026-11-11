@@ -27,4 +27,17 @@ describe('routerClash: a hand-scheduled post on a day the router filled', () => 
   it('a pick already scheduled with Post for Me can only be posted alongside', () => {
     expect(routerClash(day, { id: 7, status: 'scheduled', source_type: 'drive_folder' }, { instanceId: 9 })).toEqual({ canReplace: false });
   });
+
+  it('no clash when the pick was moved to another day and posted there', () => {
+    // Lined up for 11-11, posted 10-11 10:00 IST (04:30 UTC): 11-11 is free.
+    const moved = { id: 7, status: 'posted', source_type: 'drive_folder', scheduled_for: '2026-11-10T04:30:00Z', posted_at: '2026-11-10T02:31:00Z' };
+    expect(routerClash(day, moved, { instanceId: 9, postDate: '2026-11-11' })).toBeNull();
+    expect(routerClash(day, moved, { instanceId: 9, postDate: '2026-11-10' })).toEqual({ canReplace: false });
+  });
+
+  it('still a clash when the pick sits on that day in IST (late UTC evening)', () => {
+    // 10-11 20:00 UTC = 11-11 01:30 IST.
+    const pick = { id: 7, status: 'scheduled', source_type: 'drive_folder', scheduled_for: new Date('2026-11-10T20:00:00Z') };
+    expect(routerClash(day, pick, { instanceId: 9, postDate: '2026-11-11' })).toEqual({ canReplace: false });
+  });
 });

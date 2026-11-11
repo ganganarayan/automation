@@ -666,12 +666,19 @@ export function rerunAction(row = null) {
  * router's pick clash with it? null when not (no pick, the same instance or
  * video, or the pick failed / was replaced); else { canReplace }, false when
  * the pick is already approved or scheduled with Post for Me.
+ * postDate ('yyyy-MM-dd'): a pick that was moved to another day (its own
+ * schedule or post time is not on postDate) no longer fills it, so no clash.
  */
-export function routerClash(day, held, { instanceId = null, driveId = '' } = {}) {
+export function routerClash(day, held, { instanceId = null, driveId = '', postDate = '' } = {}) {
   if (!day || !day.instance_id || day.lane === 'none') return null;
   if (instanceId && String(day.instance_id) === String(instanceId)) return null;
   if (!held || ['failed', 'superseded'].includes(held.status)) return null;
   if (driveId && held.source_ref && String(held.source_ref) === String(driveId)) return null;
+  const heldAt = held.scheduled_for || held.posted_at;
+  if (postDate && heldAt) {
+    const at = DateTime.fromJSDate(new Date(heldAt)).setZone(ZONE);
+    if (at.isValid && at.toFormat('yyyy-MM-dd') !== postDate) return null;
+  }
   return { canReplace: rerunAction(held) !== 'keep' };
 }
 

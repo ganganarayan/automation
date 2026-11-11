@@ -1587,7 +1587,7 @@ async function routerClashes(funnel, items) {
     const postDate = postDateOf(item.scheduledIso);
     const day = await routerDays.get(funnel.id, postDate).catch(() => null);
     const held = day && day.instance_id ? await instanceRepo.get(day.instance_id).catch(() => null) : null;
-    const c = routerClash(day, held, { instanceId: item.instanceId, driveId: item.driveId });
+    const c = routerClash(day, held, { instanceId: item.instanceId, driveId: item.driveId, postDate });
     if (c) out.push({ ...c, driveId: item.driveId, name: item.name, postDate, day: formatIst(DateTime.fromISO(postDate, { zone: 'Asia/Kolkata' }), { withTime: false }), held: { id: held.id, title: held.title || '', status: held.status }, dayId: day.id });
   }
   return out;
