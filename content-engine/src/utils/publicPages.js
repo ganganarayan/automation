@@ -20,6 +20,12 @@ export const LOGIN_PATH = '/api/v1/admin/today';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+/** "+ GST" beside a price, faded so the price reads first (class gst). */
+export const GST_HTML = `<span class="gst">${GST_NOTE}</span>`;
+
+/** Escape text, then fade every "+ GST" in it. */
+export const escGst = (s) => esc(s).split(GST_NOTE).join(GST_HTML);
+
 function shell(title, inner) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
@@ -62,6 +68,8 @@ export const PLAN_FEATURES = {
     tag: 'Show up every other day, for less',
     lines: [
       'Image posts as voiced videos with music, every size',
+      'One picture per post, cut to 9:16, 4:5 and 16:9',
+      'A lighter AI voice that costs less (ElevenLabs Flash)',
       'AI copy and a headline on every picture',
       'YouTube Shorts from image posts',
       'Daily router that picks what goes out',
@@ -368,6 +376,7 @@ const HOME_CSS = `
  .billing .save{position:absolute;top:-1.3rem;right:-.4rem;background:var(--green);color:#06210f;font-size:.72rem;font-weight:800;border-radius:6px;padding:.1rem .45rem}
  .plan .yr{display:none}.yearly .plan .yr{display:block}.yearly .plan .mo{display:none}
  .plan .bill{color:var(--mute);font-size:.85rem;margin:.15rem 0 0}
+ .gst{color:var(--mute);opacity:.55;font-weight:400;font-size:.85em;white-space:nowrap}
  .float-cta{position:fixed;right:18px;bottom:18px;z-index:9;background:#f5d90a;color:#14140a;font-weight:800;border-radius:12px;padding:.85rem 1.2rem;text-decoration:none;box-shadow:0 10px 30px rgba(0,0,0,.35)}
  @media (max-width:900px){.act-wrap,.act-stage{grid-template-columns:1fr}}
  @media (max-width:760px){.links{display:none}.hero{padding:3.5rem 0 2.5rem}section{padding:3rem 0}}
@@ -454,8 +463,8 @@ function planCard(id, contactHref) {
   return `<div class="card plan${best ? ' best' : ''}">
   ${best ? '<span class="badge">Most popular</span>' : ''}
   <h3>${esc(lim.label)}</h3>
-  <div class="mo"><p class="price">₹${inr(lim.priceInr)}<small> ${GST_NOTE} / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p><p class="bill">Billed monthly</p></div>
-  <div class="yr"><p class="price">₹${inr(Math.round((lim.priceInr * 10) / 12))}<small> ${GST_NOTE} / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p><p class="bill">₹${inr(lim.priceInr * 10)} ${GST_NOTE} billed yearly: 12 months for the price of 10</p></div>
+  <div class="mo"><p class="price">₹${inr(lim.priceInr)}<small> ${GST_HTML} / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p><p class="bill">Billed monthly</p></div>
+  <div class="yr"><p class="price">₹${inr(Math.round((lim.priceInr * 10) / 12))}<small> ${GST_HTML} / month${id === 'agency' ? ' + your own AI keys' : ''}</small></p><p class="bill">₹${inr(lim.priceInr * 10)} ${GST_HTML} billed yearly: 12 months for the price of 10</p></div>
   <p class="ptag">${esc(f.tag)}</p>
   <ul>
     ${limits.map((l) => `<li class="lim">${esc(l)}</li>`).join('')}
@@ -531,7 +540,7 @@ ${landingNav('')}
   <div class="billing"><span class="save">2 months free</span><button type="button" class="on" data-b="mo" onclick="bill('mo')">MONTHLY</button><button type="button" data-b="yr" onclick="bill('yr')">YEARLY</button></div>
   <p class="kicker">One post means one post on all its channels. AI is included on Starter Lite, Starter and Growth.</p>
   <div class="grid plans">${['lite', 'starter', 'growth', 'agency'].map((id) => planCard(id, contactHref)).join('')}</div>
-  <p class="fine">All plans: over the limit, ₹999 ${GST_NOTE} for 30 more posts and ₹349 ${GST_NOTE} per extra AI video. Pay yearly: 10 months, get 12. Start with a 7-day trial of Starter. Prices in Indian rupees, per workspace, before GST: 18% GST is added to every price.</p>
+  <p class="fine">All plans: over the limit, ₹999 ${GST_HTML} for 30 more posts and ₹349 ${GST_HTML} per extra AI video. Pay yearly: 10 months, get 12. Start with a 7-day trial of Starter. Prices in Indian rupees, per workspace, before GST: 18% GST is added to every price.</p>
 </div></section>
 
 ${compareSection()}
@@ -539,7 +548,7 @@ ${compareSection()}
 <section id="faq"><div class="wrap">
   <h2>Questions</h2>
   <p class="kicker">The short answers.</p>
-  ${FAQ.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}
+  ${FAQ.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${escGst(a)}</p></details>`).join('')}
 </div></section>
 
 <section class="final"><div class="wrap">

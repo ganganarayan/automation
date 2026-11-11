@@ -22,12 +22,12 @@ describe('Starter Lite', () => {
   it('the landing page shows Lite first and every price + GST', () => {
     const h = homePage();
     expect(h).toContain('Starter Lite');
-    expect(h).toContain('₹999<small> + GST / month');
-    expect(h).toContain('₹2,499<small> + GST / month');
+    expect(h).toContain('₹999<small> <span class="gst">+ GST</span> / month');
+    expect(h).toContain('₹2,499<small> <span class="gst">+ GST</span> / month');
     expect(h).toContain('18% GST is added to every price');
     const prices = h.match(/₹[\d,]+(<small>)? ?[^₹]{0,12}/g) || [];
     // every plan price and add-on on the page carries + GST (comparison texts aside)
-    const pricing = h.slice(h.indexOf('id="pricing"'), h.indexOf('id="compare"'));
+    const pricing = h.slice(h.indexOf('id="pricing"'), h.indexOf('id="compare"')).split('<span class="gst">').join('');
     for (const m of pricing.match(/₹[\d,]+(<small>)?[^<\d,]{0,8}/g) || []) expect(m).toMatch(/\+ GST/);
     expect(prices.length).toBeGreaterThan(0);
   });

@@ -13,7 +13,7 @@
 
 import { CHECKED_ON, VERDICT, ROWS, US, COMPETITORS, REVENUE_PATH, bySlug } from './compareData.js';
 import {
-  landingHead, landingNav, landingFooter, contactHrefFor, compareMatrix, compareCards, comparePath, LOGIN_PATH,
+  landingHead, landingNav, landingFooter, contactHrefFor, compareMatrix, compareCards, comparePath, LOGIN_PATH, escGst,
 } from './publicPages.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -29,7 +29,7 @@ export function competitorForPage(page) {
 const word = (v) => (VERDICT[v] || VERDICT.u);
 const cell = (v, note, src) => {
   const m = word(v);
-  return `<span class="${m.cls}">${m.sym} ${esc(m.word)}</span><small>${esc(note)}${src ? ` <a href="${esc(src)}" rel="nofollow noopener" target="_blank">source</a>` : ''}</small>`;
+  return `<span class="${m.cls}">${m.sym} ${esc(m.word)}</span><small>${escGst(note)}${src ? ` <a href="${esc(src)}" rel="nofollow noopener" target="_blank">source</a>` : ''}</small>`;
 };
 
 function finalCta(email, heading) {
@@ -99,7 +99,7 @@ ${landingNav('/')}
 <section><div class="wrap">
   <h2>What Content Engine adds</h2>
   <p class="kicker">${gaps.length} things Content Engine does that ${esc(c.name)} does not list, or only does in part.</p>
-  <div class="grid g3">${gaps.map((r) => `<div class="card"><h3>${esc(r.label)}</h3><p>${esc(US[r.key][1])}</p><p style="margin-top:.6rem"><b>${esc(c.name)}:</b> ${esc(them(r.key)[1])}</p></div>`).join('')}</div>
+  <div class="grid g3">${gaps.map((r) => `<div class="card"><h3>${esc(r.label)}</h3><p>${escGst(US[r.key][1])}</p><p style="margin-top:.6rem"><b>${esc(c.name)}:</b> ${esc(them(r.key)[1])}</p></div>`).join('')}</div>
 </div></section>
 
 <section><div class="wrap">
