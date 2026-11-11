@@ -21,6 +21,15 @@ describe('public pages', () => {
     for (const c of CHANNELS) expect(h).toContain(c);
     expect(h).not.toContain(String.fromCharCode(0x2014));
   });
+  it('home has the trust strip, before and after, see it in action, and a yearly price of 10 months for 12', () => {
+    const h = homePage();
+    expect(h).toContain('Before Content Engine');
+    expect(h).toContain('See it in action');
+    expect(h).toContain('Cancel any time, one click');
+    expect(h).toContain(`₹${inr(Math.round((PLANS.starter.priceInr * 10) / 12))}`);
+    expect(h).toContain(`₹${inr(PLANS.starter.priceInr * 10)} billed yearly`);
+    expect(h).toContain('class="float-cta"');
+  });
   it('home plan buttons mail the contact, or open sign-in without one', () => {
     expect(homePage({ email: 'a@b.co' })).toContain('mailto:a@b.co?subject=');
     expect(homePage()).not.toContain('mailto:');
