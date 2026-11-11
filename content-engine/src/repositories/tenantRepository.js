@@ -19,8 +19,12 @@ export async function isActive(tenantId) {
 /** Every active tenant's id (background jobs loop over these). */
 export async function activeIds() {
   // Live only: active and not past its expiry (an expired tenant's jobs stop).
+  // A client is live only while its agency is.
   const { rows } = await query(
-    "SELECT id FROM tenants WHERE status = 'active' AND (expires_at IS NULL OR expires_at > now()) ORDER BY (id = $1) DESC, created_at ASC",
+    `SELECT t.id FROM tenants t LEFT JOIN tenants p ON p.id = t.parent_id
+      WHERE t.status = 'active' AND (t.expires_at IS NULL OR t.expires_at > now())
+        AND (t.parent_id IS NULL OR (p.status = 'active' AND (p.expires_at IS NULL OR p.expires_at > now())))
+      ORDER BY (t.id = $1) DESC, t.created_at ASC`,
     ['default'],
   );
   return rows.map((r) => String(r.id));
@@ -30,6 +34,18 @@ export async function activeIds() {
 export async function findById(tenantId) {
   const { rows } = await query('SELECT * FROM tenants WHERE id = $1', [tenantId]);
   return rows[0] || null;
+}
+
+/** An agency's clients (tenants whose parent it is), oldest first. */
+export async function childrenOf(tenantId) {
+  const { rows } = await query('SELECT * FROM tenants WHERE parent_id = $1 ORDER BY created_at ASC', [tenantId]);
+  return rows;
+}
+
+/** How many clients an agency has (archived ones not counted). */
+export async function countChildren(tenantId) {
+  const { rows } = await query("SELECT count(*)::int AS n FROM tenants WHERE parent_id = $1 AND status <> 'archived'", [tenantId]);
+  return rows[0].n;
 }
 
 /** List all tenants (for the config UI selector). */
@@ -58,8 +74,8 @@ export async function create({ id, name }) {
 /** Every tenant with its subscription details (the super admin's Tenants list). */
 export async function listWithSubscription() {
   const { rows } = await query(
-    `SELECT id, name, status, plan, owner_email, phone, COALESCE(subscribed_at, created_at) AS subscribed_at, expires_at
-       FROM tenants ORDER BY (id = $1) DESC, created_at ASC`,
+    `SELECT id, name, status, plan, parent_id, owner_email, phone, COALESCE(subscribed_at, created_at) AS subscribed_at, expires_at
+       FROM tenants ORDER BY (id = $1) DESC, COALESCE(parent_id, id) ASC, (parent_id IS NOT NULL) ASC, created_at ASC`,
     ['default'],
   );
   return rows;
@@ -72,13 +88,13 @@ export async function setExpiry(tenantId, expiresAt) {
 }
 
 /** A new tenant with its details (super admin). Fails if the id is taken. */
-export async function createNew({ id, name, ownerEmail, phone = '', plan = 'custom', expiresAt = null }) {
+export async function createNew({ id, name, ownerEmail, phone = '', plan = 'custom', expiresAt = null, parentId = null }) {
   const { rows } = await query(
-    `INSERT INTO tenants (id, name, status, owner_email, phone, plan, subscribed_at, expires_at)
-     VALUES ($1, $2, 'active', $3, $4, $5, now(), $6)
+    `INSERT INTO tenants (id, name, status, owner_email, phone, plan, subscribed_at, expires_at, parent_id)
+     VALUES ($1, $2, 'active', $3, $4, $5, now(), $6, $7)
      ON CONFLICT (id) DO NOTHING
-     RETURNING id, name, status, plan, owner_email, phone, subscribed_at, expires_at`,
-    [id, name || id, String(ownerEmail || '').trim().toLowerCase(), phone || null, plan, expiresAt],
+     RETURNING id, name, status, plan, parent_id, owner_email, phone, subscribed_at, expires_at`,
+    [id, name || id, String(ownerEmail || '').trim().toLowerCase(), phone || null, plan, expiresAt, parentId || null],
   );
   if (!rows[0]) throw new Error('that workspace id is taken');
   return rows[0];
@@ -90,4 +106,4 @@ export async function setPlan(tenantId, plan) {
   if (!rowCount) throw new Error('tenant not found');
 }
 
-export default { createNew, setPlan, isActive, activeIds, findById, list, create, listWithSubscription, setExpiry };
+export default { createNew, setPlan, isActive, activeIds, findById, childrenOf, countChildren, list, create, listWithSubscription, setExpiry };

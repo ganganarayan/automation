@@ -88,13 +88,32 @@ export function navHtml({ current = '', key = '', tabs = false, superAdmin = fal
     ? `<div class="nvwho">${esc(session.email)}${session.role ? `<span>${esc(roleLabel(session.role))}</span>` : ''}</div>`
     : '';
 
-  return `<div class="brand">⚙️ automation</div>
+  return `<div class="brand">⚙️ automation</div>${switcherHtml(session)}
     <div class="nvlabel" style="margin-top:0">Work</div>
     <div class="nvgroup">${work}</div>
     <div class="nvlabel">Setup</div>
     <div class="nvgroup">${setup}</div>
     <div class="nvfoot">${who}
     <form method="post" action="/api/v1/admin/logout" style="margin:0"><button type="submit" class="nv"><span class="nvi">⎋</span>Sign out</button></form></div>`;
+}
+
+/**
+ * The workspace switcher: only for someone with more than one workspace (an
+ * agency admin and its clients). Posts to /admin/workspace, which checks again.
+ * @param {{tenantId?:string, workspaces?:Array<{id:string,name:string,parentId:string|null}>}|null} session
+ */
+export function switcherHtml(session = null) {
+  const list = (session && Array.isArray(session.workspaces)) ? session.workspaces : [];
+  if (list.length < 2) return '';
+  const cur = String(session.tenantId || '');
+  const opts = list
+    .map((w) => `<option value="${esc(w.id)}"${w.id === cur ? ' selected' : ''}>${esc(w.name)}${w.parentId ? ' (client)' : ''}</option>`)
+    .join('');
+  return `<form class="nvws" method="post" action="/api/v1/admin/workspace">
+      <label for="nvws-sel">Workspace</label>
+      <select id="nvws-sel" name="workspace" onchange="this.form.submit()">${opts}</select>
+      <noscript><button type="submit" class="nv">Open</button></noscript>
+    </form>`;
 }
 
 /**
@@ -122,7 +141,10 @@ export const NAV_CSS = `
  .nvlabel{color:#6f6f88;font-size:.67rem;text-transform:uppercase;letter-spacing:.09em;margin:1.1rem .7rem .4rem}
  .nvfoot{margin-top:1.1rem;border-top:1px solid #1e1e2c;padding-top:.7rem}
  .nvwho{color:#8a8aa2;font-size:.76rem;padding:0 .7rem .4rem;word-break:break-all}
- .nvwho span{display:block;color:#6f6f88;font-size:.7rem;margin-top:.1rem}`;
+ .nvwho span{display:block;color:#6f6f88;font-size:.7rem;margin-top:.1rem}
+ .nvws{margin:0 .2rem .9rem;display:flex;flex-direction:column;gap:.25rem}
+ .nvws label{color:#6f6f88;font-size:.67rem;text-transform:uppercase;letter-spacing:.09em;padding:0 .5rem}
+ .nvws select{background:#1c1c2a;color:#fff;border:1px solid #2a2a44;border-radius:8px;padding:.42rem .5rem;font-size:.86rem;font-family:inherit;width:100%}`;
 
 /** The page frame the menu sits in, for pages that have no layout of their own. */
 export const NAV_SHELL_CSS = `
@@ -139,4 +161,4 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export default { WORK_ITEMS, HOME_PATH, workItemFor, setupItems, roleLabel, navHtml, navSlot, fillNav, NAV_CSS, NAV_SHELL_CSS };
+export default { WORK_ITEMS, HOME_PATH, workItemFor, setupItems, roleLabel, navHtml, switcherHtml, navSlot, fillNav, NAV_CSS, NAV_SHELL_CSS };

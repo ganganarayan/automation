@@ -31,7 +31,7 @@ export async function createSession({ tokenHash, email, mustChange, ttlMs }) {
 /** A live session joined with its user, or null (expired rows are ignored). */
 export async function findSession(tokenHash) {
   const { rows } = await query(
-    `SELECT s.token_hash, s.email, s.must_change, s.last_seen_at, u.role, u.tenant_id
+    `SELECT s.token_hash, s.email, s.must_change, s.last_seen_at, s.active_tenant_id, u.role, u.tenant_id
        FROM auth_sessions s JOIN users u ON u.email = s.email
       WHERE s.token_hash = $1 AND s.expires_at > now()`,
     [tokenHash],
@@ -46,6 +46,11 @@ export async function touchSession(tokenHash) {
       WHERE token_hash = $1 AND last_seen_at < now() - interval '1 minute'`,
     [tokenHash],
   );
+}
+
+/** The workspace this browser works in (null = home). The caller checks it may enter it. */
+export async function setActiveTenant(tokenHash, tenantId) {
+  await query('UPDATE auth_sessions SET active_tenant_id = $2 WHERE token_hash = $1', [tokenHash, tenantId || null]);
 }
 
 export async function deleteSession(tokenHash) {
@@ -101,6 +106,6 @@ export async function purgeExpired() {
 }
 
 export default {
-  findUser, createSession, findSession, touchSession, deleteSession, deleteSessionsFor,
+  findUser, createSession, findSession, touchSession, setActiveTenant, deleteSession, deleteSessionsFor,
   clearMustChange, setPassword, recordFailure, recordSuccess, purgeExpired,
 };

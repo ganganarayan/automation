@@ -7,14 +7,17 @@
  * Dependencies: none.
  *
  * null means unlimited. Posts are counted one per post (all its channels),
- * per IST month.
+ * per IST month. A client of an agency uses its agency's plan, and posts and AI
+ * videos are counted across the agency and all its clients (planService).
  */
 
 export const PLANS = {
-  starter: { label: 'Starter', priceInr: 2499, funnels: 1, channels: 5, posts: 30, aiVideos: 0, users: 1 },
-  growth: { label: 'Growth', priceInr: 8999, funnels: 3, channels: 6, posts: 90, aiVideos: 4, users: 3 },
-  agency: { label: 'Agency', priceInr: 14999, funnels: 10, channels: 10, posts: 300, aiVideos: null, users: 10 },
-  custom: { label: 'Custom (no limits)', priceInr: null, funnels: null, channels: null, posts: null, aiVideos: null, users: null },
+  starter: { label: 'Starter', priceInr: 2499, funnels: 1, channels: 5, posts: 30, aiVideos: 0, users: 1, clients: 0 },
+  growth: { label: 'Growth', priceInr: 8999, funnels: 3, channels: 6, posts: 90, aiVideos: 4, users: 3, clients: 0 },
+  // Agency: 10 clients, each its own workspace and logins, no cap on funnels or
+  // channels per client; posts are counted across the agency and its clients.
+  agency: { label: 'Agency', priceInr: 14999, funnels: null, channels: null, posts: 300, aiVideos: null, users: 10, clients: 10 },
+  custom: { label: 'Custom (no limits)', priceInr: null, funnels: null, channels: null, posts: null, aiVideos: null, users: null, clients: null },
 };
 
 export const PLAN_IDS = Object.keys(PLANS);
@@ -36,6 +39,7 @@ const WORDS = {
   posts: (n) => `${n} posts a month`,
   aiVideos: (n) => (n === 0 ? 'no AI videos' : `${n} AI video${n === 1 ? '' : 's'} a month`),
   users: (n) => `${n} user${n === 1 ? '' : 's'}`,
+  clients: (n) => (n === 0 ? 'no clients' : `${n} client${n === 1 ? '' : 's'}`),
 };
 
 /**

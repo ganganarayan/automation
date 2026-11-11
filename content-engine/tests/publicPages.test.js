@@ -17,6 +17,7 @@ describe('public pages', () => {
     }
     expect(h).toContain('30 posts a month');
     expect(h).toContain('No AI videos');
+    expect(h).toContain('10 clients, each its own workspace and login');
     for (const c of CHANNELS) expect(h).toContain(c);
     expect(h).not.toContain(String.fromCharCode(0x2014));
   });

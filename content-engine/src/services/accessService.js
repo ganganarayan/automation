@@ -18,6 +18,8 @@
  */
 import * as auth from '../repositories/authRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
+import * as membership from '../repositories/membershipRepository.js';
+import { mergeWorkspaces, mayEnter, pickWorkspace } from '../utils/workspaceSpec.js';
 import { settings } from '../settings/index.js';
 import { hashPassword, verifyPassword, passwordProblem, newToken, hashToken, safeEqual } from '../utils/passwordSpec.js';
 
@@ -67,7 +69,40 @@ function tokenHashOf(req) {
   return token ? hashToken(token) : null;
 }
 
-/** The signed-in session ({ email, role, mustChange, tokenHash }) or null. Cached per request. */
+// Workspaces per email, for 30 s (every admin request reads them).
+const WS_TTL_MS = 30_000;
+const wsCache = new Map();
+async function workspacesOf(email, home) {
+  const hit = wsCache.get(email);
+  if (hit && Date.now() - hit.at < WS_TTL_MS) return hit.list;
+  const list = mergeWorkspaces(await membership.workspacesFor(email), home);
+  wsCache.set(email, { at: Date.now(), list });
+  return list;
+}
+
+/** Forget cached workspaces (after a client is added, moved or a member changes). */
+export function invalidateWorkspaces(email) {
+  if (email) wsCache.delete(email);
+  else wsCache.clear();
+}
+
+/**
+ * Work in another workspace from now on (this browser only).
+ * @returns {Promise<{ ok: boolean, error?: string, tenantId?: string }>}
+ */
+export async function switchWorkspace(req, tenantId) {
+  const session = await currentSession(req);
+  if (!session || session.mustChange) return { ok: false, error: 'Sign in first.' };
+  if (session.role === 'super_admin') return { ok: false, error: 'The super admin opens workspaces from Tenants.' };
+  invalidateWorkspaces(session.email);
+  const list = await workspacesOf(session.email, session.homeTenantId);
+  const id = String(tenantId || '');
+  if (!mayEnter(list, id)) return { ok: false, error: 'That workspace is not yours' };
+  await auth.setActiveTenant(session.tokenHash, id === session.homeTenantId ? null : id);
+  return { ok: true, tenantId: id };
+}
+
+/** The signed-in session ({ email, role, tenantId, homeTenantId, workspaces, mustChange, tokenHash }) or null. Cached per request. */
 export async function currentSession(req) {
   if (req._session !== undefined) return req._session;
   let session = null;
@@ -79,8 +114,15 @@ export async function currentSession(req) {
       try {
         const row = await auth.findSession(tokenHash);
         if (row) {
-          session = { email: row.email, role: row.role, tenantId: row.tenant_id || 'default', mustChange: row.must_change, tokenHash };
+          const home = row.tenant_id || 'default';
+          session = { email: row.email, role: row.role, tenantId: home, homeTenantId: home, workspaces: [], mustChange: row.must_change, tokenHash };
           auth.touchSession(tokenHash).catch(() => {});
+          // The workspace this browser works in: the switcher's pick while the
+          // person may still enter it, else home. A failed read keeps home.
+          if (row.role !== 'super_admin') {
+            session.workspaces = await workspacesOf(row.email, home).catch(() => []);
+            session.tenantId = pickWorkspace({ home, active: row.active_tenant_id, workspaces: session.workspaces });
+          }
         }
         req._sessionError = false;
         break;
@@ -242,5 +284,5 @@ export async function signOut(req, res) {
 }
 
 export default {
-  requiredKey, resetEnabled, currentSession, canApprove, keyOk, superOk, adminKeyOk, gateState, signIn, changePassword, resetWithCode, signOut, ACCESS_KEY_STORE,
+  requiredKey, resetEnabled, currentSession, switchWorkspace, invalidateWorkspaces, canApprove, keyOk, superOk, adminKeyOk, gateState, signIn, changePassword, resetWithCode, signOut, ACCESS_KEY_STORE,
 };

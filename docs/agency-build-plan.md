@@ -1,6 +1,6 @@
 # Agency build plan (content-engine)
 
-Written 11-11-2026. Nothing built yet.
+Written 11-11-2026. Phases 1 and 2 built on staging 11-11-2026, not tried with a real agency yet.
 
 Goal: an Agency account runs up to 10 clients. Each client is its own workspace
 with its own logins, social accounts, Drive, schedule and digest. The agency
@@ -16,7 +16,7 @@ workspace.
   engine"). No agency logo or colours.
 - Product name: open (see the end of this file).
 
-## Today
+## Before this build
 
 - An Agency is one tenant with 10 funnels, 10 users and its own AI keys
   (utils/planSpec.js). A client would be a funnel.
@@ -40,7 +40,7 @@ Rejected: clients as funnels inside one tenant. It needs a second isolation
 layer (per-funnel access, accounts, Drive, digest) beside the tenant one, and
 every QA leak check written twice.
 
-## Phase 1: parent and child, members, switcher
+## Phase 1: parent and child, members, switcher (🟢 on staging 11-11-2026)
 
 Code: migration 026, tenantRepository, accessService, middleware/tenantGuard.js,
 utils/adminNav.js.
@@ -58,8 +58,13 @@ utils/adminNav.js.
   workspace. Switching rewrites active_tenant_id and reloads the page.
 - Tests: decide() table for member, agency admin on own child, agency admin on
   another agency's child (refused), client on a sibling (refused).
+- Built: tenants.kind was dropped; a client is a tenant with parent_id, an agency
+  a top-level tenant on the Agency plan. The switcher is the only way in: a
+  header, ?tenant= or body.tenant for another workspace is still 403, and a
+  record of another workspace is still 404 (switch first). Until phase 3, the
+  super admin makes a client from Tenants, New tenant, "Client of ...".
 
-## Phase 2: keys, limits, expiry
+## Phase 2: keys, limits, expiry (🟢 on staging 11-11-2026)
 
 Code: core/tenantSettings.js (providerKey, postformeFor), utils/planSpec.js,
 services/planService.js.
@@ -76,6 +81,10 @@ services/planService.js.
   An 11th client is refused with the usual plan message.
 - **Expiry:** liveGate reads the parent. An expired or suspended agency makes its
   clients look-only too, and the waker skips them.
+- Built: an agency on its own Post for Me key with clients on it no longer
+  owns its clients' accounts; a client's webhook events go to its agency's
+  webhook. A client cannot change plan; an agency with clients cannot leave the
+  Agency plan.
 - 🟡 **Cost to watch:** with no channel cap, 300 posts on 15 channels each is
   4,500 Post for Me posts on your key, above its $10 plan's 1,000 a month. Either the agency brings its own Post for
   Me key (already supported, "off your bill"), or the posts cap stays the

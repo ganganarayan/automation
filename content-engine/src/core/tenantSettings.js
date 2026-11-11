@@ -57,9 +57,40 @@ export async function postformeFor(tenantId, o) {
   const ownKey = String((o && o.postforme_api_key) || '').trim();
   const ownerO = id === OWNER_TENANT ? o : await loadOverrides(OWNER_TENANT);
   const ownerKey = String((ownerO && ownerO.postforme_api_key) || settings.postforme.apiKey || '').trim();
+  if (id !== OWNER_TENANT) {
+    const meta = await tenantMeta(id);
+    // Unknown (failed read): post nowhere rather than on the wrong key.
+    if (meta.failed) return { key: '', scope: null, shared: false };
+    // A client on its agency's Post for Me key: only accounts with its own
+    // external_id, events on the agency's webhook.
+    if (meta.parentId && !ownKey) {
+      const agencyKey = String(((await loadOverrides(meta.parentId)) || {}).postforme_api_key || '').trim();
+      if (agencyKey && agencyKey !== ownerKey) {
+        return { key: agencyKey, scope: scopeFor({ tenantId: id, ownKey: '', ownerKey: agencyKey, ownerTenant: meta.parentId }), shared: false, agencyKey: true };
+      }
+    }
+    // An agency on its own key with clients on it: its clients' accounts are not its own.
+    if (!meta.parentId && ownKey && ownKey !== ownerKey && meta.plan === 'agency') {
+      const kids = await clientsOnKey(id, ownKey);
+      if (kids.length) return { key: ownKey, scope: scopeFor({ tenantId: id, ownerTenant: id, otherTenants: kids }), shared: false };
+    }
+  }
   const key = id === OWNER_TENANT ? ownerKey : (ownKey || ownerKey);
   const scope = key ? scopeFor({ tenantId: id, ownKey: id === OWNER_TENANT ? '' : ownKey, ownerKey, ownerTenant: OWNER_TENANT, otherTenants: id === OWNER_TENANT ? await otherTenantIds() : null }) : null;
   return { key, scope, shared: !!scope && key === ownerKey };
+}
+
+/** An agency's clients that post on its own Post for Me key (no key of their own). */
+async function clientsOnKey(agencyId, agencyKey) {
+  let kids = [];
+  try { kids = await tenantRepo.childrenOf(agencyId); } catch { return []; }
+  const out = [];
+  for (const k of kids) {
+    const ko = await loadOverrides(String(k.id));
+    const theirs = String((ko && ko.postforme_api_key) || '').trim();
+    if (!theirs || theirs === agencyKey) out.push(String(k.id));
+  }
+  return out;
 }
 
 // The paid provider keys. A tenant's own key wins; without one it uses the
@@ -82,33 +113,49 @@ const PROVIDER_KEYS = {
 export const BYO_PLANS = ['agency'];
 
 const planCache = new Map();
-async function planOf(tenantId) {
+async function tenantMeta(tenantId) {
   const hit = planCache.get(tenantId);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.plan;
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit;
   let plan = 'custom';
   let exists = false;
+  let parentId = null;
+  let failed = false;
   try {
-    const row = await tenantRepo.findById(tenantId);
+    // One retry: the first query after the app wakes can fail.
+    const row = await tenantRepo.findById(tenantId)
+      .catch(() => new Promise((r) => setTimeout(r, 400)).then(() => tenantRepo.findById(tenantId)));
     exists = !!row;
     plan = (row || {}).plan || 'custom';
-  } catch { /* keep custom */ }
-  planCache.set(tenantId, { at: Date.now(), plan, exists });
-  return plan;
+    parentId = row && row.parent_id ? String(row.parent_id) : null;
+  } catch {
+    // A database hiccup: the last known answer, else "unknown" (callers fail closed).
+    if (hit) return hit;
+    failed = true;
+  }
+  const meta = { at: Date.now(), plan, exists, parentId, failed };
+  if (!failed) planCache.set(tenantId, meta);
+  return meta;
 }
 
-/** True once planOf found a tenants row (no write for an id that has none). */
+/** True once tenantMeta found a tenants row (no write for an id that has none). */
 function tenantKnown(tenantId) {
   return !!(planCache.get(tenantId) || {}).exists;
 }
 
 /**
  * One provider key for a tenant: [value, owner] where owner is 'tenant' (its
- * own), 'platform' (the owner's) or 'none'. Pure, for tests.
+ * own, or its agency's: not on the owner's bill), 'platform' (the owner's) or
+ * 'none'. A client of an agency (agency = the agency's overrides) uses its own
+ * key, else the agency's, and never the owner's. Pure, for tests.
  */
-export function providerKey(key, { own = {}, owner = {}, isOwner = false, byo = false, envValue = '' }) {
+export function providerKey(key, { own = {}, owner = {}, isOwner = false, byo = false, envValue = '', agency = null }) {
   const mine = String(own[key] ?? '').trim();
   if (mine) return [mine, isOwner ? 'platform' : 'tenant'];
   if (isOwner) return [envValue || '', envValue ? 'platform' : 'none'];
+  if (agency) {
+    const theirs = String(agency[key] ?? '').trim();
+    return theirs ? [theirs, 'tenant'] : ['', 'none'];
+  }
   if (byo) return ['', 'none'];
   const plat = String(owner[key] ?? '').trim() || String(envValue || '').trim();
   return [plat, plat ? 'platform' : 'none'];
@@ -197,10 +244,14 @@ export async function forTenant(tenantId = 'default') {
   const pfm = await postformeFor(tenantId, o);
   const isOwner = String(tenantId || OWNER_TENANT) === OWNER_TENANT;
   const ownerO = isOwner ? o : await loadOverrides(OWNER_TENANT);
-  const byo = isOwner ? false : BYO_PLANS.includes(await planOf(String(tenantId)));
+  const meta = isOwner ? null : await tenantMeta(String(tenantId));
+  // A client of an agency: its agency's keys, never the owner's. A failed read
+  // of the tenant is treated as bring-your-own (no owner key) too.
+  const agencyO = meta && meta.parentId ? await loadOverrides(meta.parentId) : null;
+  const byo = isOwner ? false : (!!(meta && meta.failed) || !!agencyO || BYO_PLANS.includes(meta ? meta.plan : 'custom'));
   const keyOwners = {};
   const key = (k) => {
-    const [v, who] = providerKey(k, { own: o, owner: ownerO, isOwner, byo, envValue: PROVIDER_KEYS[k].env() });
+    const [v, who] = providerKey(k, { own: o, owner: ownerO, isOwner, byo, envValue: PROVIDER_KEYS[k].env(), agency: agencyO || null });
     const p = PROVIDER_KEYS[k].provider;
     if (!keyOwners[p] || keyOwners[p] === 'none') keyOwners[p] = who;
     return v;

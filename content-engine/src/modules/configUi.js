@@ -59,7 +59,8 @@ import { listElevenLabsVoices } from '../providers/ttsProvider.js';
 import { settings } from '../settings/index.js';
 import { listReadyVideos } from '../services/readyPostService.js';
 import { parseDriveFolderId } from '../utils/readyPostSpec.js';
-import { keyOk, superOk, gateState, currentSession } from '../services/accessService.js';
+import { keyOk, superOk, gateState, currentSession, invalidateWorkspaces } from '../services/accessService.js';
+import { AGENCY_PLAN, planChangeProblem } from '../utils/workspaceSpec.js';
 import * as wakeSchedule from '../services/wakeScheduleService.js';
 import * as cloudflareWake from '../services/cloudflareWakeService.js';
 import { DAILY_KEY, dailyTimeOf } from '../utils/cloudflareWake.js';
@@ -505,8 +506,12 @@ export function register(ctx) {
       const plan = String(req.body?.plan || '');
       if (!PLAN_IDS.includes(plan)) throw new Error('pick a plan');
       const tenant = String(req.body?.tenant || '');
+      const row = await tenantRepo.findById(tenant);
+      const why = planChangeProblem({ tenant: row, plan, clients: row ? await tenantRepo.countChildren(tenant) : 0 });
+      if (why) throw new Error(why);
       await tenantRepo.setPlan(tenant, plan);
       planService.invalidate(tenant);
+      tenantSettings.invalidate();
       res.json({ ok: true });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
@@ -521,18 +526,27 @@ export function register(ctx) {
       const b = req.body || {};
       const id = String(b.id || '').trim().toLowerCase();
       const email = String(b.owner_email || '').trim().toLowerCase();
-      const plan = PLAN_IDS.includes(String(b.plan)) ? String(b.plan) : 'starter';
-      const months = Math.max(0, Math.min(36, Number(b.months) || 0));
+      let plan = PLAN_IDS.includes(String(b.plan)) ? String(b.plan) : 'starter';
+      let months = Math.max(0, Math.min(36, Number(b.months) || 0));
       if (!validTenantId(id)) throw new Error('Workspace id: 2 to 31 lower-case letters, digits or dashes');
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Owner email is not valid');
       if (await users.findByEmail(email)) throw new Error('That email already has an account');
+      // A client of an agency: on the agency's plan, ending with the agency (no expiry of its own).
+      const parentId = String(b.parent || '').trim();
+      if (parentId) {
+        const why = await planService.clientReason(parentId);
+        if (why) throw new Error(why);
+        plan = AGENCY_PLAN;
+        months = 0;
+      }
       let expiresAt = null;
       if (months) { expiresAt = new Date(); expiresAt.setUTCMonth(expiresAt.getUTCMonth() + months); }
-      const tenant = await tenantRepo.createNew({ id, name: String(b.name || id).trim().slice(0, 80), ownerEmail: email, phone: String(b.phone || '').trim().slice(0, 30), plan, expiresAt });
+      const tenant = await tenantRepo.createNew({ id, name: String(b.name || id).trim().slice(0, 80), ownerEmail: email, phone: String(b.phone || '').trim().slice(0, 30), plan, expiresAt, parentId: parentId || null });
       const tempPassword = randomBytes(9).toString('base64url');
       await users.createForTenant({ email, tenantId: tenant.id, role: 'admin', passwordHash: await hashPassword(tempPassword) });
       tenantSettings.invalidate();
       planService.invalidate();
+      invalidateWorkspaces();
       res.json({ ok: true, tenant: tenant.id, email, tempPassword, expires: expiresAt ? formatIst(expiresAt, { withTime: false }) : '' });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
@@ -1071,12 +1085,16 @@ function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [], aiCosts = 
       // The date input wants YYYY-MM-DD; the expiry is the end of that IST day.
       const ex = t.expires_at ? new Date(new Date(t.expires_at).getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10) : '';
       const expired = t.expires_at && new Date(t.expires_at) < new Date();
+      const agency = t.parent_id ? (tenantList || []).find((x) => String(x.id) === String(t.parent_id)) : null;
+      const planCell = t.parent_id
+        ? `<span class="hint">on ${esc(agency ? agency.name : t.parent_id)}'s Agency plan</span>`
+        : `<select onchange="savePlan(${i}, '${escJs(t.id)}', this.value)">${PLAN_IDS.map((p) => '<option value="' + p + '"' + ((t.plan || 'custom') === p ? ' selected' : '') + '>' + esc(PLANS[p].label) + (PLANS[p].priceInr ? ' ₹' + PLANS[p].priceInr.toLocaleString('en-IN') : '') + '</option>').join('')}</select><span id="flag-p${i}" class="saveflag">saved</span>`;
       return `<tr>
-        <td>${esc(t.name)}${t.status !== 'active' ? ` <span class="pill">${esc(t.status)}</span>` : ''}</td>
+        <td>${t.parent_id ? '↳ ' : ''}${esc(t.name)}${t.status !== 'active' ? ` <span class="pill">${esc(t.status)}</span>` : ''}${t.parent_id ? `<div class="hint">client of ${esc(agency ? agency.name : t.parent_id)}</div>` : ''}</td>
         <td>${esc(t.owner_email || '-')}</td>
         <td>${esc(t.phone || '-')}</td>
         <td>${esc(formatIst(t.subscribed_at, { withTime: false }))}</td>
-        <td><select onchange="savePlan(${i}, '${escJs(t.id)}', this.value)">${PLAN_IDS.map((p) => '<option value="' + p + '"' + ((t.plan || 'custom') === p ? ' selected' : '') + '>' + esc(PLANS[p].label) + (PLANS[p].priceInr ? ' ₹' + PLANS[p].priceInr.toLocaleString('en-IN') : '') + '</option>').join('')}</select><span id="flag-p${i}" class="saveflag">saved</span></td>
+        <td>${planCell}</td>
         <td><div class="planwrap">
           <input id="tx-${i}" type="date" value="${ex}" onchange="saveExpiry(${i}, '${escJs(t.id)}')" title="${expired ? 'expired' : ''}">
           <button class="act" type="button" onclick="extendExpiry(${i}, '${escJs(t.id)}', 1)">+1 month</button>
@@ -1094,7 +1112,7 @@ function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [], aiCosts = 
       <table><thead><tr><th>Tenant</th><th>Email</th><th>Phone</th><th>Subscribed</th><th>Plan</th><th>Expires</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="6" class="hint">No tenants yet.</td></tr>'}</tbody></table>
     </fieldset>
-    ${newTenantBox()}
+    ${newTenantBox(tenantList)}
     ${qaBox(tenantList)}
     ${costBox(tenantList, aiCosts, new Date(), keyOwners, keyHistories)}
     ${usageBox(tenantList, postUsage, new Date(), ownKeyIds)}
@@ -1103,14 +1121,19 @@ function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [], aiCosts = 
 }
 
 /** Owner only: make a tenant and its first admin; the one-time password is shown once. */
-function newTenantBox() {
+function newTenantBox(tenantList = []) {
+  const agencies = (tenantList || []).filter((t) => !t.parent_id && t.plan === AGENCY_PLAN);
+  const clientsOf = (id) => (tenantList || []).filter((t) => String(t.parent_id || '') === String(id) && t.status !== 'archived').length;
+  const agencyOpts = agencies.map((a) => `<option value="${esc(a.id)}">Client of ${esc(a.name)} (${clientsOf(a.id)} of ${PLANS.agency.clients})</option>`).join('');
   return `<fieldset><legend>New tenant</legend>
     <p class="hint">Makes the workspace and its owner's sign-in. Give the owner the one-time password shown below; they choose their own at first sign-in. An expired or suspended workspace can still look around but cannot change or post anything.</p>
+    <p class="hint">A client of an agency is its own workspace on the agency's plan: it uses the agency's keys (never yours), ends when the agency does, and the agency's admins can open it from their workspace switcher.</p>
     <div class="row" style="gap:.4rem;align-items:center;flex-wrap:wrap">
       <input id="nt-id" placeholder="workspace id, e.g. acme" style="min-width:10rem">
       <input id="nt-name" placeholder="Name" style="min-width:12rem">
       <input id="nt-email" placeholder="Owner email" style="min-width:14rem">
       <input id="nt-phone" placeholder="Phone (optional)" style="min-width:9rem">
+      <select id="nt-parent" onchange="const c=!!this.value;document.getElementById('nt-plan').disabled=c;document.getElementById('nt-months').disabled=c"><option value="">Its own workspace</option>${agencyOpts}</select>
       <select id="nt-plan">${PLAN_IDS.map((p) => '<option value="' + p + '"' + (p === 'starter' ? ' selected' : '') + '>' + esc(PLANS[p].label) + '</option>').join('')}</select>
       <select id="nt-months"><option value="1">1 month</option><option value="12">1 year</option><option value="0">never expires</option></select>
       <button type="button" class="act" onclick="newTenant()">➕ Create</button>
@@ -1121,7 +1144,7 @@ function newTenantBox() {
         const st=document.getElementById('nt-st'); const v=(id)=>document.getElementById(id).value.trim();
         st.textContent='Creating…'; st.style.color='';
         try{
-          const r=await fetch('/api/v1/admin/tenants/new',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:v('nt-id'),name:v('nt-name'),owner_email:v('nt-email'),phone:v('nt-phone'),plan:v('nt-plan'),months:v('nt-months')})});
+          const r=await fetch('/api/v1/admin/tenants/new',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:v('nt-id'),name:v('nt-name'),owner_email:v('nt-email'),phone:v('nt-phone'),plan:v('nt-plan'),months:v('nt-months'),parent:v('nt-parent')})});
           const j=await r.json();
           if(!j.ok){ st.textContent='🔴 '+(j.error||'failed'); st.style.color='#ff9a9a'; return; }
           st.textContent='🟢 Made '+j.tenant+'. Sign-in: '+j.email+', one-time password: '+j.tempPassword+(j.expires?' (expires '+j.expires+')':'')+'. Copy it now: it is not shown again.'; st.style.color='#5bd08a';

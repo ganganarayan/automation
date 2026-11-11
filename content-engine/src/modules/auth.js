@@ -13,6 +13,7 @@
  *   POST /api/v1/admin/password   save it
  *   GET  /api/v1/admin/reset      lockout reset with SUPER_ADMIN_RESET_CODE
  *   POST /api/v1/admin/reset
+ *   POST /api/v1/admin/workspace  work in another of your workspaces (the switcher)
  *   POST /api/v1/admin/logout
  */
 import * as access from '../services/accessService.js';
@@ -105,6 +106,21 @@ export function register(ctx) {
       }
       log.warn({ email }, 'super-admin password reset with the reset code');
       res.redirect('/api/v1/admin/today');
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // The workspace switcher: work in another workspace you may enter (an agency
+  // admin in one of its clients). The field is "workspace", not "tenant", so the
+  // tenant guard does not read it as a foreign ask.
+  router.post('/admin/workspace', async (req, res, next) => {
+    try {
+      noStore(res);
+      const out = await access.switchWorkspace(req, String(req.body?.workspace || ''));
+      if (req.is('application/json')) return res.status(out.ok ? 200 : 403).json(out);
+      if (!out.ok) return res.status(403).type('html').send(`<p>${out.error === 'Sign in first.' ? 'Sign in first.' : 'That workspace is not yours'}</p>`);
+      return res.redirect(303, '/api/v1/admin/today');
     } catch (err) {
       next(err);
     }

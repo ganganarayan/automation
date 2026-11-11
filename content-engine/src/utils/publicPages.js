@@ -350,7 +350,8 @@ function planCard(id, contactHref) {
   const f = PLAN_FEATURES[id];
   const many = (n, one, other) => (n === null ? `Unlimited ${other}` : `${n} ${n === 1 ? one : other}`);
   const limits = [
-    many(lim.funnels, 'funnel (brand)', 'funnels (brands)'),
+    ...(lim.clients ? [`${lim.clients} clients, each its own workspace and login`] : []),
+    lim.clients && lim.funnels === null ? 'Unlimited funnels per client' : many(lim.funnels, 'funnel (brand)', 'funnels (brands)'),
     lim.channels === null ? 'Unlimited channels' : `${lim.channels} channels per funnel`,
     `${lim.posts === null ? 'Unlimited' : lim.posts} posts a month`,
     lim.aiVideos === null ? 'AI videos as your keys allow' : lim.aiVideos === 0 ? 'No AI videos' : `${lim.aiVideos} AI videos a month`,

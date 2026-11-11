@@ -68,7 +68,7 @@ export function recordDecision({ recordTenant, tenantId, operator }) {
 }
 
 /** Sign-in pages stay open to an expired workspace (to sign out or change a password). */
-const ALWAYS_OPEN = /^\/admin\/(login|logout|password|signout|reset)(\/|$)/;
+const ALWAYS_OPEN = /^\/admin\/(login|logout|password|signout|reset|workspace)(\/|$)/;
 
 /**
  * An expired or suspended workspace may still look (GET) but not act: every
