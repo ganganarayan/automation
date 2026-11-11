@@ -218,7 +218,7 @@ const FAQ = [
   ['What happens when a channel fails?', 'That channel shows ❌ on the Log with the reason. Press Retry failed only and just that channel is sent again.'],
   ['Can I remove a post after it is live?', 'Yes. Tick the channels and press Delete once; the post is taken down from each platform.'],
   ['What can the app see in my Google Drive?', 'Only the files it creates itself (the drive.file permission). Your other files stay private. See the privacy policy.'],
-  ['What if I go over my plan?', 'The app tells you before you go over. Add 30 more posts for ₹999 + GST, or an extra AI video for ₹349 + GST.'],
+  ['What if I go over my plan?', 'The app tells you before you go over. Add 30 more posts for ₹2,499 + GST ($29 outside India), or an extra AI video for ₹499 + GST ($6 outside India).'],
   ['Are prices with GST?', 'In India, prices are shown before GST, with the total beside each one: 18% GST is added and shown on your GST invoice, so a GST-registered business can claim it back. Outside India, prices are in US dollars and no GST is added.'],
 ];
 

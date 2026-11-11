@@ -124,7 +124,7 @@ ${landingNav('/')}
 <section><div class="wrap">
   <h2>Price</h2>
   <div class="grid g3">
-    <div class="card"><h3>Content Engine</h3><p>Starter ₹2,499, Growth ₹8,999, Agency ₹14,999 a month, per workspace, AI included on Starter and Growth. 7-day trial. <a href="/#pricing">See plans</a></p></div>
+    <div class="card"><h3>Content Engine</h3><p>Starter Lite ₹999, Starter ₹2,799, Growth ₹10,499, Agency ₹14,999 a month + GST, per workspace ($12, $32, $119 and $169 outside India, no GST), AI included on Starter Lite, Starter and Growth. 7-day trial. <a href="/#pricing">See plans</a></p></div>
     <div class="card"><h3>${esc(c.name)}</h3><p>${esc(c.price)}</p></div>
   </div>
 </div></section>

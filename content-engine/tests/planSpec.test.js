@@ -3,8 +3,8 @@ import { PLANS, limitsFor, overLimit, tenantLive, validTenantId, planLabel } fro
 
 describe('plans match the pricing plan', () => {
   it('Starter, Growth, Agency limits', () => {
-    expect(PLANS.starter).toMatchObject({ priceInr: 2499, funnels: 1, channels: 5, posts: 30, aiVideos: 0, users: 1 });
-    expect(PLANS.growth).toMatchObject({ priceInr: 8999, funnels: 3, channels: 6, posts: 90, aiVideos: 4, users: 3 });
+    expect(PLANS.starter).toMatchObject({ priceInr: 2799, priceUsd: 32, funnels: 1, channels: 5, posts: 30, aiVideos: 0, users: 1 });
+    expect(PLANS.growth).toMatchObject({ priceInr: 10499, priceUsd: 119, funnels: 3, channels: 6, posts: 90, aiVideos: 4, users: 3 });
     expect(PLANS.agency).toMatchObject({ priceInr: 14999, funnels: null, channels: null, posts: 300, aiVideos: null, users: 10, clients: 10 });
   });
   it('an unknown or missing plan is custom (no limits)', () => {

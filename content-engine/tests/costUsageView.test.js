@@ -23,8 +23,8 @@ describe('cost report', () => {
     expect(html).toContain('Acme');
     expect(html).toContain('$10.00');
     expect(html).toContain('₹880');
-    expect(html).toContain('₹2,499');
-    expect(html).toContain('65%');
+    expect(html).toContain('₹2,799');
+    expect(html).toContain('69%');
     expect(html).toContain('$5.00 on their own keys');
     expect(html).not.toContain(String.fromCharCode(0x2014));
   });

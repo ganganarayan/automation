@@ -17,7 +17,7 @@ describe('prices by where the business is billed', () => {
     const q = quote({ plan: 'lite', bill: 'mo', country: 'IN' });
     expect(q).toMatchObject({ currency: 'INR', base: 999, gst: 180, total: 1179, amount: 117900 });
     const y = quote({ plan: 'starter', bill: 'yr', country: 'IN' });
-    expect(y).toMatchObject({ currency: 'INR', base: 24990, total: withGst(24990), amount: withGst(24990) * 100 });
+    expect(y).toMatchObject({ currency: 'INR', base: 27990, total: withGst(27990), amount: withGst(27990) * 100 });
   });
   it('outside India pays US dollars, no GST, in cents', () => {
     expect(quote({ plan: 'lite', bill: 'mo', country: 'XX' })).toMatchObject({ currency: 'USD', base: 12, gst: 0, total: 12, amount: 1200 });

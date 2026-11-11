@@ -23,7 +23,7 @@ describe('Starter Lite', () => {
     const h = homePage();
     expect(h).toContain('Starter Lite');
     expect(h).toContain('₹999<small> + GST / month');
-    expect(h).toContain('₹2,499<small> + GST / month');
+    expect(h).toContain('₹2,799<small> + GST / month');
     expect(h).toContain('18% GST is added to every price');
     const prices = h.match(/₹[\d,]+(<small>)? ?[^₹]{0,12}/g) || [];
     // every plan price and add-on on the page carries + GST (comparison texts aside)
