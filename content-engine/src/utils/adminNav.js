@@ -109,8 +109,12 @@ export function navHtml({ current = '', key = '', tabs = false, superAdmin = fal
     <div class="nvlabel">Setup</div>
     <div class="nvgroup">${setup}</div>
     <div class="nvfoot">${who}
-    <form method="post" action="/api/v1/admin/logout" style="margin:0"><button type="submit" class="nv"><span class="nvi">⎋</span>Sign out</button></form></div>`;
+    <form method="post" action="/api/v1/admin/logout" style="margin:0"><button type="submit" class="nv"><span class="nvi">⎋</span>Sign out</button></form></div>
+    ${TOUR_SCRIPT}`;
 }
+
+/** The onboarding help bot (modules/onboardingTour.js): every page with the menu loads it. */
+export const TOUR_SCRIPT = '<script src="/api/v1/admin/tour.js" defer></script>';
 
 /**
  * The workspace switcher: only for someone with more than one workspace (an

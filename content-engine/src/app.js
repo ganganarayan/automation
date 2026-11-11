@@ -50,6 +50,7 @@ import * as admin from './modules/admin.js';
 import * as workPages from './modules/workPages.js';
 import * as agencyPages from './modules/agencyPages.js';
 import * as connectPage from './modules/connectPage.js';
+import * as onboardingTour from './modules/onboardingTour.js';
 import * as festivalPage from './modules/festival.js';
 
 export function createApp() {
@@ -150,6 +151,7 @@ export function createApp() {
     .add({ name: 'agency-pages', enabled: settings.modules.admin, register: agencyPages.register })
     .add({ name: 'plan-cancel', enabled: settings.modules.admin, register: planCancel.register })
     .add({ name: 'connect-page', enabled: settings.modules.admin, register: connectPage.register })
+    .add({ name: 'onboarding-tour', enabled: settings.modules.admin, register: onboardingTour.register })
     .add({ name: 'festival', enabled: settings.modules.admin, register: festivalPage.register })
     .add({ name: 'admin', enabled: settings.modules.admin, register: admin.register });
 

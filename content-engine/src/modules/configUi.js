@@ -30,7 +30,7 @@
  *   GET  /api/v1/admin/funnels/stock         ready videos, thumbnails and image posts per funnel (JSON)
  */
 import { CONFIG_MANIFEST, APPS, fieldByKey } from '../services/configManifest.js';
-import { navHtml, NAV_CSS } from '../utils/adminNav.js';
+import { navHtml, NAV_CSS, TOUR_SCRIPT } from '../utils/adminNav.js';
 import { MUSIC_PAGE_SITES } from '../utils/shortSpec.js';
 import { folderMusic } from '../services/musicFolderService.js';
 import { publicDlUrl } from '../providers/publicDriveProvider.js';
@@ -1510,6 +1510,7 @@ function wizardPage({ funnel, cfg, stepIndex, complete }) {
   </div>
 </div>
 <a class="back-link" href="/api/v1/admin/settings#funnels">← All funnels</a>
+${TOUR_SCRIPT}
 <script>
  const BASE=${JSON.stringify(base)};
  const SAVE_URL=BASE+'/save';
