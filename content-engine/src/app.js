@@ -80,6 +80,8 @@ export function createApp() {
   });
   app.get('/privacy', async (_req, res) => res.type('html').send(publicPages.privacyPage({ email: await contactEmail() })));
   app.get('/terms', async (_req, res) => res.type('html').send(publicPages.termsPage({ email: await contactEmail() })));
+  app.get('/refund', async (_req, res) => res.type('html').send(publicPages.refundPage({ email: await contactEmail() })));
+  app.get('/shipping', async (_req, res) => res.type('html').send(publicPages.shippingPage({ email: await contactEmail() })));
   app.get('/health', (_req, res) => res.json({ status: 'ok', service: settings.service }));
   app.get('/live', (_req, res) => res.json({ status: 'alive' }));
   // Running build identity: lets a deploy be verified against the pushed commit.
