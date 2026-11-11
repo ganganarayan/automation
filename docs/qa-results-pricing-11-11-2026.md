@@ -59,3 +59,23 @@ Buy page totals were checked in the browser against the server: 3 clients
   is no self-serve "add a user" button yet.
 - Fixtures left on prod: qa-pricing-brand, qa-pricing-agency (+ c1, c2), no
   sign-in, no funnels, nothing posts.
+
+## Rerun: currency by IP, new prices (prod bdc199c, 11-11-2026 22:50 IST)
+
+| Workspace | ok | warn | fail | skip | Phase 7 pricing |
+|---|---|---|---|---|---|
+| qa-starter (paid smoke 0.0421 USD) | 103 | 1 | 0 | 5 | 40 / 40 ok |
+| qa-agency | 98 | 0 | 0 | 12 | 40 / 40 ok |
+
+The warning is the same ElevenLabs key permission as before.
+
+- Prices: Always-On Brand ₹3,199 + GST / $37 per funnel, Agency ₹3,999 + GST /
+  $47 per client. 1 funnel in India ₹3,775 with GST; 4 clients + 1 user $189.50.
+- No currency switch. Phase 7 checks each page in both views (?cur=inr and
+  ?cur=usd): the dollar home, buy, compare, SocialPilot and refund pages carry
+  no ₹, GST, India, rupee or IST, no currency switch and no Solo, in the page
+  or its source; the buy page script holds only the visitor's currency.
+- From the owner's PC in India, /api/geo on prod answers IN / inr and the home
+  page shows rupees. Railway's X-Real-IP carries the visitor IP (req.ip was a
+  proxy hop and showed India as USD on the first staging deploy, fixed in
+  bdc199c); a faked X-Real-IP is overwritten by Railway.
