@@ -29,6 +29,7 @@ import * as tenantRepo from '../repositories/tenantRepository.js';
 import * as usage from '../repositories/usageRepository.js';
 import * as phases from './qaPhases.js';
 import * as qaAgency from './qaAgency.js';
+import * as qaPricing from './qaPricing.js';
 import { PLAN_IDS } from '../utils/planSpec.js';
 import { costClaude, costText, costImages } from '../utils/pricing.js';
 import { probeMp4DurationSeconds } from '../utils/videoSpec.js';
@@ -39,10 +40,10 @@ const ffmpegBin = () => process.env.FFMPEG_PATH || 'ffmpeg';
 const TIMEOUT = 20_000;
 
 /** A qa-* workspace with no owner sign-in. Fails if the id is taken. */
-export async function createQaTenant({ id, plan = 'starter' } = {}) {
+export async function createQaTenant({ id, plan = 'brand' } = {}) {
   const tid = qaTenantId(id);
   if (!tid) throw new Error('QA workspace id: qa- then letters, digits or dashes');
-  const p = PLAN_IDS.includes(String(plan)) ? String(plan) : 'starter';
+  const p = PLAN_IDS.includes(String(plan)) ? String(plan) : 'brand';
   const row = await tenantRepo.createNew({ id: tid, name: `QA ${p}`, ownerEmail: '', plan: p, expiresAt: null });
   tenantSettings.invalidate();
   planService.invalidate();
@@ -218,6 +219,7 @@ export async function run(tenantId, { paid = false } = {}) {
   checks.push(...(await phases.sharedChecks(id, mine, owner)));
   checks.push(...(await phases.httpChecks(id, settings.port)));
   checks.push(...(await qaAgency.agencyChecks(id).catch((err) => [{ group: 'Phase 6 agency', name: 'Agency clients', status: 'fail', detail: String(err.message || err).slice(0, 240) }])));
+  checks.push(...(await qaPricing.pricingChecks(settings.port).catch((err) => [{ group: 'Phase 7 pricing', name: 'Pricing', status: 'fail', detail: String(err.message || err).slice(0, 240) }])));
   checks.push(...(await keyPings(mine)));
   let spent = [];
   if (paid) {

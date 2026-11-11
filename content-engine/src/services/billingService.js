@@ -196,16 +196,25 @@ export async function webhook(rawBody, signature, body) {
 
 /** Put the workspace on the plan its subscription now charges for, if that changed. */
 async function followPlan(tenantId, razorpayPlanId) {
-  const k = readPlanKey(await repo.keyForPlanId(razorpayPlanId).catch(() => ''));
-  if (!k.plan) return;
+  await applyPlanKey(tenantId, await repo.keyForPlanId(razorpayPlanId).catch(() => ''));
+}
+
+/**
+ * Put a workspace on the plan, funnels or clients and extra users a planKey
+ * names. Returns true when it changed something. (The QA check calls it too.)
+ */
+export async function applyPlanKey(tenantId, key) {
+  const k = readPlanKey(key);
+  if (!k.plan) return false;
   const t = await tenantRepo.findById(tenantId);
-  if (!t) return;
+  if (!t) return false;
   const units = PLANS[k.plan].unit ? k.units : null;
-  if (t.plan === k.plan && (t.units ?? null) === units && (Number(t.extra_users) || 0) === k.users) return;
+  if (t.plan === k.plan && (t.units ?? null) === units && (Number(t.extra_users) || 0) === k.users) return false;
   await tenantRepo.setPlanUnits(tenantId, k.plan, units, k.users);
   if (t.cancelled_at) await tenantRepo.setCancelled(tenantId, null);
   planService.invalidate();
   tenantSettings.invalidate();
+  return true;
 }
 
 /**
@@ -233,4 +242,4 @@ export async function stopRenewal(tenant) {
   return { stopped: true };
 }
 
-export default { keys, ready, saveKeys, start, confirm, webhook, stopRenewal, switchToSolo };
+export default { keys, ready, saveKeys, start, confirm, webhook, stopRenewal, switchToSolo, applyPlanKey };
