@@ -262,8 +262,9 @@ export async function forTenant(tenantId = 'default') {
   const agencyO = meta && meta.parentId ? await loadOverrides(meta.parentId) : null;
   const agencyMeta = meta && meta.parentId ? await tenantMeta(meta.parentId) : null;
   // An agency bought per client (units) pays for AI in its price: its clients use the owner's keys.
+  // A client's own row carries no units, so only a top-level workspace is judged by its own plan.
   const agencyIncluded = !!agencyMeta && !agencyMeta.failed && !bringsOwnKeys(agencyMeta);
-  const byo = isOwner ? false : (!!(meta && meta.failed) || (!!agencyO && !agencyIncluded) || bringsOwnKeys(meta));
+  const byo = isOwner ? false : (!!(meta && meta.failed) || (!!agencyO && !agencyIncluded) || (!meta.parentId && bringsOwnKeys(meta)));
   const keyOwners = {};
   const key = (k) => {
     const [v, who] = providerKey(k, { own: o, owner: ownerO, isOwner, byo, envValue: PROVIDER_KEYS[k].env(), agency: agencyO || null, agencyIncluded });
