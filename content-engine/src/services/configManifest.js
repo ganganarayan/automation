@@ -221,7 +221,7 @@ export const CONFIG_MANIFEST = {
         // once a day at this time. Saving a changed time updates Cloudflare.
         title: 'Daily schedule (IST)',
         fields: [
-          { key: 'daily_time', label: "Daily time: picks tomorrow's posts, sends the one email with every approval, checks posts, relays LinkedIn", type: 'time', default: '19:00', help: 'The app wakes once a day at this time and sleeps the rest of the day. The email goes once every post for tomorrow is ready, usually within minutes. Approve each post before its time; a late approval posts at once.' },
+          { key: 'daily_time', label: "Daily time: picks tomorrow's posts, sends the one email with every approval, checks posts, relays LinkedIn", type: 'time', default: '19:00', help: 'The router triggers once a day at this time and is idle the rest of the day. The email goes once every post for tomorrow is ready, usually within minutes. Approve each post before its time; a late approval posts at once.' },
           { key: 'wake_schedule_sync', label: 'Wake-up timer', type: 'wake_sync' },
         ],
       },

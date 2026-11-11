@@ -1757,7 +1757,7 @@ function fieldRow(field, configMap, tenantId = 'default') {
       <script>
         (async function(){
           const st=document.getElementById('wake-st');
-          try{ const j=await (await fetch('/api/v1/admin/wake-timer')).json(); st.textContent=j.ok?('🟢 On: the app wakes once a day at your Daily time ('+(j.time||'19:00')+' IST). Last run: '+(j.last||'🟡 never')):'🟡 The wake-up timer is not set up yet, so nothing runs on its own. The owner sets it up under Tenants.'; }
+          try{ const j=await (await fetch('/api/v1/admin/wake-timer')).json(); st.textContent=j.ok?('🟢 On: the router triggers once a day at your Daily time ('+(j.time||'19:00')+' IST). Last run: '+(j.last||'🟡 never')):'🟡 The wake-up timer is not set up yet, so nothing runs on its own. The owner sets it up under Tenants.'; }
           catch(e){ st.textContent='🟡 Could not check: '+e.message; }
         })();
       </script></div>`;

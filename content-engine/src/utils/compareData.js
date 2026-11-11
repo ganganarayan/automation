@@ -54,7 +54,7 @@ export const US = {
   aiVideo: ['y', 'Script, pictures, animation (Kling, Runway or MiniMax) and ElevenLabs voice. Growth and Agency.'],
   rawVideo: ['y', 'Drop videos in Drive: AI copy, thumbnails in every size, end card and a Clean check.'],
   sizes: ['y', 'Thumbnails and image posts in all three sizes, the tall ones drawn as their own picture.'],
-  autoDaily: ['y', 'The router wakes once a day and always posts: ready video, then AI video, then image post.'],
+  autoDaily: ['y', 'The router triggers once a day and always posts: ready video, then AI video, then image post.'],
   approvals: ['y', 'On every plan, from the app or the daily email, with Disapprove and Remake.'],
   channels: ['y', 'All eight, any number of accounts your plan allows, from one approval.'],
   firstComment: ['y', 'Posted as the first comment on every channel that allows it.'],

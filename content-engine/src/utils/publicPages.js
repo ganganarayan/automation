@@ -207,11 +207,11 @@ const STEPS = [
   ['Set up a funnel', 'Name it, paste your background, pick channels, a call to action and a Daily time (19:00 by default).'],
   ['Stock it', 'Drop ready videos in Drive, or let the AI lanes make posts for you.'],
   ['Approve', 'Review in the app or from the email. Approve, or Disapprove with a reason and Remake.'],
-  ['It posts', 'The router wakes once a day, picks the best lane, publishes to every channel and sends your digest.'],
+  ['It posts', 'The router triggers once a day, picks the best lane, publishes to every channel and sends your digest.'],
 ];
 
 const FAQ = [
-  ['Will it really post every day?', 'Yes. The router wakes each workspace once a day at its Daily time and always posts: a ready video first, then an AI video, then an image post if nothing else is in stock.'],
+  ['Will it really post every day?', 'Yes. The router triggers once a day for each workspace, at its Daily time, and always posts: a ready video first, then an AI video, then an image post if nothing else is in stock.'],
   ['Does anything go out without me?', 'Only what you approve. Every post waits in the Library for Approve, and the daily digest tells you what is waiting.'],
   ['How many channels can I connect?', `As many as your plan allows: any number of accounts across ${CHANNELS.join(', ')}. Each funnel posts to all of its channels from one approval.`],
   ['Do I need my own AI keys?', 'Not on Starter Lite, Starter or Growth: the AI is included. On Agency you bring your own OpenAI, Claude, Kling, MiniMax and ElevenLabs keys and pay those providers directly.'],
@@ -280,7 +280,8 @@ const HOME_CSS = `
  .btn.sm{padding:.45rem .9rem;font-size:.9rem}
  .hero{padding:5rem 0 3.5rem;text-align:center}
  .pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:.25rem .8rem;font-size:.82rem;color:var(--mute);margin-bottom:1.2rem}
- .hero h1{font-size:clamp(2.2rem,6vw,4rem);font-weight:900;line-height:1.05;margin:0 auto 1rem;max-width:880px;letter-spacing:-.03em}
+ .hero h1{font-size:clamp(2rem,5vw,3.4rem);font-weight:900;line-height:1.08;margin:0 auto 1rem;max-width:900px;letter-spacing:-.03em}
+ .hero p.subhead{font-size:clamp(1.15rem,2.6vw,1.45rem);font-weight:700;max-width:720px;margin:0 auto 1rem}
  .hero h1 em{font-style:normal;color:var(--link)}
  .hero p.lead{font-size:1.15rem;color:var(--mute);max-width:680px;margin:0 auto 2rem}
  .cta{display:flex;gap:.8rem;justify-content:center;flex-wrap:wrap}
@@ -513,7 +514,8 @@ ${landingNav('')}
 
 <header class="hero"><div class="wrap">
   <span class="pill">One post a day, per brand, on every channel</span>
-  <h1>Your social media, <em>made, checked and posted</em> every single day.</h1>
+  <h1>Grow your personal or company brand. <em>Automate your social presence</em>, set it up once a month.</h1>
+  <p class="subhead">Your social media, made, checked and posted every single day.</p>
   <p class="lead">Content Engine turns your videos, or nothing at all, into finished posts with copy, thumbnails, voice and music. You approve. It publishes to every channel, reports what went live and turns comments into leads.</p>
   <div class="cta"><a class="btn" href="${trialHref}">Start the 7-day trial</a><a class="btn ghost" href="#pricing">See pricing</a></div>
   <div class="chips">${CHANNELS.map((c) => `<span class="chip">${esc(c)}</span>`).join('')}</div>

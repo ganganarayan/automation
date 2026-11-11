@@ -57,6 +57,8 @@ export function setupItems({ superAdmin = false, role = 'admin' } = {}) {
     // Its own page (not a settings panel): one-click cancel lives there.
     ...(role === 'admin' ? [{ id: 'plan', label: 'Plan', href: '/api/v1/admin/plan' }] : []),
     ...(superAdmin ? [{ id: 'tenants', label: 'Tenants' }] : []),
+    // The owner's Razorpay keys (a box on the Plan page).
+    ...(superAdmin ? [{ id: 'payments', label: 'Payments', href: '/api/v1/admin/plan#payments' }] : []),
   ];
 }
 

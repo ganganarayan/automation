@@ -49,7 +49,7 @@ export function planBody({ tenant = null, role = 'admin', superAdmin = false, ba
 
   if (superAdmin && pay) {
     const hook = `${origin}/buy/webhook`;
-    out.push(`<h2>Payments (owner only)</h2>
+    out.push(`<h2 id="payments">Payments (owner only)</h2>
       <p class="hint">Razorpay takes payments on the <a href="/buy">buy page</a>: India in rupees with 18% GST, everyone else in US dollars with no GST. US dollars need International payments switched on in your Razorpay account. From the Razorpay dashboard, Account and Settings, API keys. A blank box keeps what is saved.</p>
       <div class="card"><div class="row"><span>Status</span><b>${pay.keyId && pay.secretSet ? (pay.keyId.startsWith('rzp_live_') ? '🟢 Live: people can pay' : '🟡 Test keys: payments are not real') : '🟡 Not set: the buy page asks people to write to you'}</b></div>
       <div class="row"><span>Webhook</span><b>${pay.webhookSet ? '🟢 Secret saved' : '🟡 Not set: renewals will not extend workspaces'}</b></div></div>
