@@ -25,9 +25,14 @@ function lookup(ip) {
   }
 }
 
-/** The client's IP (Express req.ip honours trust proxy), without the IPv6 prefix. */
+/**
+ * The client's IP, without the IPv6 prefix. Railway's edge writes the visitor's
+ * address to X-Real-IP (its own, replacing anything the visitor sent); req.ip
+ * can be an inner proxy hop there, so it is only the fallback.
+ */
 export function clientIp(req) {
-  const ip = String((req && (req.ip || (req.socket && req.socket.remoteAddress))) || '');
+  const real = String((req && req.get && req.get('x-real-ip')) || '').trim();
+  const ip = /^[0-9a-f.:]+$/i.test(real) ? real : String((req && (req.ip || (req.socket && req.socket.remoteAddress))) || '');
   return ip.replace(/^::ffff:/, '');
 }
 

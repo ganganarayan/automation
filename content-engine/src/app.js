@@ -22,7 +22,7 @@ import { notFound, errorHandler } from './middleware/errorHandler.js';
 import * as tenantSettings from './core/tenantSettings.js';
 import * as publicPages from './utils/publicPages.js';
 import * as comparePages from './utils/comparePages.js';
-import { currencyOf } from './utils/geo.js';
+import { currencyOf, countryOf } from './utils/geo.js';
 import * as planCancel from './modules/planCancel.js';
 import * as billingModule from './modules/billing.js';
 
@@ -99,6 +99,8 @@ export function createApp() {
     branch: process.env.RAILWAY_GIT_BRANCH || null,
   });
   app.get('/api/version', version);
+  // Which currency this visitor is shown (country only, never the IP).
+  app.get('/api/geo', (req, res) => res.set('Cache-Control', 'no-store').json({ country: countryOf(req) || null, currency: currencyOf(req) }));
   app.get('/version', version);
   app.get('/ready', async (_req, res) => {
     try {

@@ -10,6 +10,8 @@ describe('currency from the IP', () => {
     expect(currencyOf(req('8.8.8.8'))).toBe('usd');
     expect(currencyOf(req('127.0.0.1'))).toBe('usd');
     expect(clientIp(req('::ffff:49.36.0.1'))).toBe('49.36.0.1');
+    expect(currencyOf(req('10.0.0.5', {}, { 'x-real-ip': '49.36.0.1' }))).toBe('inr');
+    expect(clientIp(req('10.0.0.5', {}, { 'x-real-ip': 'junk<>' }))).toBe('10.0.0.5');
   });
   it('?cur forces the page for checks; a header cannot fake the country', () => {
     expect(currencyOf(req('8.8.8.8', { cur: 'inr' }))).toBe('inr');
