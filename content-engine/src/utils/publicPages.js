@@ -471,7 +471,7 @@ ${landingNav('')}
   <p class="lead">Content Engine turns your videos, or nothing at all, into finished posts with copy, thumbnails, voice and music. You approve. It publishes to every channel, reports what went live and turns comments into leads.</p>
   <div class="cta"><a class="btn" href="${trialHref}">Start the 7-day trial</a><a class="btn ghost" href="#pricing">See pricing</a></div>
   <div class="chips">${CHANNELS.map((c) => `<span class="chip">${esc(c)}</span>`).join('')}</div>
-  <div class="trust"><span><b>✓</b> You approve every post</span><span><b>₹</b> Priced in rupees</span><span><b>↺</b> Cancel any time, one click</span><span><b>◷</b> Dates and times in IST</span></div>
+  <div class="trust"><span><b>✓</b> You approve every post</span><span><b>₹</b> Priced in rupees</span><span><b>↺</b> Cancel any time</span><span><b>◷</b> Dates and times in IST</span></div>
 </div></header>
 
 <section id="how"><div class="wrap">

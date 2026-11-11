@@ -24,7 +24,7 @@ describe('public pages', () => {
     const h = homePage();
     expect(h).toContain('Before Content Engine');
     expect(h).toContain('See it in action');
-    expect(h).toContain('Cancel any time, one click');
+    expect(h).toContain('Cancel any time</span>');
     expect(h).toContain(`₹${inr(Math.round((PLANS.starter.priceInr * 10) / 12))}`);
     expect(h).toContain(`₹${inr(PLANS.starter.priceInr * 10)} billed yearly`);
     expect(h).toContain('class="float-cta"');
