@@ -21,6 +21,7 @@ import { bindTenant, guardRecords, guardParamId } from './middleware/tenantGuard
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 import * as tenantSettings from './core/tenantSettings.js';
 import * as publicPages from './utils/publicPages.js';
+import * as comparePages from './utils/comparePages.js';
 
 import * as approvalService from './services/approvalService.js';
 
@@ -71,6 +72,12 @@ export function createApp() {
   // consent screen needs. The contact is the default tenant's notification email.
   const contactEmail = async () => (await tenantSettings.forTenant('default').catch(() => null))?.emails?.notify || '';
   app.get('/', async (_req, res) => res.type('html').send(publicPages.homePage({ email: await contactEmail() })));
+  app.get('/compare', async (_req, res) => res.type('html').send(comparePages.compareIndexPage({ email: await contactEmail() })));
+  app.get('/compare/:page', async (req, res, next) => {
+    const c = comparePages.competitorForPage(req.params.page);
+    if (!c) return next();
+    return res.type('html').send(comparePages.comparisonPage(c, { email: await contactEmail() }));
+  });
   app.get('/privacy', async (_req, res) => res.type('html').send(publicPages.privacyPage({ email: await contactEmail() })));
   app.get('/terms', async (_req, res) => res.type('html').send(publicPages.termsPage({ email: await contactEmail() })));
   app.get('/health', (_req, res) => res.json({ status: 'ok', service: settings.service }));

@@ -6,12 +6,13 @@
  *               Google sign-in for "Connect Google Drive" can be published.
  *               The Sign in button opens the app on the same domain.
  * Responsibility: Pure HTML rendering (no settings / DB / I/O).
- * Dependencies: utils/planSpec (plan limits and prices, pure).
+ * Dependencies: utils/planSpec (plan limits and prices), utils/compareData (competitors), both pure.
  *
  * Routes (app.js): GET /  ·  GET /privacy  ·  GET /terms
  */
 
 import { PLANS } from './planSpec.js';
+import { CHECKED_ON, VERDICT, ROWS, US, COMPETITORS } from './compareData.js';
 
 export const UPDATED = '11-11-2026';
 export const LOGIN_PATH = '/api/v1/admin/today';
@@ -37,7 +38,7 @@ function shell(title, inner) {
 </style></head><body><div class="wrap">
 <header><a class="brand" href="/">Content Engine</a><a class="btn" href="${LOGIN_PATH}">Sign in</a></header>
 ${inner}
-<footer><span>Content Engine</span><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a></footer>
+<footer><span>Content Engine</span><a href="/compare">Compare</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a></footer>
 </div></body></html>`;
 }
 
@@ -268,6 +269,7 @@ const HOME_CSS = `
  .y{color:var(--green);font-weight:800}.p{color:#e0b23a;font-weight:800}.n{color:#ef6b6b;font-weight:800}.u{color:var(--mute)}
  tr.grp td{background:#0f0f19;color:var(--mute);font-weight:700;text-transform:uppercase;font-size:.75rem;letter-spacing:.06em}
  td small{display:block;color:var(--mute);font-size:.82rem;margin-top:.15rem}
+ .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
  .legend{color:var(--mute);font-size:.85rem;margin-top:.8rem}
  .vs h3{display:flex;justify-content:space-between;align-items:center;gap:.5rem}
  .vs .cat{color:var(--mute);font-size:.8rem;font-weight:500}
@@ -296,7 +298,7 @@ export function landingHead(title, description) {
 export function landingNav(base = '') {
   return `<nav class="top"><div class="wrap">
   <a class="brand" href="/">Content Engine</a>
-  <span class="links"><a href="${base}#how">How it works</a><a href="${base}#features">Features</a><a href="${base}#pricing">Pricing</a><a href="${base}#faq">FAQ</a></span>
+  <span class="links"><a href="${base}#how">How it works</a><a href="${base}#features">Features</a><a href="${base}#pricing">Pricing</a><a href="/compare">Compare</a><a href="${base}#faq">FAQ</a></span>
   <a class="btn sm" href="${LOGIN_PATH}">Sign in</a>
 </div></nav>`;
 }
@@ -305,6 +307,41 @@ export function landingNav(base = '') {
 export function landingFooter(email = '') {
   return `<footer><div class="wrap"><span>Content Engine</span><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a>${email ? `<a href="mailto:${esc(email)}">Contact</a>` : ''}</div></footer>
 </body></html>`;
+}
+
+/** Path of one comparison page. */
+export const comparePath = (c) => `/compare/content-engine-vs-${c.slug}`;
+
+/** One verdict cell: the mark, with the note as a tooltip and screen-reader text. */
+function mark([v, note]) {
+  const m = VERDICT[v] || VERDICT.u;
+  return `<span class="${m.cls}" title="${esc(`${m.word}: ${note}`)}">${m.sym}</span><span class="sr">${esc(m.word)}</span>`;
+}
+
+/** The full matrix: every row, Content Engine first, then each competitor. */
+export function compareMatrix(list = COMPETITORS) {
+  const head = `<tr><th>Feature</th><th class="us">Content Engine</th>${list.map((c) => `<th><a href="${comparePath(c)}">${esc(c.name)}</a></th>`).join('')}</tr>`;
+  const body = ROWS.map((r) => (r.group
+    ? `<tr class="grp"><td colspan="${list.length + 2}">${esc(r.group)}</td></tr>`
+    : `<tr><td>${esc(r.label)}</td><td class="c us">${mark(US[r.key])}</td>${list.map((c) => `<td class="c">${mark(c.rows[r.key] || ['u', 'Not listed.'])}</td>`).join('')}</tr>`)).join('');
+  return `<div class="tbl"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>
+<p class="legend"><span class="y">✓</span> yes · <span class="p">◐</span> partly or on higher plans only · <span class="n">✗</span> no, by their own word · <span class="u">?</span> not listed on their website. Read from each company's own website on ${esc(CHECKED_ON)}. Hover a mark for the detail; each name opens the full comparison with sources.</p>`;
+}
+
+/** Cards linking to each comparison page. */
+export function compareCards(list = COMPETITORS) {
+  return `<div class="grid g3">${list.map((c) => `<a class="card vs" href="${comparePath(c)}" style="text-decoration:none;color:inherit"><h3>Content Engine vs ${esc(c.name)} <span class="cat">${esc(c.category)}</span></h3><p>${esc(c.oneLine)}</p></a>`).join('')}</div>`;
+}
+
+/** The landing page's comparison section. */
+export function compareSection() {
+  return `<section id="compare"><div class="wrap">
+  <h2>Content Engine vs the rest</h2>
+  <p class="kicker">Most tools schedule the post you made. Content Engine makes it, posts it every day and turns the comments into leads. Here is every feature, side by side.</p>
+  ${compareMatrix()}
+  <h3 class="gt" style="margin:2.4rem 0 1rem">Read a full comparison</h3>
+  ${compareCards()}
+</div></section>`;
 }
 
 function planCard(id, contactHref) {
@@ -384,6 +421,8 @@ ${landingNav('')}
   <div class="grid plans">${['starter', 'growth', 'agency'].map((id) => planCard(id, contactHref)).join('')}</div>
   <p class="fine">All plans: over the limit, ₹999 for 30 more posts and ₹349 per extra AI video. Pay yearly: 10 months, get 12. Start with a 7-day trial of Starter. Prices in Indian rupees, per workspace.</p>
 </div></section>
+
+${compareSection()}
 
 <section id="faq"><div class="wrap">
   <h2>Questions</h2>
