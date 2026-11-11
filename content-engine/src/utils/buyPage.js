@@ -45,7 +45,7 @@ ${closed}
   </div>
   <div class="two">
     <label><span id="unitlab">Funnels (brands), 10 channels each</span><input name="units" id="units" type="number" min="1" max="${MAX_UNITS}" value="${n}" required oninput="sum()"></label>
-    <label>Extra users (1 user is included${p === 'agency' ? ', plus one per client' : ''})<input name="users" id="users" type="number" min="0" max="${MAX_EXTRA_USERS}" value="0" oninput="sum()"></label>
+    <label><span id="userlab">Extra users (1 user is included${p === 'agency' ? ', plus one per client' : ''})</span><input name="users" id="users" type="number" min="0" max="${MAX_EXTRA_USERS}" value="0" oninput="sum()"></label>
   </div>
   <label>Where is your business billed?<select name="country" id="country" onchange="sum()">${Object.entries(COUNTRIES).map(([v, l]) => opt(v, v === 'IN' ? 'India: rupees, 18% GST added' : 'Outside India: US dollars, no GST', v === country)).join('')}</select></label>
   <div class="two">
@@ -72,7 +72,7 @@ function grp(n){var s=String(Math.round(n));if(s.length<=3)return s;return s.sli
 function cash(n,inr){if(inr)return '\u20b9'+grp(n);var c=Math.round(n*100);return '$'+String(Math.floor(c/100)).replace(/\\B(?=(\\d{3})+(?!\\d))/g,',')+(c%100?'.'+String(c%100).padStart(2,'0'):'');}
 function whole(id,lo,hi){var v=Math.floor(Number(el(id).value));return v>=lo&&v<=hi?v:lo;}
 function sum(){var pl=P.plans[el('plan').value];if(!pl)return;var inr=el('country').value==='IN';var yr=el('bill').value==='yr';
- el('unitlab').textContent=pl.per==='client'?'Clients, each its own workspace, 10 channels':'Funnels (brands), 10 channels each';
+ el('userlab').textContent='Extra users (1 user is included'+(pl.per==='client'?', plus one per client)':')');el('unitlab').textContent=pl.per==='client'?'Clients, each its own workspace, 10 channels':'Funnels (brands), 10 channels each';
  var n=whole('units',1,P.maxUnits),u=whole('users',0,P.maxUsers);var unit=inr?pl.inr:pl.usd,user=inr?P.user.inr:P.user.usd;
  var month=unit*n+user*u;var times=yr?10:1;var base=inr?Math.round(month*times):Math.round(month*times*100)/100;var gst=inr?Math.round(base*1.18)-base:0;var total=base+gst;var per=yr?'year':'month';
  var lines=[n+' '+(pl.per==='client'?(n===1?'client':'clients'):(n===1?'funnel':'funnels'))+' x '+cash(unit*times,inr)];

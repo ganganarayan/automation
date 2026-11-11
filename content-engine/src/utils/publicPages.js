@@ -400,7 +400,7 @@ const HOME_CSS = `
  .bonus{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin:2rem 0 1rem}
  .bonus div{border:1px dashed var(--line);border-radius:12px;padding:1rem}
  .bonus b{display:block;margin-bottom:.3rem}
- @media (max-width:760px){.stack td:last-child{white-space:normal}}
+ @media (max-width:760px){.stack thead{display:none}.stack,.stack tbody,.stack tr,.stack td{display:block;width:100%}.stack tr{border-bottom:1px solid var(--line);padding:.7rem 0}.stack td,.stack td:last-child{border:0;padding:.15rem 0;text-align:left;white-space:normal}.stack .sum,.stack .you{display:flex;justify-content:space-between;gap:1rem}.stack .sum td,.stack .you td{width:auto}}
  .float-cta{position:fixed;right:18px;bottom:18px;z-index:9;background:#f5d90a;color:#14140a;font-weight:800;border-radius:12px;padding:.85rem 1.2rem;text-decoration:none;box-shadow:0 10px 30px rgba(0,0,0,.35)}
  @media (max-width:900px){.act-wrap,.act-stage{grid-template-columns:1fr}}
  @media (max-width:760px){.links{display:none}.hero{padding:3.5rem 0 2.5rem}section{padding:3rem 0}}
