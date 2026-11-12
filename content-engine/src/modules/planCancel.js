@@ -15,7 +15,7 @@
  *         POST /api/v1/admin/plan/resume       form post, back to the page
  *         POST /api/v1/admin/plan/solo         form post: move to Solo from the next renewal
  *         POST /api/v1/admin/plan/exit-link    super admin: { url }
- *         POST /api/v1/admin/plan/test/:step   super admin, Rs 1 tests: subscribe | upgrade | upgrade-paid | downgrade | cancel
+ *         POST /api/v1/admin/plan/test/:step   super admin, test payments: subscribe | upgrade | upgrade-paid | downgrade | cancel
  */
 import * as tenantRepo from '../repositories/tenantRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
@@ -138,7 +138,7 @@ export function register(ctx) {
     }
   });
 
-  // Owner only: Rs 1 tests on every plan with the live keys (Payments).
+  // Owner only: test payments on every plan with the live keys (Payments).
   const TEST_STEPS = {
     subscribe: (b) => billingTest.startSubscribe({ plan: String(b.plan || ''), name: String(b.name || ''), email: String(b.email || ''), phone: String(b.phone || '') }),
     upgrade: (b) => billingTest.startUpgrade({ tenantId: String(b.tenantId || ''), plan: String(b.plan || '') }),

@@ -67,10 +67,10 @@ async function razorpayPlan(k, q) {
   const plan = await rzp.createPlan(k, {
     period: PERIODS[q.bill].period,
     item: {
-      name: `Content Engine ${PLANS[q.plan].label}${countsText(q) ? `, ${countsText(q)}` : ''} (${PERIODS[q.bill].word})${q.amount === 100 ? ' Rs 1 test' : ''}`.slice(0, 120),
+      name: `Content Engine ${PLANS[q.plan].label}${countsText(q) ? `, ${countsText(q)}` : ''} (${PERIODS[q.bill].word})${q.test ? ` test Rs ${(q.amount / 100).toFixed(2)}` : ''}`.slice(0, 120),
       amount: q.amount,
       currency: q.currency,
-      description: q.amount === 100 ? 'Rs 1 test payment' : (q.currency === 'INR' ? `${money(q.base, 'INR')} + 18% GST ${money(q.gst, 'INR')}` : 'Billed in US dollars'),
+      description: q.test ? 'Test payment' : (q.currency === 'INR' ? `${money(q.base, 'INR')} + 18% GST ${money(q.gst, 'INR')}` : 'Billed in US dollars'),
     },
   });
   await repo.savePlanId(key, plan.id);

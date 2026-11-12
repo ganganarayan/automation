@@ -9,7 +9,7 @@
  */
 import { cancelProblem } from './cancelSpec.js';
 import { planLabel, PLANS, limitsForTenant } from './planSpec.js';
-import { TEST_PLANS } from './billingTestSpec.js';
+import { TEST_PLANS, testPrice } from './billingTestSpec.js';
 
 export const PLAN_PATH = '/api/v1/admin/plan';
 
@@ -102,20 +102,20 @@ export function soloOffer(tenant) {
 
 export default { PLAN_PATH, planBody, soloOffer };
 
-/** Owner only: Rs 1 tests on every plan, one row each, with the live keys. */
+/** Owner only: test payments on every plan, one row each, with the live keys. */
 export function testPayments(tests = []) {
   const esc2 = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const opts = tests.length
     ? tests.map((t) => `<option value="${esc2(t.tenantId)}">${esc2(t.name)}: ${esc2(planLabel(t.plan))}, ${esc2(t.email)}, ${t.ended ? 'cancelled' : `paid until ${esc2(t.until)}`}</option>`).join('')
     : '<option value="">No test workspace yet: Subscribe on a row first</option>';
   const rows = TEST_PLANS.map((p) => `<tr data-plan="${p}"><td><b>${esc2(PLANS[p].label)}</b></td>
-      <td><button class="act" type="button" data-do="subscribe">Subscribe ₹1</button></td>
-      <td><button class="act" type="button" data-do="upgrade">Upgrade ₹1</button></td>
+      <td><button class="act" type="button" data-do="subscribe">Subscribe ${testPrice(p)}</button></td>
+      <td><button class="act" type="button" data-do="upgrade">Upgrade ${testPrice(p)}</button></td>
       <td><button class="act" type="button" data-do="downgrade">Downgrade</button></td>
       <td><button class="act" type="button" data-do="cancel">Cancel</button></td></tr>`).join('');
   const data = JSON.stringify({ order: TEST_PLANS, tests }).replace(/</g, '\\u003c');
-  return `<h2 id="test-payments">Test payments, ₹1 each (owner only)</h2>
-    <p class="hint">Real money with the keys above: ₹1 a step, refund it from Razorpay if you like. Subscribe makes a new workspace on that plan and emails its sign-in to the buyer email. Upgrade charges ₹1 and opens the plan's features now; Downgrade switches them off now with no charge; Cancel ends the subscription and locks the workspace. Each step emails the buyer. Renewals stay at ₹1 a month until you cancel.</p>
+  return `<h2 id="test-payments">Test payments (owner only)</h2>
+    <p class="hint">Real money with the keys above. Each plan has its own small price (₹1.10 for the cheapest, ₹1.20 the next, and so on) so you can tell the charges apart in Razorpay. Subscribe makes a new workspace on that plan and emails its sign-in to the buyer email. Upgrade charges the new plan's price and opens its features now. Downgrade charges nothing: the features outside the new plan switch off now, and the renewals charge the new plan's price from the next month. Cancel ends the subscription and locks the workspace. Each step emails the buyer. Renewals go on every month until you cancel.</p>
     <div class="grid2">
       <label>Test buyer email (new for each Subscribe)<input id="tp-email" type="email" placeholder="you+lite@gmail.com" autocomplete="off"></label>
       <label>Test buyer name and phone<span class="inl"><input id="tp-name" placeholder="Name"><input id="tp-phone" placeholder="Phone"></span></label>

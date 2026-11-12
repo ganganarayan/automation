@@ -1,9 +1,9 @@
 /**
- * Rs 1 test payments (pure).
+ * Small test payments (pure).
  *
- * Purpose:      Let the owner run the real money path on every plan for one
- *               rupee: subscribe, upgrade (paid), downgrade, cancel.
- * Responsibility: test plans in price order, the Rs 1 quote, order signature,
+ * Purpose:      Let the owner run the real money path on every plan for a
+ *               little over a rupee: subscribe, upgrade (paid), downgrade, cancel.
+ * Responsibility: test plans in price order, the test quote, order signature,
  *               and the emails a buyer gets for each step.
  * Dependencies: node:crypto (via billingSpec), utils/{planSpec,billingSpec,time}.
  */
@@ -21,10 +21,21 @@ export function rankOf(plan) {
   return TEST_PLANS.indexOf(String(plan || ''));
 }
 
-/** What a test charge costs: one rupee, no GST, monthly, one funnel or client. */
+/**
+ * What a test charge costs: Rs 1.10 for the cheapest plan, Rs 1.20 for the
+ * next and so on, so each plan's charges are told apart in Razorpay. No GST,
+ * monthly, one funnel or client. `base` is whole rupees (the column is whole).
+ */
 export function testQuote(plan) {
-  if (rankOf(plan) < 0) throw new Error('Pick a plan to test');
-  return { plan, bill: 'mo', currency: 'INR', units: 1, users: 0, base: 1, gst: 0, total: 1, amount: 100 };
+  const r = rankOf(plan);
+  if (r < 0) throw new Error('Pick a plan to test');
+  const amount = 100 + 10 * (r + 1);
+  return { plan, bill: 'mo', currency: 'INR', units: 1, users: 0, base: 1, gst: 0, total: amount / 100, amount, test: true };
+}
+
+/** The price of a plan's test charge, for buttons and emails: "₹1.10". */
+export function testPrice(plan) {
+  return `₹${(testQuote(plan).amount / 100).toFixed(2)}`;
 }
 
 /** Which buttons a row offers for the picked test workspace. */
@@ -52,7 +63,7 @@ const label = (plan) => (PLANS[plan] && PLANS[plan].label) || plan;
  */
 export function billingMail({ kind, plan = '', from = '', workspace = '', email = '', tempPassword = '', base = '', until = '', test = false }) {
   const signIn = `${String(base || '').replace(/\/+$/, '')}/api/v1/admin/login`;
-  const tag = test ? ' (Rs 1 test)' : '';
+  const tag = test ? ' (test payment)' : '';
   if (kind === 'welcome') {
     return {
       subject: `Your Content Engine workspace is ready${tag}`,
@@ -91,4 +102,4 @@ export function billingMail({ kind, plan = '', from = '', workspace = '', email 
   throw new Error(`unknown billing email: ${kind}`);
 }
 
-export default { TEST_PLANS, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, rowActions, orderSigOk, billingMail };
+export default { TEST_PLANS, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, rowActions, orderSigOk, billingMail };
