@@ -9,6 +9,7 @@
  */
 import { cancelProblem } from './cancelSpec.js';
 import { planLabel, PLANS, limitsForTenant } from './planSpec.js';
+import { TEST_PLANS } from './billingTestSpec.js';
 
 export const PLAN_PATH = '/api/v1/admin/plan';
 
@@ -70,6 +71,7 @@ export function planBody({ tenant = null, role = 'admin', superAdmin = false, ba
       <script>function genHook(){var a=new Uint8Array(24);crypto.getRandomValues(a);var s=Array.from(a,function(x){return x.toString(16).padStart(2,'0');}).join('');var i=document.getElementById('rzp-hook');i.value=s;document.getElementById('pay-flag').textContent='🟢 New secret made (hidden). Press Copy, paste it in Razorpay, then Save.';}
       function copyPay(id,b){var v=document.getElementById(id).value;var f=document.getElementById('pay-flag');if(!v){f.textContent='🟡 Nothing to copy: a saved secret is not kept in the page. Generate or type it first.';return;}navigator.clipboard.writeText(v).then(function(){var t=b.textContent;b.textContent='Copied';setTimeout(function(){b.textContent=t;},1200);},function(e){f.textContent='🟡 Copy failed: '+e.message;});}
       async function savePay(){const f=document.getElementById('pay-flag');f.textContent='';try{const j=await (await fetch('${PLAN_PATH}/billing-keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keyId:document.getElementById('rzp-id').value,keySecret:document.getElementById('rzp-secret').value,webhookSecret:document.getElementById('rzp-hook').value})})).json();f.textContent=j.ok?'🟢 saved, reload to see the status':'🟡 '+(j.error||'not saved');}catch(e){f.textContent='🟡 '+e.message;}}</script>`);
+    out.push(testPayments(pay.tests || []));
   }
 
   if (superAdmin) {
@@ -99,3 +101,50 @@ export function soloOffer(tenant) {
 }
 
 export default { PLAN_PATH, planBody, soloOffer };
+
+/** Owner only: Rs 1 tests on every plan, one row each, with the live keys. */
+export function testPayments(tests = []) {
+  const esc2 = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const opts = tests.length
+    ? tests.map((t) => `<option value="${esc2(t.tenantId)}">${esc2(t.name)}: ${esc2(planLabel(t.plan))}, ${esc2(t.email)}, ${t.ended ? 'cancelled' : `paid until ${esc2(t.until)}`}</option>`).join('')
+    : '<option value="">No test workspace yet: Subscribe on a row first</option>';
+  const rows = TEST_PLANS.map((p) => `<tr data-plan="${p}"><td><b>${esc2(PLANS[p].label)}</b></td>
+      <td><button class="act" type="button" data-do="subscribe">Subscribe ₹1</button></td>
+      <td><button class="act" type="button" data-do="upgrade">Upgrade ₹1</button></td>
+      <td><button class="act" type="button" data-do="downgrade">Downgrade</button></td>
+      <td><button class="act" type="button" data-do="cancel">Cancel</button></td></tr>`).join('');
+  const data = JSON.stringify({ order: TEST_PLANS, tests }).replace(/</g, '\\u003c');
+  return `<h2 id="test-payments">Test payments, ₹1 each (owner only)</h2>
+    <p class="hint">Real money with the keys above: ₹1 a step, refund it from Razorpay if you like. Subscribe makes a new workspace on that plan and emails its sign-in to the buyer email. Upgrade charges ₹1 and opens the plan's features now; Downgrade switches them off now with no charge; Cancel ends the subscription and locks the workspace. Each step emails the buyer. Renewals stay at ₹1 a month until you cancel.</p>
+    <div class="grid2">
+      <label>Test buyer email (new for each Subscribe)<input id="tp-email" type="email" placeholder="you+lite@gmail.com" autocomplete="off"></label>
+      <label>Test buyer name and phone<span class="inl"><input id="tp-name" placeholder="Name"><input id="tp-phone" placeholder="Phone"></span></label>
+    </div>
+    <label>Test workspace for Upgrade, Downgrade and Cancel<select id="tp-ws">${opts}</select></label>
+    <table class="tp"><thead><tr><th>Plan</th><th></th><th></th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <p id="tp-msg" class="hint"></p>
+    <script>(function(){var D=${data};var M=document.getElementById('tp-msg');var W=document.getElementById('tp-ws');
+    function picked(){for(var i=0;i<D.tests.length;i++){if(D.tests[i].tenantId===W.value)return D.tests[i];}return null;}
+    function rank(p){return D.order.indexOf(p);}
+    function paint(){var t=picked();var on=t&&!t.ended?rank(t.plan):-2;document.querySelectorAll('table.tp tr[data-plan]').forEach(function(r){var x=rank(r.getAttribute('data-plan'));
+      r.querySelector('[data-do=upgrade]').disabled=!(on>=0&&x>on);r.querySelector('[data-do=downgrade]').disabled=!(on>=0&&x<on);r.querySelector('[data-do=cancel]').disabled=!(on>=0&&x===on);r.style.fontWeight=(on===x)?'700':'';});}
+    async function post(u,b){var r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});var j=await r.json().catch(function(){return {ok:false,error:'The app answered '+r.status};});if(!j.ok)throw new Error(j.error||'failed');return j;}
+    function rzp(){return new Promise(function(ok,bad){if(window.Razorpay)return ok();var s=document.createElement('script');s.src='https://checkout.razorpay.com/v1/checkout.js';s.onload=ok;s.onerror=function(){bad(new Error('The payment window did not load'));};document.body.appendChild(s);});}
+    function mailed(e){return e&&e.sent?' Email sent.':' 🟡 Email not sent'+(e&&e.error?': '+e.error:'')+'.';}
+    function later(){setTimeout(function(){location.reload();},3500);}
+    async function run(step,plan){M.textContent='Working…';try{
+      if(step==='subscribe'){var s=await post('/api/v1/admin/plan/test/subscribe',{plan:plan,email:document.getElementById('tp-email').value,name:document.getElementById('tp-name').value,phone:document.getElementById('tp-phone').value});await rzp();
+        new window.Razorpay({key:s.keyId,subscription_id:s.subscriptionId,name:'Content Engine',description:s.description,prefill:s.prefill,
+          handler:async function(r){try{var j=await post('/buy/confirm',{paymentId:r.razorpay_payment_id,subscriptionId:r.razorpay_subscription_id,signature:r.razorpay_signature});M.textContent='🟢 Paid. Workspace '+j.tenant+' made for '+j.email+(j.tempPassword?', one-time password '+j.tempPassword:'')+'. The sign-in was emailed. Reloading…';setTimeout(function(){location.reload();},8000);}catch(e){M.textContent='🔴 '+e.message;}},
+          modal:{ondismiss:function(){M.textContent='🟡 Payment window closed.';}}}).open();return;}
+      var t=picked();if(!t)throw new Error('Pick a test workspace first');
+      if(step==='upgrade'){var o=await post('/api/v1/admin/plan/test/upgrade',{tenantId:t.tenantId,plan:plan});await rzp();
+        new window.Razorpay({key:o.keyId,order_id:o.orderId,amount:o.amount,currency:'INR',name:'Content Engine',description:o.description,prefill:o.prefill,
+          handler:async function(r){try{var j=await post('/api/v1/admin/plan/test/upgrade-paid',{orderId:r.razorpay_order_id,paymentId:r.razorpay_payment_id,signature:r.razorpay_signature});M.textContent='🟢 Upgraded to '+j.plan+'.'+mailed(j.email)+' Reloading…';later();}catch(e){M.textContent='🔴 '+e.message;}},
+          modal:{ondismiss:function(){M.textContent='🟡 Payment window closed.';}}}).open();return;}
+      if(step==='downgrade'){if(!confirm('Move '+t.name+' down to '+plan+' now?')){M.textContent='';return;}var d=await post('/api/v1/admin/plan/test/downgrade',{tenantId:t.tenantId,plan:plan});M.textContent='🟢 Downgraded to '+d.plan+'.'+mailed(d.email)+' Reloading…';later();return;}
+      if(step==='cancel'){if(!confirm('Cancel the subscription of '+t.name+' and lock it now?')){M.textContent='';return;}var c=await post('/api/v1/admin/plan/test/cancel',{tenantId:t.tenantId});M.textContent=(c.razorpay==='cancelled'?'🟢 Cancelled on Razorpay and locked.':'🟡 Locked here, Razorpay said: '+c.razorpay)+mailed(c.email)+' Reloading…';later();}
+    }catch(e){M.textContent='🔴 '+e.message;}}
+    document.querySelectorAll('table.tp button[data-do]').forEach(function(b){b.addEventListener('click',function(){run(b.getAttribute('data-do'),b.closest('tr').getAttribute('data-plan'));});});
+    W.addEventListener('change',paint);paint();})();</script>`;
+}

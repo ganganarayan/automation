@@ -15,6 +15,7 @@
  *         POST /api/v1/admin/plan/resume       form post, back to the page
  *         POST /api/v1/admin/plan/solo         form post: move to Solo from the next renewal
  *         POST /api/v1/admin/plan/exit-link    super admin: { url }
+ *         POST /api/v1/admin/plan/test/:step   super admin, Rs 1 tests: subscribe | upgrade | upgrade-paid | downgrade | cancel
  */
 import * as tenantRepo from '../repositories/tenantRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
@@ -24,6 +25,7 @@ import { planBody, soloOffer, PLAN_PATH } from '../utils/planPage.js';
 import { navHtml, NAV_CSS, NAV_SHELL_CSS } from '../utils/adminNav.js';
 import { formatIst } from '../utils/time.js';
 import * as billing from '../services/billingService.js';
+import * as billingTest from '../services/billingTestService.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const day = (v) => (v ? formatIst(v, { withTime: false }) : '');
@@ -52,7 +54,7 @@ export function register(ctx) {
       let pay = null;
       if (w.superAdmin) {
         const k = await billing.keys().catch(() => ({ keyId: '', keySecret: '', webhookSecret: '' }));
-        pay = { keyId: k.keyId, secretSet: !!k.keySecret, webhookSet: !!k.webhookSecret };
+        pay = { keyId: k.keyId, secretSet: !!k.keySecret, webhookSet: !!k.webhookSecret, tests: await billingTest.list().catch(() => []) };
       }
       const origin = `${req.protocol}://${req.get('host')}`;
       res.type('html').send(shell('Plan', planBody({ ...w, base, flash: String(req.query.done || ''), day, pay, origin }), w.session));
@@ -132,6 +134,31 @@ export function register(ctx) {
       log.info({ by: session.email, live: out.live }, 'razorpay keys saved');
       return res.json({ ok: true, ...out });
     } catch (err) {
+      return res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Owner only: Rs 1 tests on every plan with the live keys (Payments).
+  const TEST_STEPS = {
+    subscribe: (b) => billingTest.startSubscribe({ plan: String(b.plan || ''), name: String(b.name || ''), email: String(b.email || ''), phone: String(b.phone || '') }),
+    upgrade: (b) => billingTest.startUpgrade({ tenantId: String(b.tenantId || ''), plan: String(b.plan || '') }),
+    'upgrade-paid': (b) => billingTest.confirmUpgrade({ orderId: String(b.orderId || ''), paymentId: String(b.paymentId || ''), signature: String(b.signature || '') }),
+    downgrade: (b) => billingTest.downgrade({ tenantId: String(b.tenantId || ''), plan: String(b.plan || '') }),
+    cancel: (b) => billingTest.cancel({ tenantId: String(b.tenantId || '') }),
+  };
+  router.post('/admin/plan/test/:step', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'Sign in first.' });
+      const session = await currentSession(req);
+      if (!session || session.role !== 'super_admin') return res.status(403).json({ ok: false, error: 'Only the owner runs tests.' });
+      const step = TEST_STEPS[req.params.step];
+      if (!step) return res.status(404).json({ ok: false, error: 'No such step' });
+      const out = await step(req.body || {});
+      log.info({ by: session.email, step: req.params.step, tenant: out.tenant || req.body?.tenantId || '' }, 'billing test step');
+      res.set('Cache-Control', 'no-store');
+      return res.json({ ok: true, ...out });
+    } catch (err) {
+      log.warn({ step: req.params.step, err: err.message }, 'billing test step failed');
       return res.status(400).json({ ok: false, error: err.message });
     }
   });

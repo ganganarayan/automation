@@ -52,4 +52,14 @@ export function changePlan(keys, id, planId) {
   return call(keys, 'PATCH', `/subscriptions/${encodeURIComponent(id)}`, { plan_id: planId, quantity: 1, schedule_change_at: 'cycle_end', customer_notify: 1 });
 }
 
-export default { createPlan, createSubscription, cancelSubscription, changePlan };
+/** End a subscription now, not at the end of the period (Rs 1 tests). */
+export function cancelNow(keys, id) {
+  return call(keys, 'POST', `/subscriptions/${encodeURIComponent(id)}/cancel`, { cancel_at_cycle_end: 0 });
+}
+
+/** A one-time order for Checkout: { amount (paise), currency, receipt, notes }. */
+export function createOrder(keys, body) {
+  return call(keys, 'POST', '/orders', body);
+}
+
+export default { createPlan, createSubscription, cancelSubscription, cancelNow, changePlan, createOrder };

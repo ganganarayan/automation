@@ -23,6 +23,7 @@ import * as rzp from '../providers/razorpayBilling.js';
 import * as tenantSettings from '../core/tenantSettings.js';
 import * as planService from './planService.js';
 import { invalidateWorkspaces } from './accessService.js';
+import { TEST_SUBS_KEY, billingMail } from '../utils/billingTestSpec.js';
 import { hashPassword } from '../utils/passwordSpec.js';
 import { PLANS } from '../utils/planSpec.js';
 import { OWNER_TENANT } from '../utils/cancelSpec.js';
@@ -66,14 +67,36 @@ async function razorpayPlan(k, q) {
   const plan = await rzp.createPlan(k, {
     period: PERIODS[q.bill].period,
     item: {
-      name: `Content Engine ${PLANS[q.plan].label}${countsText(q) ? `, ${countsText(q)}` : ''} (${PERIODS[q.bill].word})`.slice(0, 120),
+      name: `Content Engine ${PLANS[q.plan].label}${countsText(q) ? `, ${countsText(q)}` : ''} (${PERIODS[q.bill].word})${q.amount === 100 ? ' Rs 1 test' : ''}`.slice(0, 120),
       amount: q.amount,
       currency: q.currency,
-      description: q.currency === 'INR' ? `${money(q.base, 'INR')} + 18% GST ${money(q.gst, 'INR')}` : 'Billed in US dollars',
+      description: q.amount === 100 ? 'Rs 1 test payment' : (q.currency === 'INR' ? `${money(q.base, 'INR')} + 18% GST ${money(q.gst, 'INR')}` : 'Billed in US dollars'),
     },
   });
   await repo.savePlanId(key, plan.id);
   return plan.id;
+}
+
+/** The Razorpay plan for a quote (the Rs 1 tests use it too). */
+export const razorpayPlanFor = razorpayPlan;
+
+/** The buyer's welcome email with the sign-in. Never throws; failures are only logged by the caller. */
+async function welcomeMail(c, tenantId, tempPassword, expires) {
+  try {
+    // Loaded here so the billing rules load without the mail and settings stack.
+    const { mailFor } = await import('./inviteService.js');
+    const { settings } = await import('../settings/index.js');
+    const { formatIst } = await import('../utils/time.js');
+    const m = await mailFor('default');
+    if (!m) return;
+    let test = false;
+    try { test = (JSON.parse((await tenantConfig.get(OWNER_TENANT, TEST_SUBS_KEY)) || '[]') || []).includes(c.id); } catch { test = false; }
+    const msg = billingMail({
+      kind: 'welcome', plan: c.plan, workspace: c.business || c.name || tenantId, email: c.email, tempPassword,
+      base: settings.app.publicBaseUrl, until: expires ? formatIst(expires, { withTime: false }) : '', test,
+    });
+    await m.send({ to: c.email, subject: msg.subject, text: msg.text });
+  } catch { /* the page still shows the sign-in */ }
 }
 
 /**
@@ -131,6 +154,7 @@ async function provision(subId, { paymentId = '', expiresAt = null } = {}) {
     tenantSettings.invalidate();
     planService.invalidate();
     invalidateWorkspaces();
+    welcomeMail(c, t.id, tempPassword, expires);
     return { checkout: { ...c, tenant_id: t.id }, tenant: t.id, tempPassword, made: true };
   } catch (err) {
     await repo.release(subId);
@@ -242,4 +266,4 @@ export async function stopRenewal(tenant) {
   return { stopped: true };
 }
 
-export default { keys, ready, saveKeys, start, confirm, webhook, stopRenewal, switchToSolo, applyPlanKey };
+export default { keys, ready, saveKeys, razorpayPlanFor, start, confirm, webhook, stopRenewal, switchToSolo, applyPlanKey };

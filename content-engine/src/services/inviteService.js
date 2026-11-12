@@ -36,7 +36,7 @@ export function inviteText({ workspace = '', access = 'admin', email = '', tempP
   };
 }
 
-async function mailFor(tenantId) {
+export async function mailFor(tenantId) {
   const p = await buildProviders(tenantId);
   const mail = { ...p.resolved.mail, smtp: p.resolved.smtp || {} };
   return mailMissing(mail).length ? null : p.mail;
