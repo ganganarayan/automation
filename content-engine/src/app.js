@@ -23,6 +23,7 @@ import * as tenantSettings from './core/tenantSettings.js';
 import * as publicPages from './utils/publicPages.js';
 import * as comparePages from './utils/comparePages.js';
 import * as kbPages from './utils/kbPages.js';
+import { kbArticle } from './utils/kbData.js';
 import { currencyOf, countryOf } from './utils/geo.js';
 import * as landingDeploy from './services/landingDeployService.js';
 import * as planCancel from './modules/planCancel.js';
@@ -87,6 +88,10 @@ export function createApp() {
   const toLanding = async (req, res, next) => {
     const domain = await landingDeploy.liveDomain().catch(() => '');
     if (!domain || req.hostname === domain) return next();
+    // An unknown page is not on the Worker either, which sends it back here:
+    // answer it here (404) instead of bouncing between the two.
+    if (req.params.slug && !kbArticle(req.params.slug)) return next();
+    if (req.params.page && !comparePages.competitorForPage(req.params.page)) return next();
     // The app's own domain opens the app at its root, not the landing page.
     if (req.path === '/' && req.hostname === (await landingDeploy.liveAppHost().catch(() => ''))) return res.redirect(302, publicPages.LOGIN_PATH);
     return res.redirect(302, `https://${domain}${req.originalUrl}`);
