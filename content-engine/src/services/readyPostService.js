@@ -33,6 +33,8 @@ import { routerClash, rerunAction } from '../utils/routerSpec.js';
 import { DateTime } from 'luxon';
 import * as sourcesRepo from '../repositories/funnelSourcesRepository.js';
 import { buildProviders } from './providerFactory.js';
+import { addChannelCta, reapplyCta } from './videoCtaService.js';
+import { pointVideos } from '../utils/ctaSpec.js';
 import * as heartbeat from '../core/heartbeat.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { createTranscriptProvider } from '../providers/transcriptProvider.js';
@@ -1263,7 +1265,13 @@ async function fixOne(row, opts) {
   if (old && ['processing', 'processed'].includes(old.status)) return { outcome: 'failed', title, error: 'Post for Me is already publishing it' };
 
   // The new post first, then the old one goes: never none, never two.
-  const request = swapMediaUrl(req, req.mediaUrl, clean.url);
+  let request = swapMediaUrl(req, req.mediaUrl, clean.url);
+  // Channels that had their own call-to-action copy get it again, on the cleaned video.
+  if (req.cta && req.cta.texts && request.platformConfigurations) {
+    const configs = pointVideos(request.platformConfigurations, Object.keys(req.cta.texts), clean.url);
+    const redone = await reapplyCta({ videoUrl: clean.url, durationSec: clean.durationSec, platformConfigurations: configs, cta: req.cta, publish, log });
+    request = { ...request, platformConfigurations: redone.platformConfigurations, cta: redone.cta };
+  }
   const made = await publish.createPost({ accountIds, scheduledAt: at.toISOString(), caption: request.caption, mediaUrl: request.mediaUrl, platformConfigurations: request.platformConfigurations });
   const ref = made && made.id;
   if (!ref) throw new Error('Post for Me did not return a post id');
@@ -1508,8 +1516,12 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
     const caption = ai ? ai.caption : (sel.caption.trim() || captionFor(cfg, resolved));
     try {
       await drive.shareAnyone(sel.driveId);
+      // Each channel's call to action in the middle of its own copy (Settings).
+      const withCta = ai
+        ? await addChannelCta({ tenantId: funnel.tenant_id, resolved: providers.resolved, videoUrl, durationSec, platformConfigurations: ai.platformConfigurations, publish, log })
+        : { platformConfigurations, cta: null };
       // Kept on the instance so failed channels can be re-posted exactly.
-      const request = { caption, mediaUrl: videoUrl, platformConfigurations: ai ? ai.platformConfigurations : platformConfigurations };
+      const request = { caption, mediaUrl: videoUrl, platformConfigurations: withCta.platformConfigurations, ...(withCta.cta ? { cta: withCta.cta } : {}) };
       const result = await publish.createPost({ accountIds: accounts, scheduledAt: scheduledIso || undefined, ...request });
       const ref = result && result.id ? result.id : null;
       // The link goes in each channel's first comment once the post is live.

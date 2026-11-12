@@ -91,6 +91,15 @@ export function createFfmpegProvider(cfg = {}, log) {
       }
     },
 
+    /** Burn a channel's call to action into a video (the argv comes from utils/ctaSpec). */
+    async overlayCta({ args }) {
+      try {
+        await run(bin, args, { maxBuffer: 64 * 1024 * 1024, timeout: 30 * 60 * 1000 });
+      } catch (err) {
+        throw new ExternalAPIError(`ffmpeg call to action failed: ${err.stderr ? String(err.stderr).slice(-300) : err.message}`);
+      }
+    },
+
     /** Render an image post's Short (the argv comes from utils/shortSpec). */
     async imageToShort({ args, cwd }) {
       await run(bin, args, { maxBuffer: 64 * 1024 * 1024, timeout: 300000, ...(cwd ? { cwd } : {}) });

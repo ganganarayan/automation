@@ -24,6 +24,9 @@ import { DEFAULT_COPY_PROMPT } from '../utils/aiCopySpec.js';
 import { MAIL_PROVIDERS, DEFAULT_MAIL_PROVIDER } from '../utils/mailApis.js';
 import { DEFAULT_SCRIPT_PROMPT } from '../utils/stageSpec.js';
 import { VIDAPULSE_SYSTEM } from './prompts.js';
+import { CTA_PLATFORMS, DEFAULT_CTA, CTA_SEC_OPTIONS, CTA_MAX_LINES, CTA_MAX_CHARS } from '../utils/ctaSpec.js';
+
+const CTA_LABELS = { youtube: 'YouTube', instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', linkedin: 'LinkedIn', threads: 'Threads', x: 'X' };
 
 export const APPS = ['api-keys', 'content-engine', 'tracking-bridge'];
 
@@ -132,6 +135,23 @@ export const CONFIG_MANIFEST = {
             help: 'GitHub counts as failed when it reports an error or has not finished within an hour.',
           },
           { key: 'short_music_url', label: 'Music for every video, with its copyright credit', type: 'textarea', musicList: true, musicPreview: true, rows: 6, placeholder: 'https://drive.google.com/drive/folders/...\nhttps://drive.google.com/file/d/.../view | Song by Artist, CC BY 4.0', help: 'Every video the app makes takes its music from here, for all funnels and lanes (ready videos keep their own sound). Paste a Drive folder link: put the audio files in it, each with a .txt of the same name holding its copyright credit (song.mp3 and song.txt), and share the folder Anyone with the link; add music to it any time. Single file links work too, each with its credit. Each video gets one at random; if it will not load, the next is tried. The credit of the music used is always added as the last line of the post caption (on X only when it still fits). YouTube, Spotify or SoundCloud links are web pages, not files, and are skipped. With no music that loads, the video goes out with the voice only.' },
+        ],
+      },
+      {
+        title: 'Call to action on the video',
+        fields: [
+          {
+            key: 'video_cta', label: 'Show a call to action in the middle of each ready video', type: 'select', default: 'off',
+            options: [{ value: 'on', label: 'Yes: each channel gets its own line' }, { value: 'off', label: 'No' }],
+            help: 'Ready videos (Lane 1) only. Each channel gets its own copy of the video with its line shown in the middle, so YouTube can say Subscribe while Instagram says Follow or DM. Each video takes the next line in each list, so they rotate. Channels with the same line share one copy. Every different line is one more re-encode of the video on Railway before it posts, so a long video takes a few minutes longer. If a copy fails, that channel posts the video without it.',
+          },
+          { key: 'video_cta_sec', label: 'How long it shows', type: 'select', default: '4', options: CTA_SEC_OPTIONS.map((s) => ({ value: String(s), label: `${s} seconds` })) },
+          ...CTA_PLATFORMS.map((p) => ({
+            key: `video_cta_${p}`,
+            label: `${CTA_LABELS[p]}: one line per video, up to ${CTA_MAX_LINES}, rotated`,
+            type: 'textarea', rows: 3, default: DEFAULT_CTA[p].join('\n'),
+            ...(p === 'youtube' ? { help: `Up to ${CTA_MAX_CHARS} characters a line. Blank = the lines shown.` } : {}),
+          })),
         ],
       },
       {

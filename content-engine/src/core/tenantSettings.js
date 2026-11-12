@@ -405,6 +405,13 @@ export async function forTenant(tenantId = 'default') {
       track: pick('short_music', ''),
       url: pick('short_music_url', ''),
     },
+    // Call to action burned into the middle of each ready video, per channel
+    // (utils/ctaSpec): 'on' / 'off', seconds shown, lines per channel (blank = built-in).
+    videoCta: {
+      on: pick('video_cta', 'off'),
+      sec: pick('video_cta_sec', '4'),
+      lists: Object.fromEntries(['youtube', 'instagram', 'facebook', 'tiktok', 'linkedin', 'threads', 'x'].map((p) => [p, pick(`video_cta_${p}`, '')])),
+    },
     // Image posts: 'on' = a video with music and the caption read aloud (default),
     // 'music' = a video with music only, 'off' = the picture.
     imageVideo: pick('image_video', 'on'),
