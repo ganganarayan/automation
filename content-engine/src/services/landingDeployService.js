@@ -59,6 +59,10 @@ export async function deploy({ domain = '', appDomain } = {}) {
     if (!appUrl) throw new Error('this server has no public address (PUBLIC_BASE_URL)');
     const pages = renderLanding({ email: await contactEmail(), origin: `https://${host}` });
     await call(landingRequests.putScript(String(account).trim(), String(token).trim(), name, { appUrl, pages }));
+    // Already attached to this Worker (any deploy after the first): nothing to attach.
+    const existing = await call(landingRequests.listDomains(String(account).trim(), String(token).trim(), host)).catch(() => null);
+    const mine = ((existing && existing.result) || []).find((d) => d.hostname === host);
+    if (mine && mine.service !== name) throw new Error(`the pages are up, but ${host} is attached to another Worker (${mine.service}). Remove it there (Workers & Pages, that Worker, Settings, Domains & Routes) and deploy again.`);
     let zoneId = '';
     for (const z of zoneCandidates(host)) {
       const found = await call(landingRequests.findZone(String(token).trim(), z)).catch(() => null);
@@ -67,8 +71,8 @@ export async function deploy({ domain = '', appDomain } = {}) {
     }
     // Without Zone: Read the zone is not found; Cloudflare also takes its name.
     const zoneName = zoneId ? '' : zoneCandidates(host).slice(-1)[0];
-    await call(landingRequests.putDomain(String(account).trim(), String(token).trim(), { hostname: host, service: name, zoneId, zoneName }))
-      .catch((err) => { throw new Error(`the Worker is up, but the domain was not attached: ${err.message}. If ${host} still has an old DNS record (the Railway one), delete it in Cloudflare DNS and deploy again.`); });
+    if (!mine) await call(landingRequests.putDomain(String(account).trim(), String(token).trim(), { hostname: host, service: name, zoneId, zoneName }))
+      .catch((err) => { throw new Error(`the pages are up, but ${host} was not attached: ${err.message}`); });
     outcome = { ok: true, at, worker: name, domain: host, appUrl, pages: Object.keys(pages).length };
     log.info(outcome, 'landing deployed to Cloudflare');
   } catch (err) {

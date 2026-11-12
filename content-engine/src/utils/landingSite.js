@@ -115,6 +115,7 @@ export const landingRequests = {
     return { url: `${API}/accounts/${account}/workers/scripts/${name}`, init: { method: 'PUT', headers: auth(token), body: form } };
   },
   findZone: (token, zoneName) => ({ url: `${API}/zones?name=${encodeURIComponent(zoneName)}`, init: { headers: auth(token) } }),
+  listDomains: (account, token, hostname) => ({ url: `${API}/accounts/${account}/workers/domains?hostname=${encodeURIComponent(hostname)}`, init: { headers: auth(token) } }),
   putDomain: (account, token, { hostname, service, zoneId = '', zoneName = '' }) => ({
     url: `${API}/accounts/${account}/workers/domains`,
     init: {

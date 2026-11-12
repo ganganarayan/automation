@@ -66,3 +66,9 @@ describe('landing site on Cloudflare', () => {
     expect(byName).toMatchObject({ zone_name: 'example.com' });
   });
 });
+
+describe('landing domain lookup', () => {
+  it('asks Cloudflare which Worker holds the hostname', () => {
+    expect(landingRequests.listDomains('a', 't', 'h.example.com').url).toBe('https://api.cloudflare.com/client/v4/accounts/a/workers/domains?hostname=h.example.com');
+  });
+});
