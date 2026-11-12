@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { TEST_PLANS, rankOf, testQuote, testPrice, rowActions, orderSigOk, billingMail } from '../src/utils/billingTestSpec.js';
+import { TEST_PLANS, rankOf, testQuote, testPrice, upgradePrice, rowActions, orderSigOk, billingMail } from '../src/utils/billingTestSpec.js';
 import { planKey, readPlanKey } from '../src/utils/billingSpec.js';
 import { planBody, testPayments } from '../src/utils/planPage.js';
 
@@ -13,6 +13,8 @@ describe('Rs 1 test payments', () => {
   it('charges each plan its own small price, and the plan key still names the plan', () => {
     expect(TEST_PLANS.map((p) => testQuote(p).amount)).toEqual([110, 120, 130, 140, 150, 160]);
     expect(testPrice('lite')).toBe('₹1.10');
+    expect(upgradePrice('solo')).toBe('₹2.20');
+    expect(TEST_PLANS.map(testPrice)).not.toEqual(expect.arrayContaining(TEST_PLANS.map(upgradePrice)));
     const q = testQuote('growth');
     expect(q).toMatchObject({ currency: 'INR', amount: 150, total: 1.5, gst: 0, bill: 'mo' });
     expect(readPlanKey(planKey(q))).toMatchObject({ plan: 'growth', units: 1, users: 0 });
@@ -50,7 +52,9 @@ describe('Rs 1 test payments', () => {
   it('shows one row per plan with all four buttons, for the owner only', () => {
     const html = testPayments([{ tenantId: 't1', name: 'Test lite', email: 'a@b.co', plan: 'lite', ended: false, until: '12-12-2026' }]);
     expect((html.match(/<tr data-plan=/g) || []).length).toBe(6);
-    for (const b of ['Subscribe ₹1.10', 'Upgrade ₹1.60', 'Downgrade', 'Cancel']) expect(html).toContain(b);
+    expect((html.match(/data-do="upgrade"/g) || []).length).toBe(5);
+    expect((html.match(/data-do="downgrade"/g) || []).length).toBe(5);
+    for (const b of ['Subscribe ₹1.10', 'Subscribe ₹1.60', 'Upgrade ₹2.20', 'Upgrade ₹2.60', 'Downgrade', 'Cancel']) expect(html).toContain(b);
     const owner = planBody({ superAdmin: true, pay: { keyId: '', tests: [] }, origin: 'https://x' });
     expect(owner).toContain('test-payments');
     expect(planBody({ superAdmin: false })).not.toContain('test-payments');

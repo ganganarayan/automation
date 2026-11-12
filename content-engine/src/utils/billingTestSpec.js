@@ -33,9 +33,27 @@ export function testQuote(plan) {
   return { plan, bill: 'mo', currency: 'INR', units: 1, users: 0, base: 1, gst: 0, total: amount / 100, amount, test: true };
 }
 
-/** The price of a plan's test charge, for buttons and emails: "₹1.10". */
+/**
+ * What a test upgrade to this plan costs, once: Rs 2.20 for Solo up to
+ * Rs 2.60 for Agency, so an upgrade charge never looks like a subscription
+ * charge (Rs 1.10 to Rs 1.60). Paise.
+ */
+export function upgradeAmount(plan) {
+  const r = rankOf(plan);
+  if (r < 0) throw new Error('Pick a plan to test');
+  return 200 + 10 * (r + 1);
+}
+
+const rupees = (paise) => `₹${(paise / 100).toFixed(2)}`;
+
+/** The monthly price of a plan's test subscription: "₹1.10". */
 export function testPrice(plan) {
-  return `₹${(testQuote(plan).amount / 100).toFixed(2)}`;
+  return rupees(testQuote(plan).amount);
+}
+
+/** The one-time price of a test upgrade to a plan: "₹2.20". */
+export function upgradePrice(plan) {
+  return rupees(upgradeAmount(plan));
 }
 
 /** Which buttons a row offers for the picked test workspace. */
@@ -102,4 +120,4 @@ export function billingMail({ kind, plan = '', from = '', workspace = '', email 
   throw new Error(`unknown billing email: ${kind}`);
 }
 
-export default { TEST_PLANS, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, rowActions, orderSigOk, billingMail };
+export default { TEST_PLANS, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, upgradeAmount, upgradePrice, rowActions, orderSigOk, billingMail };

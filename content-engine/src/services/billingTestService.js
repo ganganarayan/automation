@@ -29,7 +29,7 @@ import { mailFor } from './inviteService.js';
 import { settings } from '../settings/index.js';
 import { OWNER_TENANT } from '../utils/cancelSpec.js';
 import { planKey, cleanBuyer, expiryAfter } from '../utils/billingSpec.js';
-import { TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, orderSigOk, billingMail } from '../utils/billingTestSpec.js';
+import { TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, upgradeAmount, upgradePrice, orderSigOk, billingMail } from '../utils/billingTestSpec.js';
 import { formatIst } from '../utils/time.js';
 import { childLogger } from '../core/logger.js';
 
@@ -108,10 +108,10 @@ export async function startUpgrade({ tenantId, plan }) {
   const { t, email } = await testWorkspace(tenantId);
   if (!(rankOf(plan) > rankOf(t.plan))) throw new Error('An upgrade goes to a dearer plan');
   const k = await billing.keys();
-  const amount = testQuote(plan).amount;
+  const amount = upgradeAmount(plan);
   const order = await rzp.createOrder(k, { amount, currency: 'INR', receipt: `up-${t.id}`.slice(0, 40), notes: { tenant: t.id, plan, test: '1' } });
   await tenantConfig.set(OWNER_TENANT, `${TEST_ORDER_PREFIX}${order.id}`, JSON.stringify({ tenantId: t.id, plan }));
-  return { keyId: k.keyId, orderId: order.id, amount, description: `Test upgrade of ${t.name || t.id} to ${plan} (${testPrice(plan)})`, prefill: { email } };
+  return { keyId: k.keyId, orderId: order.id, amount, description: `Test upgrade of ${t.name || t.id} to ${plan} (${upgradePrice(plan)})`, prefill: { email } };
 }
 
 export async function confirmUpgrade({ orderId = '', paymentId = '', signature = '' }) {
@@ -124,7 +124,7 @@ export async function confirmUpgrade({ orderId = '', paymentId = '', signature =
   const from = t.plan;
   if (from !== pending.plan) {
     await moveTo(t, pending.plan);
-    await repo.logPayment({ paymentId, subId: t.billing_sub_id, tenantId: t.id, currency: 'INR', amount: testQuote(pending.plan).amount, base: 1, gst: 0, gstin: null }).catch(() => {});
+    await repo.logPayment({ paymentId, subId: t.billing_sub_id, tenantId: t.id, currency: 'INR', amount: upgradeAmount(pending.plan), base: 2, gst: 0, gstin: null }).catch(() => {});
   }
   const sent = await mail(email, billingMail({ kind: 'upgraded', plan: pending.plan, from, workspace: t.name || t.id, base: settings.app.publicBaseUrl, test: true }));
   return { tenant: t.id, plan: pending.plan, email: sent };
