@@ -23,6 +23,7 @@ import * as tenantSettings from './core/tenantSettings.js';
 import * as publicPages from './utils/publicPages.js';
 import * as comparePages from './utils/comparePages.js';
 import { currencyOf, countryOf } from './utils/geo.js';
+import * as landingDeploy from './services/landingDeployService.js';
 import * as planCancel from './modules/planCancel.js';
 import * as billingModule from './modules/billing.js';
 
@@ -80,6 +81,14 @@ export function createApp() {
     const e = (await tenantSettings.forTenant('default').catch(() => null))?.emails || {};
     return e.public || e.notify || '';
   };
+  // Once the landing pages are live on Cloudflare (Tenants panel), this app
+  // sends its own copies there; Sign in, /buy and the app stay here.
+  const toLanding = async (req, res, next) => {
+    const domain = await landingDeploy.liveDomain().catch(() => '');
+    if (!domain || req.hostname === domain) return next();
+    return res.redirect(302, `https://${domain}${req.originalUrl}`);
+  };
+  app.get(['/', '/compare', '/compare/:page', '/privacy', '/terms', '/refund', '/shipping'], toLanding);
   app.get('/', async (req, res) => res.type('html').send(publicPages.homePage({ email: await contactEmail(), cur: currencyOf(req) })));
   app.get('/compare', async (req, res) => res.type('html').send(comparePages.compareIndexPage({ email: await contactEmail(), cur: currencyOf(req) })));
   app.get('/compare/:page', async (req, res, next) => {

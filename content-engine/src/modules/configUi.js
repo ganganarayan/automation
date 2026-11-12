@@ -67,6 +67,7 @@ import { sendInvite } from '../services/inviteService.js';
 const ACCESS_TEXT = { admin: 'Admin: every client', staff: 'Staff: ticked clients only', owner: 'Client owner: runs this workspace', viewer: 'Client viewer: looks only' };
 import * as wakeSchedule from '../services/wakeScheduleService.js';
 import * as cloudflareWake from '../services/cloudflareWakeService.js';
+import * as landingDeploy from '../services/landingDeployService.js';
 import { DAILY_KEY, dailyTimeOf } from '../utils/cloudflareWake.js';
 import { usageBox } from '../utils/pfmUsageView.js';
 import { costBox } from '../utils/costUsageView.js';
@@ -687,6 +688,23 @@ export function register(ctx) {
       res.status(400).json({ ok: false, text: `🔴 ${err.message}` });
     }
   });
+  // Owner only: the landing pages on Cloudflare (Tenants panel).
+  router.get('/admin/landing', async (req, res) => {
+    try {
+      if (!(await ownerOnly(req, res))) return;
+      res.json(await landingDeploy.status());
+    } catch (err) {
+      res.status(400).json({ ok: false, text: `🔴 ${err.message}` });
+    }
+  });
+  router.post('/admin/landing/deploy', async (req, res) => {
+    try {
+      if (!(await ownerOnly(req, res))) return;
+      res.json(await landingDeploy.deploy({ domain: req.body?.domain }));
+    } catch (err) {
+      res.status(400).json({ ok: false, text: `🔴 ${err.message}` });
+    }
+  });
 
   // GitHub wake-up times (old: the Cloudflare waker replaced them; kept for the manual workflow).
   router.get('/admin/wake-schedule', async (req, res) => {
@@ -1130,6 +1148,7 @@ function tenantsPanel({ tenantList, postUsage = null, ownKeyIds = [], aiCosts = 
     ${costBox(tenantList, aiCosts, new Date(), keyOwners, keyHistories)}
     ${usageBox(tenantList, postUsage, new Date(), ownKeyIds)}
     ${wakerBox()}
+    ${landingBox()}
   </section>`;
 }
 
@@ -1214,6 +1233,27 @@ function qaBox(tenantList) {
           st.textContent=dot[j.verdict]+' '+j.tenant+': '+n('ok')+' passed, '+n('warn')+' to look at, '+n('fail')+' failed'+(paid?', spent $'+j.spentUsd:'')+'.';
         }catch(e){ st.textContent='🔴 '+e.message; }
       }
+    </script>
+  </fieldset>`;
+}
+
+/** Owner only: the public pages served from Cloudflare on the owner's own domain. */
+function landingBox() {
+  return `<fieldset><legend>Landing pages on Cloudflare</legend>
+    <p class="hint">Puts the home page, compare pages and policies on your own domain, served by Cloudflare (rupees in India, dollars elsewhere). Sign in, Buy and the app stay on this app. Uses the account ID and token from the wake-up timer box; the token needs <b>Workers Scripts: Edit</b> and access to the domain's zone (Zone <b>Zone: Read</b>). Delete any old DNS record for the landing domain first (for example the Railway one), or Cloudflare will not attach it. Press Deploy again after you change prices, plan text or the contact email.</p>
+    <div class="row" style="gap:.4rem;align-items:center;flex-wrap:wrap">
+      <input id="lp-dom" placeholder="Landing domain, e.g. content360.example.com" style="min-width:20rem">
+      <button type="button" class="act" onclick="lpDeploy()">☁ Deploy landing pages</button>
+    </div>
+    <p id="lp-st" class="hint">Checking…</p>
+    <script>
+      function lpShow(j){ document.getElementById('lp-st').textContent=j.text||'🟡 unknown'; if(j.domain) document.getElementById('lp-dom').value=j.domain; }
+      async function lpDeploy(){
+        const st=document.getElementById('lp-st'); st.textContent='Deploying to Cloudflare…';
+        try{ const r=await fetch('/api/v1/admin/landing/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain:document.getElementById('lp-dom').value.trim()})}); lpShow(await r.json()); }
+        catch(e){ st.textContent='🔴 '+e.message; }
+      }
+      (async function(){ try{ lpShow(await (await fetch('/api/v1/admin/landing')).json()); }catch(e){ document.getElementById('lp-st').textContent='🟡 Could not check: '+e.message; } })();
     </script>
   </fieldset>`;
 }
