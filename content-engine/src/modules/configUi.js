@@ -58,6 +58,7 @@ import { createPostForMeProvider } from '../providers/publishProvider.js';
 import { listElevenLabsVoices } from '../providers/ttsProvider.js';
 import { settings } from '../settings/index.js';
 import { listReadyVideos } from '../services/readyPostService.js';
+import { previewCta } from '../services/videoCtaService.js';
 import { parseDriveFolderId } from '../utils/readyPostSpec.js';
 import { keyOk, superOk, gateState, currentSession, invalidateWorkspaces } from '../services/accessService.js';
 import { AGENCY_PLAN, planChangeProblem, kindOf, accessChoices, accessRole, ROLE_LABEL } from '../utils/workspaceSpec.js';
@@ -201,6 +202,27 @@ export function register(ctx) {
       res.send(buf);
     } catch (err) {
       res.status(502).end();
+    }
+  });
+
+  // ▶ Preview a channel's call to action: a 14 s test clip rendered by this
+  // server's ffmpeg, the same way a real post is (one at a time).
+  let ctaPreviewBusy = false;
+  router.get('/admin/settings/cta-preview', async (req, res) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).end();
+      if (ctaPreviewBusy) return res.status(429).type('text/plain').send('another preview is rendering, try again in a moment');
+      ctaPreviewBusy = true;
+      const buf = await previewCta({
+        platform: String(req.query.platform || 'youtube'),
+        line: String(req.query.line || '').slice(0, 200),
+        animated: req.query.anim !== '0',
+        wide: req.query.wide === '1',
+      }).finally(() => { ctaPreviewBusy = false; });
+      res.set({ 'Content-Type': 'video/mp4', 'Cache-Control': 'private, no-store' });
+      res.send(buf);
+    } catch (err) {
+      res.status(502).type('text/plain').send(`preview failed: ${String(err.message).slice(0, 300)}`);
     }
   });
 
@@ -1700,6 +1722,35 @@ function appSection(app, tenantId, configMap, key, extra = '') {
  * browser from the same formula ffmpeg uses (no server work, no egress);
  * "my own music" plays the link typed below it.
  */
+/**
+ * ▶ Preview next to a channel's call-to-action lines: the server renders a
+ * test clip with that channel's animation and the first line typed, and it
+ * plays here.
+ */
+function ctaPreviewButton(platform, key) {
+  const id = `ctap-${String(platform).replace(/[^a-z]/g, '')}`;
+  return ` <button type="button" class="btn" id="${id}-b" style="margin-left:6px">▶ Preview</button>
+<label class="hint" style="margin-left:6px"><input type="checkbox" id="${id}-w"> wide (16:9)</label>
+<span class="hint" id="${id}-s"></span><div id="${id}-v"></div>
+<script>(function(){
+  const b=document.getElementById('${id}-b'),s=document.getElementById('${id}-s'),v=document.getElementById('${id}-v'),w=document.getElementById('${id}-w');
+  b.addEventListener('click',async function(){
+    const el=document.querySelector('[name="set[${key}]"]');
+    const line=((el&&el.value)||'').split(/\\r?\\n/).map(function(x){return x.trim();}).filter(Boolean)[0]||'';
+    b.disabled=true;s.textContent=' Rendering on the server (about 20 to 60 s)...';v.innerHTML='';
+    try{
+      const r=await fetch('/api/v1/admin/settings/cta-preview?platform=${platform}&line='+encodeURIComponent(line)+(w.checked?'&wide=1':''));
+      if(!r.ok)throw new Error(await r.text());
+      const url=URL.createObjectURL(await r.blob());
+      v.innerHTML='<video controls autoplay playsinline style="max-width:100%;max-height:520px;margin-top:6px"></video>';
+      v.querySelector('video').src=url;
+      s.textContent=' 🟢 Test picture: the animation at 1.5 s, the line at 8 s. On a real video they sit in the middle.';
+    }catch(e){s.textContent=' 🔴 '+e.message;}
+    b.disabled=false;
+  });
+})();</script>`;
+}
+
 function musicPreviewButton() {
   return ` <button type="button" class="btn" id="mprev" style="margin-left:6px" aria-label="Play the music">▶ Play</button>
 <span class="hint" id="mprev-st"></span>
@@ -1984,7 +2035,7 @@ function secretJsonSummary(raw) {
   if (field.type === 'json' || field.type === 'textarea') {
     // A field with a built-in default shows it pre-filled until it's changed.
     const rows = field.rows ? ` rows="${Number(field.rows)}"` : field.default ? ' rows="12"' : '';
-    return `<div class="field"><label>${esc(field.label)}</label>${field.musicPreview ? `<div>${musicPreviewButton()}</div>` : ''}${field.musicList ? musicListEditor(field.key) : ''}
+    return `<div class="field"><label>${esc(field.label)}</label>${field.musicPreview ? `<div>${musicPreviewButton()}</div>` : ''}${field.ctaPreview ? `<div>${ctaPreviewButton(field.ctaPreview, field.key)}</div>` : ''}${field.musicList ? musicListEditor(field.key) : ''}
       <textarea name="set[${esc(field.key)}]"${rows} placeholder="${field.placeholder ? esc(field.placeholder) : ''}">${esc(has ? current : (field.default || ''))}</textarea>
       ${field.help ? `<p class="hint">${esc(field.help)}</p>` : ''}</div>`;
   }

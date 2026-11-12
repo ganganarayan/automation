@@ -141,15 +141,15 @@ export const CONFIG_MANIFEST = {
         title: 'Call to action on the video',
         fields: [
           {
-            key: 'video_cta', label: 'Show a call to action in the middle of each ready video', type: 'select', default: 'off',
+            key: 'video_cta', label: 'Show a call to action in the middle of each video', type: 'select', default: 'off',
             options: [{ value: 'on', label: 'Yes: each channel gets its own line' }, { value: 'off', label: 'No' }],
-            help: 'Ready videos (Lane 1) only. Each channel gets its own copy of the video with its line shown in the middle, so YouTube can say Subscribe while Instagram says Follow or DM. Each video takes the next line in each list, so they rotate. Channels with the same line share one copy. Every different line is one more re-encode of the video on Railway before it posts, so a long video takes a few minutes longer. If a copy fails, that channel posts the video without it.',
+            help: 'Ready videos and image-post videos (not festival greetings). Each channel gets its own copy of the video with its line shown as text in the middle, so YouTube can say Subscribe while Instagram says Follow or DM. Nothing is spoken and the video never pauses. On videos over 3 minutes a floating like, follow and bell animation in that channel\'s own look plays 10 seconds before the line, with a click on each tap and a bell, mixed under the video\'s sound. Each video takes the next line in each list, so they rotate. Copies that would be the same are made once; every other copy is one more re-encode on Railway before it posts, so a long video posted to many channels takes several minutes longer. If a copy fails, that channel posts the video without it.',
           },
           { key: 'video_cta_sec', label: 'How long it shows', type: 'select', default: '4', options: CTA_SEC_OPTIONS.map((s) => ({ value: String(s), label: `${s} seconds` })) },
           ...CTA_PLATFORMS.map((p) => ({
             key: `video_cta_${p}`,
             label: `${CTA_LABELS[p]}: one line per video, up to ${CTA_MAX_LINES}, rotated`,
-            type: 'textarea', rows: 3, default: DEFAULT_CTA[p].join('\n'),
+            type: 'textarea', rows: 3, default: DEFAULT_CTA[p].join('\n'), ctaPreview: p,
             ...(p === 'youtube' ? { help: `Up to ${CTA_MAX_CHARS} characters a line. Blank = the lines shown.` } : {}),
           })),
         ],

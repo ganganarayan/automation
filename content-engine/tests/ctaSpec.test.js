@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ctaLines, normalizeVideoCta, ctaPlan, ctaGroups, ctaWindow, ctaBannerSvg, ctaOverlayArgs,
-  videoPlatforms, withCtaVideos, pointVideos, DEFAULT_CTA, wrapCta,
+  videoPlatforms, withCtaVideos, pointVideos, DEFAULT_CTA, wrapCta, renderGroups,
 } from '../src/utils/ctaSpec.js';
 
 describe('call to action lines', () => {
@@ -69,10 +69,10 @@ describe('per-channel videos', () => {
     linkedin: { caption: 'c' },
   };
   it('only channels posting the video get a copy', () => {
-    expect(videoPlatforms(configs, video)).toEqual(['youtube', 'instagram']);
+    expect(videoPlatforms(configs, [video])).toEqual({ youtube: video, instagram: video });
   });
   it('swaps in each copy and keeps thumbnails', () => {
-    const out = withCtaVideos(configs, video, { youtube: 'https://cta/yt', instagram: 'https://cta/ig', x: 'https://cta/x' });
+    const out = withCtaVideos(configs, { youtube: 'https://cta/yt', instagram: 'https://cta/ig' });
     expect(out.youtube.media[0]).toEqual({ url: 'https://cta/yt', thumbnail_url: 'https://thumb/yt' });
     expect(out.instagram.media[0]).toEqual({ url: 'https://cta/ig', thumbnail_timestamp_ms: 0 });
     expect(out.x).toBe(configs.x);
@@ -82,5 +82,34 @@ describe('per-channel videos', () => {
     const out = pointVideos({ youtube: { media: [{ url: 'https://cta/yt', thumbnail_url: 'k' }] } }, ['youtube', 'tiktok'], 'https://clean');
     expect(out.youtube.media[0]).toEqual({ url: 'https://clean', thumbnail_url: 'k' });
     expect(out.tiktok).toBeUndefined();
+  });
+});
+
+describe('render groups', () => {
+  const plan = { youtube: 'Sub', instagram: 'Follow', tiktok: 'Follow', linkedin: 'Follow' };
+  it('text only: same source and line share a copy', () => {
+    const g = renderGroups({ sources: { youtube: 'v', instagram: 'v', tiktok: 'v', linkedin: 'l' }, plan });
+    expect([...g.values()].map((x) => x.platforms)).toEqual([['youtube'], ['instagram', 'tiktok'], ['linkedin']]);
+  });
+  it('animated: each channel its own look', () => {
+    const g = renderGroups({ sources: { youtube: 'v', instagram: 'v', tiktok: 'v' }, plan, animated: true });
+    expect(g.size).toBe(3);
+  });
+});
+
+describe('with the animation', () => {
+  it('overlays the frames from their start, mixes the sounds under the video', () => {
+    const args = ctaOverlayArgs({ input: 'in', overlay: 'p.png', output: 'o.mp4', start: 90, end: 94, anim: { pattern: '/t/f%04d.png', start: 80, x: 10, y: 20, sounds: ['aevalsrc=0:d=1[s0]', 'aevalsrc=0:d=1[s1]'] } });
+    expect(args.slice(args.indexOf('-itsoffset'), args.indexOf('-itsoffset') + 2)).toEqual(['-itsoffset', '80']);
+    const graph = args[args.indexOf('-filter_complex') + 1];
+    expect(graph).toContain('[0:v][2:v]overlay=10:20:eof_action=pass[va]');
+    expect(graph).toContain('[a0][s0][s1]amix=inputs=3:duration=first:dropout_transition=0:normalize=0[a]');
+    expect(args).toContain('[a]');
+    expect(args).not.toContain('copy');
+  });
+  it('makes silence to mix into when the video has no sound', () => {
+    const args = ctaOverlayArgs({ input: 'in', overlay: 'p.png', output: 'o.mp4', start: 90, end: 94, hasAudio: false, totalSec: 200.2, anim: { pattern: 'f%04d.png', start: 80, x: 0, y: 0, sounds: [] } });
+    expect(args).toContain('anullsrc=r=48000:cl=stereo');
+    expect(args[args.indexOf('-filter_complex') + 1]).toContain('[3:a]aformat');
   });
 });

@@ -139,23 +139,48 @@ export function ctaBannerSvg({ w = 1080, h = 1920, text = '', platform = '' }) {
  * `start` and `end` seconds. Sound is copied untouched; the picture is
  * re-encoded the same way Clean does it.
  */
-export function ctaOverlayArgs({ input, overlay, output, start, end, fps = 30 }) {
+export function ctaOverlayArgs({ input, overlay, output, start, end, fps = 30, anim = null, hasAudio = true, totalSec = 0 }) {
   if (!input || !overlay || !output) throw new Error('ctaOverlayArgs needs input, overlay and output');
   const s = Number(start) || 0;
   const e = Math.max(s + 1, Number(end) || 0);
   const r = Math.min(60, Math.max(1, Math.round(Number(fps) || 30)));
   const fade = 0.35;
+  const pill = `[1:v]format=rgba,fade=t=in:st=${s}:d=${fade}:alpha=1,fade=t=out:st=${Math.round((e - fade) * 100) / 100}:d=${fade}:alpha=1[ov]`;
+  if (!anim) {
+    const graph = [pill, `[0:v][ov]overlay=0:0:shortest=1:enable='between(t,${s},${e})',format=yuv420p[v]`].join(';');
+    return [
+      '-y', '-i', input,
+      '-loop', '1', '-framerate', String(r), '-i', overlay,
+      '-filter_complex', graph,
+      '-map', '[v]', '-map', '0:a?',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+      '-c:a', 'copy',
+      '-movflags', '+faststart',
+      output,
+    ];
+  }
+  // With the animation: its frames come in at its start time (input 2), float
+  // over the video, then the text line; the tap sounds are mixed under the
+  // video's own sound (or silence when it has none).
+  const sounds = anim.sounds || [];
+  const base = hasAudio ? '[0:a]' : '[3:a]';
   const graph = [
-    `[1:v]format=rgba,fade=t=in:st=${s}:d=${fade}:alpha=1,fade=t=out:st=${Math.round((e - fade) * 100) / 100}:d=${fade}:alpha=1[ov]`,
-    `[0:v][ov]overlay=0:0:shortest=1:enable='between(t,${s},${e})',format=yuv420p[v]`,
+    pill,
+    `[0:v][2:v]overlay=${anim.x}:${anim.y}:eof_action=pass[va]`,
+    `[va][ov]overlay=0:0:shortest=1:enable='between(t,${s},${e})',format=yuv420p[v]`,
+    `${base}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a0]`,
+    ...sounds,
+    `[a0]${sounds.map((_, i) => `[s${i}]`).join('')}amix=inputs=${sounds.length + 1}:duration=first:dropout_transition=0:normalize=0[a]`,
   ].join(';');
   return [
     '-y', '-i', input,
     '-loop', '1', '-framerate', String(r), '-i', overlay,
+    '-itsoffset', String(anim.start), '-framerate', String(anim.fps || 30), '-i', anim.pattern,
+    ...(hasAudio ? [] : ['-f', 'lavfi', '-t', String(Math.max(1, Math.ceil(Number(totalSec) || 1))), '-i', 'anullsrc=r=48000:cl=stereo']),
     '-filter_complex', graph,
-    '-map', '[v]', '-map', '0:a?',
+    '-map', '[v]', '-map', '[a]',
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
-    '-c:a', 'copy',
+    '-c:a', 'aac', '-b:a', '160k',
     '-movflags', '+faststart',
     output,
   ];
@@ -163,24 +188,44 @@ export function ctaOverlayArgs({ input, overlay, output, start, end, fps = 30 })
 
 const mediaUrlOf = (cfg) => (((cfg && Array.isArray(cfg.media) && cfg.media[0]) || {}).url) || '';
 
-/** The channels whose post carries this video (not a picture step-down). */
-export function videoPlatforms(configs = {}, videoUrl = '') {
-  if (!videoUrl || !configs) return [];
-  return Object.keys(configs).filter((p) => CTA_PLATFORMS.includes(p) && mediaUrlOf(configs[p]) === videoUrl);
+/** The channels whose post carries one of these videos (not a picture step-down): { platform: sourceUrl }. */
+export function videoPlatforms(configs = {}, videoUrls = []) {
+  const urls = new Set((Array.isArray(videoUrls) ? videoUrls : [videoUrls]).filter(Boolean));
+  const out = {};
+  if (!urls.size || !configs) return out;
+  for (const p of Object.keys(configs)) {
+    const url = mediaUrlOf(configs[p]);
+    if (CTA_PLATFORMS.includes(p) && urls.has(url)) out[p] = url;
+  }
+  return out;
 }
 
 /** The configs with each channel's own CTA copy as its video; thumbnails and everything else kept. */
-export function withCtaVideos(configs = {}, videoUrl = '', urlByPlatform = {}) {
+export function withCtaVideos(configs = {}, urlByPlatform = {}) {
   const out = {};
   for (const [p, cfg] of Object.entries(configs || {})) {
     const url = urlByPlatform[p];
-    if (url && mediaUrlOf(cfg) === videoUrl) {
-      out[p] = { ...cfg, media: [{ ...cfg.media[0], url }, ...cfg.media.slice(1)] };
-    } else {
-      out[p] = cfg;
-    }
+    out[p] = url && mediaUrlOf(cfg) ? { ...cfg, media: [{ ...cfg.media[0], url }, ...cfg.media.slice(1)] } : cfg;
   }
   return out;
+}
+
+/**
+ * The renders one post needs: channels sharing a source video, a line and a
+ * look share one. Map(key -> { source, text, look, platforms }); `look` is the
+ * channel whose animation it carries (animated) or its pill colour.
+ */
+export function renderGroups({ sources = {}, plan = {}, animated = false } = {}) {
+  const groups = new Map();
+  for (const [p, source] of Object.entries(sources)) {
+    const text = plan[p];
+    if (!text) continue;
+    const look = animated ? p : (p === 'youtube' ? 'youtube' : 'dark');
+    const key = `${source}\n${text}\n${look}`;
+    if (!groups.has(key)) groups.set(key, { source, text, look, platforms: [] });
+    groups.get(key).platforms.push(p);
+  }
+  return groups;
 }
 
 /** The configs with these channels' videos pointed at `url` (their old call-to-action copies dropped). */
@@ -194,6 +239,6 @@ export function pointVideos(configs = {}, platforms = [], url = '') {
 }
 
 export default {
-  pointVideos, CTA_PLATFORMS, DEFAULT_CTA, CTA_MAX_LINES, CTA_MAX_CHARS, CTA_SEC_OPTIONS, ctaLines, normalizeVideoCta, ctaPlan, ctaGroups,
+  pointVideos, renderGroups, CTA_PLATFORMS, DEFAULT_CTA, CTA_MAX_LINES, CTA_MAX_CHARS, CTA_SEC_OPTIONS, ctaLines, normalizeVideoCta, ctaPlan, ctaGroups,
   ctaWindow, wrapCta, ctaBannerSvg, ctaOverlayArgs, videoPlatforms, withCtaVideos,
 };

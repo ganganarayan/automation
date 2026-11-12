@@ -38,6 +38,7 @@ import * as poster from './funnelPosterService.js';
 import * as firstComment from './firstCommentService.js';
 import { buildProviders } from './providerFactory.js';
 import { createPostForMeProvider } from '../providers/publishProvider.js';
+import { addChannelCta } from './videoCtaService.js';
 import { request } from '../core/httpClient.js';
 import { extractRow, composePrompt, composeCaptions, buildPlatformConfigs } from '../utils/postCompose.js';
 import { patchStep, addCostToSteps, sumInstanceCost } from '../utils/instanceSpec.js';
@@ -797,6 +798,13 @@ export async function approve(approval) {
       ...(video.voiceError ? { voiceError: video.voiceError } : {}),
       ...(video.subtitleError ? { subtitleError: video.subtitleError } : {}),
     };
+    // Each channel's call to action in the middle of its own copy (Settings).
+    // A festival greeting carries none, as it carries no sales link.
+    if (!img.festival) {
+      const withCta = await addChannelCta({ tenantId: f.tenantId, resolved: providers.resolved, videoUrls: Object.values(video.videos || {}), durationSec: video.seconds, platformConfigurations: req.platformConfigurations, publish, log });
+      req.platformConfigurations = withCta.platformConfigurations;
+      if (withCta.cta) req.cta = withCta.cta;
+    }
     accounts.splice(0, accounts.length, ...(f.accounts || []));
     if (video.chars) steps = addCostToSteps(steps, 'publish', { ...costTts({ provider: voicePriceKey(providers), chars: video.chars }), at: new Date().toISOString() });
   }

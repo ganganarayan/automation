@@ -1518,7 +1518,7 @@ export async function postSelections({ tenantId = 'default', funnelId, selection
       await drive.shareAnyone(sel.driveId);
       // Each channel's call to action in the middle of its own copy (Settings).
       const withCta = ai
-        ? await addChannelCta({ tenantId: funnel.tenant_id, resolved: providers.resolved, videoUrl, durationSec, platformConfigurations: ai.platformConfigurations, publish, log })
+        ? await addChannelCta({ tenantId: funnel.tenant_id, resolved: providers.resolved, videoUrls: [videoUrl], durationSec, platformConfigurations: ai.platformConfigurations, publish, log })
         : { platformConfigurations, cta: null };
       // Kept on the instance so failed channels can be re-posted exactly.
       const request = { caption, mediaUrl: videoUrl, platformConfigurations: withCta.platformConfigurations, ...(withCta.cta ? { cta: withCta.cta } : {}) };
