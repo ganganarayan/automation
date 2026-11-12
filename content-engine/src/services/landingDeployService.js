@@ -17,7 +17,7 @@ import * as tenantConfig from '../repositories/tenantConfigRepository.js';
 import * as tenantSettings from '../core/tenantSettings.js';
 import { settings } from '../settings/index.js';
 import {
-  LANDING_DEPLOY_KEY, LANDING_DOMAIN_KEY, renderLanding, cleanDomain, zoneCandidates, landingWorkerName, landingRequests,
+  LANDING_DEPLOY_KEY, LANDING_DOMAIN_KEY, LANDING_APP_KEY, renderLanding, cleanDomain, zoneCandidates, landingWorkerName, landingRequests,
 } from '../utils/landingSite.js';
 import { cfError } from '../utils/cloudflareWake.js';
 import { formatIst } from '../utils/time.js';
@@ -38,7 +38,7 @@ async function contactEmail() {
 }
 
 /** Render, upload and attach. Never throws. */
-export async function deploy({ domain = '' } = {}) {
+export async function deploy({ domain = '', appDomain } = {}) {
   const at = new Date().toISOString();
   const name = landingWorkerName(settings.app.publicBaseUrl);
   const host = cleanDomain(domain || (await tenantConfig.get('default', LANDING_DOMAIN_KEY).catch(() => '')));
@@ -48,7 +48,14 @@ export async function deploy({ domain = '' } = {}) {
     await tenantConfig.set('default', LANDING_DOMAIN_KEY, host);
     const [account, token] = await Promise.all(['cloudflare_account_id', 'cloudflare_api_token'].map((k) => tenantConfig.get('default', k).catch(() => '')));
     if (!account || !token) throw new Error('save the Cloudflare account ID and API token in the wake-up timer box first');
-    const appUrl = String(settings.app.publicBaseUrl || '').replace(/\/+$/, '');
+    // Where Sign in and Buy go: the owner's app domain, else this server's own address.
+    if (appDomain !== undefined) {
+      const typed = String(appDomain || '').trim();
+      if (typed && !cleanDomain(typed)) throw new Error('the app address is a domain, for example app.content360.example.com');
+      await tenantConfig.set('default', LANDING_APP_KEY, cleanDomain(typed));
+    }
+    const appHost = cleanDomain(await tenantConfig.get('default', LANDING_APP_KEY).catch(() => ''));
+    const appUrl = appHost ? `https://${appHost}` : String(settings.app.publicBaseUrl || '').replace(/\/+$/, '');
     if (!appUrl) throw new Error('this server has no public address (PUBLIC_BASE_URL)');
     const pages = renderLanding({ email: await contactEmail() });
     await call(landingRequests.putScript(String(account).trim(), String(token).trim(), name, { appUrl, pages }));
@@ -62,7 +69,7 @@ export async function deploy({ domain = '' } = {}) {
     const zoneName = zoneId ? '' : zoneCandidates(host).slice(-1)[0];
     await call(landingRequests.putDomain(String(account).trim(), String(token).trim(), { hostname: host, service: name, zoneId, zoneName }))
       .catch((err) => { throw new Error(`the Worker is up, but the domain was not attached: ${err.message}. If ${host} still has an old DNS record (the Railway one), delete it in Cloudflare DNS and deploy again.`); });
-    outcome = { ok: true, at, worker: name, domain: host, pages: Object.keys(pages).length };
+    outcome = { ok: true, at, worker: name, domain: host, appUrl, pages: Object.keys(pages).length };
     log.info(outcome, 'landing deployed to Cloudflare');
   } catch (err) {
     outcome = { ok: false, at, worker: name, domain: host, message: err.message };
@@ -80,9 +87,10 @@ export async function status() {
   const text = !d
     ? '🟡 Not on Cloudflare yet: the pages are served by this app.'
     : d.ok
-      ? `🟢 ${d.pages} pages live on https://${d.domain}, deployed ${formatIst(d.at)} IST. This app now sends its own home page there.`
+      ? `🟢 ${d.pages} pages live on https://${d.domain}, deployed ${formatIst(d.at)} IST. Sign in and Buy go to ${d.appUrl || 'this app'}. This app now sends its own home page there.`
       : `🔴 ${d.message} (tried ${formatIst(d.at)} IST)`;
-  return { ok: !!(d && d.ok), text, domain };
+  const appDomain = (await tenantConfig.get('default', LANDING_APP_KEY).catch(() => '')) || '';
+  return { ok: !!(d && d.ok), text, domain, appDomain };
 }
 
 let cache = { at: 0, domain: '' };

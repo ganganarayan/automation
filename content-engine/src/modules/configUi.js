@@ -700,7 +700,7 @@ export function register(ctx) {
   router.post('/admin/landing/deploy', async (req, res) => {
     try {
       if (!(await ownerOnly(req, res))) return;
-      res.json(await landingDeploy.deploy({ domain: req.body?.domain }));
+      res.json(await landingDeploy.deploy({ domain: req.body?.domain, appDomain: req.body?.appDomain }));
     } catch (err) {
       res.status(400).json({ ok: false, text: `🔴 ${err.message}` });
     }
@@ -1240,17 +1240,18 @@ function qaBox(tenantList) {
 /** Owner only: the public pages served from Cloudflare on the owner's own domain. */
 function landingBox() {
   return `<fieldset><legend>Landing pages on Cloudflare</legend>
-    <p class="hint">Puts the home page, compare pages and policies on your own domain, served by Cloudflare (rupees in India, dollars elsewhere). Sign in, Buy and the app stay on this app. Uses the account ID and token from the wake-up timer box; the token needs <b>Workers Scripts: Edit</b> and access to the domain's zone (Zone <b>Zone: Read</b>). Delete any old DNS record for the landing domain first (for example the Railway one), or Cloudflare will not attach it. Press Deploy again after you change prices, plan text or the contact email.</p>
+    <p class="hint">Puts the home page, compare pages and policies on your own domain, served by Cloudflare (rupees in India, dollars elsewhere). Sign in, Buy and the app stay on this app. Uses the account ID and token from the wake-up timer box; the token needs <b>Workers Scripts: Edit</b> and access to the domain's zone (Zone <b>Zone: Read</b>). Delete any old DNS record for the landing domain first (for example the Railway one), or Cloudflare will not attach it. App address: where Sign in and Buy send people (your app domain added in Railway); blank keeps this app's own address. Press Deploy again after you change prices, plan text or the contact email.</p>
     <div class="row" style="gap:.4rem;align-items:center;flex-wrap:wrap">
       <input id="lp-dom" placeholder="Landing domain, e.g. content360.example.com" style="min-width:20rem">
+      <input id="lp-app" placeholder="App address for Sign in, e.g. app.content360.example.com (blank = this app)" style="min-width:24rem">
       <button type="button" class="act" onclick="lpDeploy()">☁ Deploy landing pages</button>
     </div>
     <p id="lp-st" class="hint">Checking…</p>
     <script>
-      function lpShow(j){ document.getElementById('lp-st').textContent=j.text||'🟡 unknown'; if(j.domain) document.getElementById('lp-dom').value=j.domain; }
+      function lpShow(j){ document.getElementById('lp-st').textContent=j.text||'🟡 unknown'; if(j.domain) document.getElementById('lp-dom').value=j.domain; if(j.appDomain) document.getElementById('lp-app').value=j.appDomain; }
       async function lpDeploy(){
         const st=document.getElementById('lp-st'); st.textContent='Deploying to Cloudflare…';
-        try{ const r=await fetch('/api/v1/admin/landing/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain:document.getElementById('lp-dom').value.trim()})}); lpShow(await r.json()); }
+        try{ const r=await fetch('/api/v1/admin/landing/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain:document.getElementById('lp-dom').value.trim(),appDomain:document.getElementById('lp-app').value.trim()})}); lpShow(await r.json()); }
         catch(e){ st.textContent='🔴 '+e.message; }
       }
       (async function(){ try{ lpShow(await (await fetch('/api/v1/admin/landing')).json()); }catch(e){ document.getElementById('lp-st').textContent='🟡 Could not check: '+e.message; } })();

@@ -20,6 +20,7 @@ import { COMPETITORS } from './compareData.js';
 const API = 'https://api.cloudflare.com/client/v4';
 export const LANDING_DEPLOY_KEY = 'landing_deployed';
 export const LANDING_DOMAIN_KEY = 'landing_domain';
+export const LANDING_APP_KEY = 'landing_app_domain';
 
 /** { path: { inr, usd } } or { path: { all } } for a page with no price. */
 export function renderLanding({ email = '' } = {}) {
@@ -111,4 +112,4 @@ export const landingRequests = {
   }),
 };
 
-export default { LANDING_DEPLOY_KEY, LANDING_DOMAIN_KEY, renderLanding, pagesModule, LANDING_WORKER_SOURCE, cleanDomain, zoneCandidates, landingWorkerName, landingRequests };
+export default { LANDING_DEPLOY_KEY, LANDING_DOMAIN_KEY, LANDING_APP_KEY, renderLanding, pagesModule, LANDING_WORKER_SOURCE, cleanDomain, zoneCandidates, landingWorkerName, landingRequests };
