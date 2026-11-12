@@ -40,7 +40,8 @@ async function contactEmail() {
 /** Render, upload and attach. Never throws. */
 export async function deploy({ domain = '', appDomain } = {}) {
   const at = new Date().toISOString();
-  const name = landingWorkerName(settings.app.publicBaseUrl);
+  // The Worker already holding the domain keeps it, even if this server's address changed since.
+  let name = landingWorkerName(settings.app.publicBaseUrl);
   const host = cleanDomain(domain || (await tenantConfig.get('default', LANDING_DOMAIN_KEY).catch(() => '')));
   let outcome;
   try {
@@ -58,11 +59,11 @@ export async function deploy({ domain = '', appDomain } = {}) {
     const appUrl = appHost ? `https://${appHost}` : String(settings.app.publicBaseUrl || '').replace(/\/+$/, '');
     if (!appUrl) throw new Error('this server has no public address (PUBLIC_BASE_URL)');
     const pages = renderLanding({ email: await contactEmail(), origin: `https://${host}` });
-    await call(landingRequests.putScript(String(account).trim(), String(token).trim(), name, { appUrl, pages }));
-    // Already attached to this Worker (any deploy after the first): nothing to attach.
     const existing = await call(landingRequests.listDomains(String(account).trim(), String(token).trim(), host)).catch(() => null);
     const mine = ((existing && existing.result) || []).find((d) => d.hostname === host);
-    if (mine && mine.service !== name) throw new Error(`the pages are up, but ${host} is attached to another Worker (${mine.service}). Remove it there (Workers & Pages, that Worker, Settings, Domains & Routes) and deploy again.`);
+    if (mine && !String(mine.service || '').startsWith('landing-')) throw new Error(`${host} is attached to a Worker this app did not make (${mine.service}). Remove it there (Workers & Pages, that Worker, Settings, Domains & Routes) and deploy again.`);
+    if (mine) name = mine.service;
+    await call(landingRequests.putScript(String(account).trim(), String(token).trim(), name, { appUrl, pages }));
     let zoneId = '';
     for (const z of zoneCandidates(host)) {
       const found = await call(landingRequests.findZone(String(token).trim(), z)).catch(() => null);
