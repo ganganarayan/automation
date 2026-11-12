@@ -54,7 +54,7 @@ export function shell(title, inner) {
 </style></head><body><div class="wrap">
 <header><a class="brand" href="/">Content Engine</a><a class="btn" href="${LOGIN_PATH}">Sign in</a></header>
 ${inner}
-<footer><span>Content Engine</span><a href="/compare">Compare</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a><a href="/refund">Refund policy</a><a href="/shipping">Shipping policy</a></footer>
+<footer><span>Content Engine</span><a href="/compare">Compare</a><a href="/kb">Help</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a><a href="/refund">Refund policy</a><a href="/shipping">Shipping policy</a></footer>
 </div></body></html>`;
 }
 
@@ -429,10 +429,10 @@ export function contactHrefFor(email = '') {
 }
 
 /** <head> and the opening <body> shared by the landing and comparison pages. */
-export function landingHead(title, description) {
+export function landingHead(title, description, extra = '') {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
-<meta name="description" content="${esc(description)}">
+<meta name="description" content="${esc(description)}">${extra}
 <style>${HOME_CSS}</style></head><body>`;
 }
 
@@ -440,14 +440,14 @@ export function landingHead(title, description) {
 export function landingNav(base = '') {
   return `<nav class="top"><div class="wrap">
   <a class="brand" href="/">Content Engine</a>
-  <span class="links"><a href="${base}#how">How it works</a><a href="${base}#features">Features</a><a href="${base}#pricing">Pricing</a><a href="/compare">Compare</a><a href="${base}#faq">FAQ</a></span>
+  <span class="links"><a href="${base}#how">How it works</a><a href="${base}#features">Features</a><a href="${base}#pricing">Pricing</a><a href="/compare">Compare</a><a href="/kb">Help</a><a href="${base}#faq">FAQ</a></span>
   <a class="btn sm" href="${LOGIN_PATH}">Sign in</a>
 </div></nav>`;
 }
 
 /** Footer and the closing tags. */
 export function landingFooter(email = '') {
-  return `<footer><div class="wrap"><span>Content Engine</span><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a><a href="/refund">Refund policy</a><a href="/shipping">Shipping policy</a>${email ? `<a href="mailto:${esc(email)}">Contact</a>` : ''}</div></footer>
+  return `<footer><div class="wrap"><span>Content Engine</span><a href="/kb">Help and answers</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a><a href="/refund">Refund policy</a><a href="/shipping">Shipping policy</a>${email ? `<a href="mailto:${esc(email)}">Contact</a>` : ''}</div></footer>
 </body></html>`;
 }
 

@@ -11,19 +11,25 @@
  *                 path is answered from the pages; any other path (Sign in,
  *                 /buy, the app) is sent on to the app's own address.
  *               - landingWorkerName, cleanDomain, zoneCandidates, landingRequests.
- * Dependencies: utils/{publicPages,comparePages,compareData}.
+ * Dependencies: utils/{publicPages,comparePages,compareData,kbPages,kbData}.
  */
 import * as publicPages from './publicPages.js';
 import * as comparePages from './comparePages.js';
 import { COMPETITORS } from './compareData.js';
+import * as kbPages from './kbPages.js';
+import { kbArticles } from './kbData.js';
 
 const API = 'https://api.cloudflare.com/client/v4';
 export const LANDING_DEPLOY_KEY = 'landing_deployed';
 export const LANDING_DOMAIN_KEY = 'landing_domain';
 export const LANDING_APP_KEY = 'landing_app_domain';
 
-/** { path: { inr, usd } } or { path: { all } } for a page with no price. */
-export function renderLanding({ email = '' } = {}) {
+/**
+ * { path: { inr, usd } } or { path: { all } } for a page with no price.
+ * A page that is not HTML carries its content type: { all, type }.
+ * `origin` (https://host) makes canonical links, the sitemap and llms.txt absolute.
+ */
+export function renderLanding({ email = '', origin = '' } = {}) {
   const both = (fn) => ({ inr: fn('inr'), usd: fn('usd') });
   const pages = {
     '/': both((cur) => publicPages.homePage({ email, cur })),
@@ -34,6 +40,13 @@ export function renderLanding({ email = '' } = {}) {
     '/shipping': { all: publicPages.shippingPage({ email }) },
   };
   for (const c of COMPETITORS) pages[publicPages.comparePath(c)] = both((cur) => comparePages.comparisonPage(c, { email, cur }));
+  pages['/kb'] = both((cur) => kbPages.kbIndexPage({ email, cur, origin }));
+  for (const a of kbArticles()) pages[kbPages.kbPath(a)] = both((cur) => kbPages.kbArticlePage(a.slug, { email, cur, origin }));
+  const text = 'text/plain; charset=utf-8';
+  pages['/llms.txt'] = { all: kbPages.llmsTxt({ origin }), type: text };
+  pages['/llms-full.txt'] = { all: kbPages.llmsFullTxt({ origin }), type: text };
+  pages['/robots.txt'] = { all: kbPages.robotsTxt({ origin }), type: text };
+  pages['/sitemap.xml'] = { all: kbPages.sitemapXml({ origin }), type: 'application/xml; charset=utf-8' };
   return pages;
 }
 
@@ -55,7 +68,7 @@ export default {
     if (cur !== 'inr' && cur !== 'usd') cur = (request.cf && request.cf.country) === 'IN' ? 'inr' : 'usd';
     const html = page.all || page[cur];
     return new Response(request.method === 'HEAD' ? null : html, {
-      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=300', 'x-robots-tag': 'all' },
+      headers: { 'content-type': page.type || 'text/html; charset=utf-8', 'cache-control': 'public, max-age=300', 'x-robots-tag': 'all' },
     });
   },
 };

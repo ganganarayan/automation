@@ -22,6 +22,7 @@ import { notFound, errorHandler } from './middleware/errorHandler.js';
 import * as tenantSettings from './core/tenantSettings.js';
 import * as publicPages from './utils/publicPages.js';
 import * as comparePages from './utils/comparePages.js';
+import * as kbPages from './utils/kbPages.js';
 import { currencyOf, countryOf } from './utils/geo.js';
 import * as landingDeploy from './services/landingDeployService.js';
 import * as planCancel from './modules/planCancel.js';
@@ -88,7 +89,22 @@ export function createApp() {
     if (!domain || req.hostname === domain) return next();
     return res.redirect(302, `https://${domain}${req.originalUrl}`);
   };
-  app.get(['/', '/compare', '/compare/:page', '/privacy', '/terms', '/refund', '/shipping'], toLanding);
+  app.get(['/', '/compare', '/compare/:page', '/privacy', '/terms', '/refund', '/shipping', '/kb', '/kb/:slug', '/llms.txt', '/llms-full.txt', '/sitemap.xml'], toLanding);
+  // Help centre and the AI search files. Canonical links name the landing
+  // domain once it is live, else this server's own address.
+  const originOf = async (req) => {
+    const domain = await landingDeploy.liveDomain().catch(() => '');
+    return domain ? `https://${domain}` : `${req.protocol}://${req.get('host')}`;
+  };
+  app.get('/kb', async (req, res) => res.type('html').send(kbPages.kbIndexPage({ email: await contactEmail(), cur: currencyOf(req), origin: await originOf(req) })));
+  app.get('/kb/:slug', async (req, res, next) => {
+    const html = kbPages.kbArticlePage(req.params.slug, { email: await contactEmail(), cur: currencyOf(req), origin: await originOf(req) });
+    return html ? res.type('html').send(html) : next();
+  });
+  app.get('/llms.txt', async (req, res) => res.type('text/plain').send(kbPages.llmsTxt({ origin: await originOf(req) })));
+  app.get('/llms-full.txt', async (req, res) => res.type('text/plain').send(kbPages.llmsFullTxt({ origin: await originOf(req) })));
+  app.get('/sitemap.xml', async (req, res) => res.type('application/xml').send(kbPages.sitemapXml({ origin: await originOf(req) })));
+  app.get('/robots.txt', async (req, res) => res.type('text/plain').send(kbPages.robotsTxt({ origin: await originOf(req) })));
   app.get('/', async (req, res) => res.type('html').send(publicPages.homePage({ email: await contactEmail(), cur: currencyOf(req) })));
   app.get('/compare', async (req, res) => res.type('html').send(comparePages.compareIndexPage({ email: await contactEmail(), cur: currencyOf(req) })));
   app.get('/compare/:page', async (req, res, next) => {

@@ -57,7 +57,7 @@ export async function deploy({ domain = '', appDomain } = {}) {
     const appHost = cleanDomain(await tenantConfig.get('default', LANDING_APP_KEY).catch(() => ''));
     const appUrl = appHost ? `https://${appHost}` : String(settings.app.publicBaseUrl || '').replace(/\/+$/, '');
     if (!appUrl) throw new Error('this server has no public address (PUBLIC_BASE_URL)');
-    const pages = renderLanding({ email: await contactEmail() });
+    const pages = renderLanding({ email: await contactEmail(), origin: `https://${host}` });
     await call(landingRequests.putScript(String(account).trim(), String(token).trim(), name, { appUrl, pages }));
     let zoneId = '';
     for (const z of zoneCandidates(host)) {
