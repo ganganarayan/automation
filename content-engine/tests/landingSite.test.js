@@ -72,3 +72,13 @@ describe('landing domain lookup', () => {
     expect(landingRequests.listDomains('a', 't', 'h.example.com').url).toBe('https://api.cloudflare.com/client/v4/accounts/a/workers/domains?hostname=h.example.com');
   });
 });
+
+describe('landing links to the app', () => {
+  it('points Sign in and Buy straight at the app domain', () => {
+    const pages = renderLanding({ appUrl: 'https://app.example.com' });
+    expect(pages['/'].inr).toContain('href="https://app.example.com/api/v1/admin/today"');
+    expect(pages['/'].inr).toContain("a.href='https://app.example.com/buy?plan='");
+    expect(pages['/'].inr).not.toContain('href="/api/v1/');
+    expect(pages['/privacy'].all).toContain('href="/terms"');
+  });
+});

@@ -29,7 +29,7 @@ export const LANDING_APP_KEY = 'landing_app_domain';
  * A page that is not HTML carries its content type: { all, type }.
  * `origin` (https://host) makes canonical links, the sitemap and llms.txt absolute.
  */
-export function renderLanding({ email = '', origin = '' } = {}) {
+export function renderLanding({ email = '', origin = '', appUrl = '' } = {}) {
   const both = (fn) => ({ inr: fn('inr'), usd: fn('usd') });
   const pages = {
     '/': both((cur) => publicPages.homePage({ email, cur })),
@@ -47,7 +47,22 @@ export function renderLanding({ email = '', origin = '' } = {}) {
   pages['/llms-full.txt'] = { all: kbPages.llmsFullTxt({ origin }), type: text };
   pages['/robots.txt'] = { all: kbPages.robotsTxt({ origin }), type: text };
   pages['/sitemap.xml'] = { all: kbPages.sitemapXml({ origin }), type: 'application/xml; charset=utf-8' };
+  if (appUrl) {
+    for (const p of Object.values(pages)) {
+      if (p.type) continue;
+      for (const k of ['all', 'inr', 'usd']) if (p[k]) p[k] = appLinks(p[k], appUrl);
+    }
+  }
   return pages;
+}
+
+/** Sign in and Buy link straight to the app's own address instead of bouncing through the landing domain. */
+export function appLinks(html, appUrl) {
+  const a = String(appUrl).replace(/\/+$/, '');
+  return String(html)
+    .split('href="/api/v1/').join(`href="${a}/api/v1/`)
+    .split('href="/buy?').join(`href="${a}/buy?`)
+    .split("a.href='/buy?").join(`a.href='${a}/buy?`);
 }
 
 /** The pages as the Worker's second module. */
@@ -126,4 +141,4 @@ export const landingRequests = {
   }),
 };
 
-export default { LANDING_DEPLOY_KEY, LANDING_DOMAIN_KEY, LANDING_APP_KEY, renderLanding, pagesModule, LANDING_WORKER_SOURCE, cleanDomain, zoneCandidates, landingWorkerName, landingRequests };
+export default { appLinks, LANDING_DEPLOY_KEY, LANDING_DOMAIN_KEY, LANDING_APP_KEY, renderLanding, pagesModule, LANDING_WORKER_SOURCE, cleanDomain, zoneCandidates, landingWorkerName, landingRequests };

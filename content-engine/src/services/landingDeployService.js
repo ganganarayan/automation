@@ -58,7 +58,7 @@ export async function deploy({ domain = '', appDomain } = {}) {
     const appHost = cleanDomain(await tenantConfig.get('default', LANDING_APP_KEY).catch(() => ''));
     const appUrl = appHost ? `https://${appHost}` : String(settings.app.publicBaseUrl || '').replace(/\/+$/, '');
     if (!appUrl) throw new Error('this server has no public address (PUBLIC_BASE_URL)');
-    const pages = renderLanding({ email: await contactEmail(), origin: `https://${host}` });
+    const pages = renderLanding({ email: await contactEmail(), origin: `https://${host}`, appUrl });
     const existing = await call(landingRequests.listDomains(String(account).trim(), String(token).trim(), host)).catch(() => null);
     const mine = ((existing && existing.result) || []).find((d) => d.hostname === host);
     if (mine && !String(mine.service || '').startsWith('landing-')) throw new Error(`${host} is attached to a Worker this app did not make (${mine.service}). Remove it there (Workers & Pages, that Worker, Settings, Domains & Routes) and deploy again.`);
@@ -81,7 +81,7 @@ export async function deploy({ domain = '', appDomain } = {}) {
     log.warn(outcome, 'landing deploy failed');
   }
   await tenantConfig.set('default', LANDING_DEPLOY_KEY, JSON.stringify(outcome)).catch(() => {});
-  cache = { at: 0, domain: '' };
+  cache = { at: 0, domain: '', appHost: '' };
   return status();
 }
 
@@ -98,18 +98,29 @@ export async function status() {
   return { ok: !!(d && d.ok), text, domain, appDomain };
 }
 
-let cache = { at: 0, domain: '' };
+let cache = { at: 0, domain: '', appHost: '' };
 
-/** The landing domain once a deploy has worked, else ''. Read at most once a minute. */
-export async function liveDomain() {
-  if (Date.now() - cache.at < 60000) return cache.domain;
+async function readLive() {
+  if (Date.now() - cache.at < 60000) return cache;
   let domain = '';
+  let appHost = '';
   try {
     const d = JSON.parse((await tenantConfig.get('default', LANDING_DEPLOY_KEY)) || 'null');
     domain = d && d.ok ? cleanDomain(d.domain) : '';
+    if (domain && d.appUrl) { try { appHost = new URL(d.appUrl).hostname; } catch { appHost = ''; } }
   } catch { domain = ''; }
-  cache = { at: Date.now(), domain };
-  return domain;
+  cache = { at: Date.now(), domain, appHost };
+  return cache;
 }
 
-export default { deploy, status, liveDomain };
+/** The landing domain once a deploy has worked, else ''. Read at most once a minute. */
+export async function liveDomain() {
+  return (await readLive()).domain;
+}
+
+/** The app's own domain the landing sends Sign in to, once a deploy has worked, else ''. */
+export async function liveAppHost() {
+  return (await readLive()).appHost;
+}
+
+export default { deploy, status, liveDomain, liveAppHost };

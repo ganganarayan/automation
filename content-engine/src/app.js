@@ -87,6 +87,8 @@ export function createApp() {
   const toLanding = async (req, res, next) => {
     const domain = await landingDeploy.liveDomain().catch(() => '');
     if (!domain || req.hostname === domain) return next();
+    // The app's own domain opens the app at its root, not the landing page.
+    if (req.path === '/' && req.hostname === (await landingDeploy.liveAppHost().catch(() => ''))) return res.redirect(302, publicPages.LOGIN_PATH);
     return res.redirect(302, `https://${domain}${req.originalUrl}`);
   };
   app.get(['/', '/compare', '/compare/:page', '/privacy', '/terms', '/refund', '/shipping', '/kb', '/kb/:slug', '/llms.txt', '/llms-full.txt', '/sitemap.xml'], toLanding);
