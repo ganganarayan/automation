@@ -43,6 +43,18 @@ async function call({ url, init }) {
   return json;
 }
 
+/**
+ * The waker's name: the one already deployed keeps its name even when this
+ * server's address changes (Railway reports a custom domain once one is added).
+ */
+async function wakerName() {
+  try {
+    const d = JSON.parse((await tenantConfig.get('default', DEPLOY_KEY)) || 'null');
+    if (d && d.ok && /^automation-wake-[a-z0-9-]+$/.test(String(d.worker || ''))) return d.worker;
+  } catch { /* fall through */ }
+  return workerName(settings.app.publicBaseUrl);
+}
+
 /** Save the owner's Cloudflare account id and token (a blank token keeps the saved one). */
 export async function saveCredentials({ account = '', token = '' }) {
   const a = String(account || '').trim();
@@ -76,7 +88,7 @@ export async function syncTimes() {
  */
 export async function deploy() {
   const at = new Date().toISOString();
-  const name = workerName(settings.app.publicBaseUrl);
+  const name = await wakerName();
   let outcome;
   try {
     const { account, token } = await creds();
@@ -122,7 +134,7 @@ export async function status() {
       last: l ? `${l.ok ? '🟢' : '🔴'} ${formatIst(l.at)} IST${l.error ? `: ${l.error}` : ''}` : '🟡 never',
     });
   }
-  return { ok: !!(deployed && deployed.ok), text, account, hasToken: !!token, worker: workerName(settings.app.publicBaseUrl), tenants };
+  return { ok: !!(deployed && deployed.ok), text, account, hasToken: !!token, worker: (deployed && deployed.ok && deployed.worker) || workerName(settings.app.publicBaseUrl), tenants };
 }
 
 export default { saveCredentials, syncTimes, deploy, status };
