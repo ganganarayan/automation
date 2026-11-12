@@ -106,7 +106,7 @@ async function moveTo(t, plan) {
 /** Upgrade: a one-time order at the plan's test price; the move happens when it is paid. */
 export async function startUpgrade({ tenantId, plan }) {
   const { t, email } = await testWorkspace(tenantId);
-  if (!(rankOf(plan) > rankOf(t.plan))) throw new Error('An upgrade goes to a dearer plan');
+  if (rankOf(plan) !== rankOf(t.plan) + 1 || rankOf(t.plan) < 0) throw new Error('An upgrade goes one plan up');
   const k = await billing.keys();
   const amount = upgradeAmount(plan);
   const order = await rzp.createOrder(k, { amount, currency: 'INR', receipt: `up-${t.id}`.slice(0, 40), notes: { tenant: t.id, plan, test: '1' } });
@@ -124,7 +124,7 @@ export async function confirmUpgrade({ orderId = '', paymentId = '', signature =
   const from = t.plan;
   if (from !== pending.plan) {
     await moveTo(t, pending.plan);
-    await repo.logPayment({ paymentId, subId: t.billing_sub_id, tenantId: t.id, currency: 'INR', amount: upgradeAmount(pending.plan), base: 2, gst: 0, gstin: null }).catch(() => {});
+    await repo.logPayment({ paymentId, subId: t.billing_sub_id, tenantId: t.id, currency: 'INR', amount: upgradeAmount(pending.plan), base: 1, gst: 0, gstin: null }).catch(() => {});
   }
   const sent = await mail(email, billingMail({ kind: 'upgraded', plan: pending.plan, from, workspace: t.name || t.id, base: settings.app.publicBaseUrl, test: true }));
   return { tenant: t.id, plan: pending.plan, email: sent };
@@ -133,7 +133,7 @@ export async function confirmUpgrade({ orderId = '', paymentId = '', signature =
 /** Downgrade: move down now, no charge. */
 export async function downgrade({ tenantId, plan }) {
   const { t, email } = await testWorkspace(tenantId);
-  if (!(rankOf(plan) >= 0 && rankOf(plan) < rankOf(t.plan))) throw new Error('A downgrade goes to a cheaper plan');
+  if (rankOf(plan) < 0 || rankOf(plan) !== rankOf(t.plan) - 1) throw new Error('A downgrade goes one plan down');
   const from = t.plan;
   await moveTo(t, plan);
   const sent = await mail(email, billingMail({ kind: 'downgraded', plan, from, workspace: t.name || t.id, base: settings.app.publicBaseUrl, test: true }));

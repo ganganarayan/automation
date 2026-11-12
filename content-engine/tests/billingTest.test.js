@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { TEST_PLANS, rankOf, testQuote, testPrice, upgradePrice, rowActions, orderSigOk, billingMail } from '../src/utils/billingTestSpec.js';
+import { TEST_PLANS, rankOf, testQuote, testPrice, upgradePrice, stepsFrom, rowActions, orderSigOk, billingMail } from '../src/utils/billingTestSpec.js';
 import { planKey, readPlanKey } from '../src/utils/billingSpec.js';
 import { planBody, testPayments } from '../src/utils/planPage.js';
 
@@ -13,21 +13,21 @@ describe('Rs 1 test payments', () => {
   it('charges each plan its own small price, and the plan key still names the plan', () => {
     expect(TEST_PLANS.map((p) => testQuote(p).amount)).toEqual([110, 120, 130, 140, 150, 160]);
     expect(testPrice('lite')).toBe('₹1.10');
-    expect(upgradePrice('solo')).toBe('₹2.20');
-    expect(TEST_PLANS.map(testPrice)).not.toEqual(expect.arrayContaining(TEST_PLANS.map(upgradePrice)));
+    expect(upgradePrice('solo')).toBe('₹1.20');
     const q = testQuote('growth');
     expect(q).toMatchObject({ currency: 'INR', amount: 150, total: 1.5, gst: 0, bill: 'mo' });
     expect(readPlanKey(planKey(q))).toMatchObject({ plan: 'growth', units: 1, users: 0 });
     expect(() => testQuote('custom')).toThrow();
   });
 
-  it('offers upgrade above, downgrade below and cancel on the current plan', () => {
+  it('makes only the current plan row live: one step up, one step down, cancel', () => {
     const ws = { plan: 'starter', ended: false };
-    expect(rowActions('growth', ws)).toEqual({ upgrade: true, downgrade: false, cancel: false });
-    expect(rowActions('lite', ws)).toEqual({ upgrade: false, downgrade: true, cancel: false });
-    expect(rowActions('starter', ws)).toEqual({ upgrade: false, downgrade: false, cancel: true });
-    expect(rowActions('growth', { plan: 'starter', ended: true })).toEqual({ upgrade: false, downgrade: false, cancel: false });
-    expect(rowActions('growth', null)).toEqual({ upgrade: false, downgrade: false, cancel: false });
+    expect(rowActions('starter', ws)).toEqual({ upgrade: true, downgrade: true, cancel: true });
+    expect(rowActions('growth', ws)).toEqual({ upgrade: false, downgrade: false, cancel: false });
+    expect(rowActions('lite', { plan: 'lite' })).toEqual({ upgrade: true, downgrade: false, cancel: true });
+    expect(rowActions('agency', { plan: 'agency' })).toEqual({ upgrade: false, downgrade: true, cancel: true });
+    expect(rowActions('starter', { plan: 'starter', ended: true })).toEqual({ upgrade: false, downgrade: false, cancel: false });
+    expect(stepsFrom('lite')).toEqual({ up: 'solo', down: '' });
   });
 
   it('checks the order signature', () => {
@@ -54,7 +54,7 @@ describe('Rs 1 test payments', () => {
     expect((html.match(/<tr data-plan=/g) || []).length).toBe(6);
     expect((html.match(/data-do="upgrade"/g) || []).length).toBe(5);
     expect((html.match(/data-do="downgrade"/g) || []).length).toBe(5);
-    for (const b of ['Subscribe ₹1.10', 'Subscribe ₹1.60', 'Upgrade ₹2.20', 'Upgrade ₹2.60', 'Downgrade', 'Cancel']) expect(html).toContain(b);
+    for (const b of ['Subscribe ₹1.10', 'Subscribe ₹1.60', 'Upgrade to Solo ₹1.20', 'Upgrade to Agency ₹1.60', 'Downgrade to Starter Lite', 'Downgrade to Growth', 'Cancel']) expect(html).toContain(b);
     const owner = planBody({ superAdmin: true, pay: { keyId: '', tests: [] }, origin: 'https://x' });
     expect(owner).toContain('test-payments');
     expect(planBody({ superAdmin: false })).not.toContain('test-payments');

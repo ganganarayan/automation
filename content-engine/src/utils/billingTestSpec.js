@@ -33,15 +33,15 @@ export function testQuote(plan) {
   return { plan, bill: 'mo', currency: 'INR', units: 1, users: 0, base: 1, gst: 0, total: amount / 100, amount, test: true };
 }
 
-/**
- * What a test upgrade to this plan costs, once: Rs 2.20 for Solo up to
- * Rs 2.60 for Agency, so an upgrade charge never looks like a subscription
- * charge (Rs 1.10 to Rs 1.60). Paise.
- */
+/** What a test upgrade to this plan costs, once: that plan's own price (Rs 1.20 for Solo). Paise. */
 export function upgradeAmount(plan) {
+  return testQuote(plan).amount;
+}
+
+/** The plan one step up and one step down from this one ('' at either end). */
+export function stepsFrom(plan) {
   const r = rankOf(plan);
-  if (r < 0) throw new Error('Pick a plan to test');
-  return 200 + 10 * (r + 1);
+  return { up: r >= 0 ? (TEST_PLANS[r + 1] || '') : '', down: r > 0 ? TEST_PLANS[r - 1] : '' };
 }
 
 const rupees = (paise) => `₹${(paise / 100).toFixed(2)}`;
@@ -51,20 +51,19 @@ export function testPrice(plan) {
   return rupees(testQuote(plan).amount);
 }
 
-/** The one-time price of a test upgrade to a plan: "₹2.20". */
+/** The one-time price of a test upgrade to a plan, the same as its own price: "₹1.20" for Solo. */
 export function upgradePrice(plan) {
   return rupees(upgradeAmount(plan));
 }
 
-/** Which buttons a row offers for the picked test workspace. */
+/**
+ * A row is the plan the picked workspace is on now: its Upgrade goes one plan
+ * up, its Downgrade one plan down, its Cancel ends it. Only that row is live.
+ */
 export function rowActions(rowPlan, picked) {
-  const r = rankOf(rowPlan);
-  const on = picked && !picked.ended ? rankOf(picked.plan) : -2;
-  return {
-    upgrade: on >= 0 && r > on,
-    downgrade: on >= 0 && r < on,
-    cancel: on >= 0 && r === on,
-  };
+  const live = !!(picked && !picked.ended && picked.plan === rowPlan && rankOf(rowPlan) >= 0);
+  const s = stepsFrom(rowPlan);
+  return { upgrade: live && !!s.up, downgrade: live && !!s.down, cancel: live };
 }
 
 /** Razorpay's signature on a paid order: HMAC of "order_id|payment_id". */
@@ -120,4 +119,4 @@ export function billingMail({ kind, plan = '', from = '', workspace = '', email 
   throw new Error(`unknown billing email: ${kind}`);
 }
 
-export default { TEST_PLANS, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, upgradeAmount, upgradePrice, rowActions, orderSigOk, billingMail };
+export default { TEST_PLANS, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, upgradeAmount, upgradePrice, stepsFrom, rowActions, orderSigOk, billingMail };
