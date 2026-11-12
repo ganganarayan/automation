@@ -60,12 +60,15 @@ export function planBody({ tenant = null, role = 'admin', superAdmin = false, ba
       <div class="row"><span>Webhook</span><b>${pay.webhookSet ? '🟢 Secret saved' : '🟡 Not set: renewals will not extend workspaces'}</b></div></div>
       <div class="grid2">
         <label>Key Id<input id="rzp-id" placeholder="rzp_live_..." value="${esc(pay.keyId)}"></label>
-        <label>Key Secret<input id="rzp-secret" type="password" placeholder="${pay.secretSet ? 'saved' : ''}" autocomplete="off"></label>
-        <label>Webhook secret<input id="rzp-hook" type="password" placeholder="${pay.webhookSet ? 'saved' : ''}" autocomplete="off"></label>
+        <label>Key Secret<span class="inl"><input id="rzp-secret" type="password" placeholder="${pay.secretSet ? 'saved' : ''}" autocomplete="off"><button class="act" type="button" onclick="copyPay('rzp-secret',this)">Copy</button></span></label>
+        <label>Webhook secret<span class="inl"><input id="rzp-hook" type="password" placeholder="${pay.webhookSet ? 'saved' : ''}" autocomplete="off"><button class="act" type="button" onclick="copyPay('rzp-hook',this)">Copy</button></span></label>
       </div>
       <div class="inl"><button class="act" type="button" onclick="genHook()">Generate webhook secret</button><button class="act primary" type="button" onclick="savePay()">Save</button><span id="pay-flag" class="hint"></span></div>
-      <p class="hint">In Razorpay, Webhooks, add: URL <b>${esc(hook)}</b>, the same webhook secret, events <b>subscription.charged, subscription.cancelled, subscription.halted, subscription.completed</b>.</p>
-      <script>function genHook(){var a=new Uint8Array(24);crypto.getRandomValues(a);var s=Array.from(a,function(x){return x.toString(16).padStart(2,'0');}).join('');var i=document.getElementById('rzp-hook');i.type='text';i.value=s;}
+      <p class="hint">In Razorpay, Account and Settings, Webhooks, Add new webhook:</p>
+      <div class="inl"><label>Webhook URL<input id="rzp-url" readonly value="${esc(hook)}" style="min-width:22rem"></label><button class="act" type="button" onclick="copyPay('rzp-url',this)">Copy</button></div>
+      <p class="hint">Secret: the webhook secret above (Generate, Copy, paste it in Razorpay, then Save here). Events: <b>subscription.charged, subscription.cancelled, subscription.halted, subscription.completed</b>. A saved secret is never shown again: to change it, generate a new one and update Razorpay too.</p>
+      <script>function genHook(){var a=new Uint8Array(24);crypto.getRandomValues(a);var s=Array.from(a,function(x){return x.toString(16).padStart(2,'0');}).join('');var i=document.getElementById('rzp-hook');i.value=s;document.getElementById('pay-flag').textContent='🟢 New secret made (hidden). Press Copy, paste it in Razorpay, then Save.';}
+      function copyPay(id,b){var v=document.getElementById(id).value;var f=document.getElementById('pay-flag');if(!v){f.textContent='🟡 Nothing to copy: a saved secret is not kept in the page. Generate or type it first.';return;}navigator.clipboard.writeText(v).then(function(){var t=b.textContent;b.textContent='Copied';setTimeout(function(){b.textContent=t;},1200);},function(e){f.textContent='🟡 Copy failed: '+e.message;});}
       async function savePay(){const f=document.getElementById('pay-flag');f.textContent='';try{const j=await (await fetch('${PLAN_PATH}/billing-keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keyId:document.getElementById('rzp-id').value,keySecret:document.getElementById('rzp-secret').value,webhookSecret:document.getElementById('rzp-hook').value})})).json();f.textContent=j.ok?'🟢 saved, reload to see the status':'🟡 '+(j.error||'not saved');}catch(e){f.textContent='🟡 '+e.message;}}</script>`);
   }
 

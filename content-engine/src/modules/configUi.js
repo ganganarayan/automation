@@ -1050,10 +1050,10 @@ ${NAV_CSS}
   function genSecret(id){
     const b=new Uint8Array(24); crypto.getRandomValues(b);
     const hex=Array.from(b).map(x=>x.toString(16).padStart(2,'0')).join('');
-    const el=document.getElementById(id); el.value='whsec_'+hex; el.focus(); el.select();
+    const el=document.getElementById(id); el.value='whsec_'+hex; el.style.outline='2px solid #5bd08a'; setTimeout(()=>el.style.outline='',700);
   }
   function copyField(id){
-    const el=document.getElementById(id); el.select();
+    const el=document.getElementById(id);
     navigator.clipboard?.writeText(el.value).then(()=>{ el.style.outline='2px solid #5bd08a'; setTimeout(()=>el.style.outline='',700); });
   }
   async function testEmail(){
@@ -1945,8 +1945,8 @@ function fieldRow(field, configMap, tenantId = 'default') {
     const fid = `gs-${field.key}`;
     return `<div class="field"><label>${esc(field.label)}</label>
       <div class="row" style="gap:.4rem">
-        <input id="${fid}" type="text" name="set[${esc(field.key)}]" value="${esc(has ? current : '')}"
-          placeholder="click Generate" autocomplete="off" style="flex:1;min-width:220px">
+        <input id="${fid}" type="password" name="set[${esc(field.key)}]" value="${esc(has ? current : '')}"
+          placeholder="click Generate" autocomplete="new-password" data-lpignore="true" data-1p-ignore style="flex:1;min-width:220px">
         <button type="button" class="act" onclick="genSecret('${fid}')">Generate</button>
         <button type="button" class="act" onclick="copyField('${fid}')">Copy</button>
       </div>
