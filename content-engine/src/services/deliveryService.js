@@ -1,17 +1,13 @@
 /**
- * Delivery log, alerts, and daily reports.
+ * Delivery log and failure alerts.
  *
- * Purpose:      Record Post-for-Me delivery results, alert on failures, and send
- *               the two daily delivery reports.
+ * Purpose:      Record Post-for-Me delivery results and alert on failures.
  * Responsibility:
  *               - recordResult(payload): map account -> {platform, brand, name},
  *                 insert a log row, and email an alert on failure.
- *               - sendGitaReport / sendVidapulseReport: build and email reports.
- * Dependencies: pfmDeliveryLogRepository, report builders, providers (mail),
- *               tenantSettings, time utils.
+ * Dependencies: pfmDeliveryLogRepository, providers (mail), time utils.
  */
 import * as deliveryLog from '../repositories/pfmDeliveryLogRepository.js';
-import { buildGitaReport, buildVidapulseReport } from '../utils/report.js';
 import { buildProviders } from './providerFactory.js';
 import { todayKeyIst } from '../utils/time.js';
 import { childLogger } from '../core/logger.js';
@@ -57,45 +53,4 @@ export async function recordResult({ tenantId = 'default', event }) {
   return row;
 }
 
-/** Cron 08:30 IST: Gita 7/7 report. */
-export async function sendGitaReport({ tenantId = 'default' }) {
-  const log = childLogger({ module: 'delivery', tenant_id: tenantId });
-  const providers = await buildProviders(tenantId);
-  const resolved = providers.resolved;
-  const day = todayKeyIst();
-  const rows = await deliveryLog.forDay({ tenantId, brand: 'gita', dayIst: day });
-  const expected = expectedAccounts(resolved.postforme.accountMap, 'gita', resolved.postforme.gitaAccounts);
-  const report = buildGitaReport(rows, expected);
-  await providers.mail.send({ to: resolved.emails.report, subject: report.subject, text: report.body });
-  log.info({ subject: report.subject }, 'gita report sent');
-}
-
-/** Cron 09:00 IST: VidaPulse report with 26h staleness check. */
-export async function sendVidapulseReport({ tenantId = 'default' }) {
-  const log = childLogger({ module: 'delivery', tenant_id: tenantId });
-  const providers = await buildProviders(tenantId);
-  const resolved = providers.resolved;
-  const rows = await deliveryLog.latest({ tenantId, brand: 'vidapulse', limit: 50 });
-  const expected = expectedAccounts(resolved.postforme.accountMap, 'vidapulse', resolved.postforme.vidapulseAccounts);
-  const report = buildVidapulseReport(rows, expected, new Date(), 26);
-  await providers.mail.send({ to: resolved.emails.approvalVidapulse, subject: report.subject, text: report.body });
-  log.info({ subject: report.subject }, 'vidapulse report sent');
-}
-
-/** Build the expected-accounts list for a brand from the account map (+ ids). */
-function expectedAccounts(accountMap, brand, accountIds = []) {
-  const out = [];
-  const seen = new Set();
-  for (const [id, meta] of Object.entries(accountMap || {})) {
-    if ((meta.brand || '').toLowerCase() === brand) {
-      out.push({ account_id: id, account_name: meta.account_name || meta.name, platform: meta.platform });
-      seen.add(id);
-    }
-  }
-  for (const id of accountIds) {
-    if (!seen.has(id)) out.push({ account_id: id, account_name: id, platform: (accountMap?.[id]?.platform) });
-  }
-  return out;
-}
-
-export default { recordResult, sendGitaReport, sendVidapulseReport };
+export default { recordResult };

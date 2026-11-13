@@ -292,8 +292,8 @@ export const CONFIG_MANIFEST = {
     // stored values are still read by tenantSettings.forTenant.)
     modules: [
       {
-        key: 'delivery', label: 'Delivery log & daily reports',
-        help: 'Records each Post for Me result (posted / failed) and emails the daily delivery reports (08:30 IST). On is recommended.',
+        key: 'delivery', label: 'Delivery log & failure alerts',
+        help: 'Records each Post for Me result (posted / failed) and emails you at once when a post fails. On is recommended.',
       },
     ],
   },

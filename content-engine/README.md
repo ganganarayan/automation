@@ -37,7 +37,7 @@ Content is emailed with a signed, single-use link to `GET /api/v1/review/{token}
 ## Scheduled jobs (IST)
 
 - 22:00: Gita & VidaPulse image generation (→ approval email)
-- 08:30: Gita delivery report; 09:00: VidaPulse report (26h staleness) + VidaPulse refill watchdog
+- 09:00: VidaPulse refill watchdog
 - Video pipeline is **off by default** (`MODULE_VIDEO_PIPELINE_ENABLED=false`).
 
 ## Data (owned tables)
