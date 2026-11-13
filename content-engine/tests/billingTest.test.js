@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { TEST_PLANS, rankOf, testQuote, testPrice, upgradePrice, stepsFrom, rowActions, orderSigOk, billingMail } from '../src/utils/billingTestSpec.js';
+import { subscribeState, TEST_PLANS, rankOf, testQuote, testPrice, upgradePrice, stepsFrom, rowActions, orderSigOk, billingMail } from '../src/utils/billingTestSpec.js';
 import { planKey, readPlanKey } from '../src/utils/billingSpec.js';
 import { planBody, testPayments } from '../src/utils/planPage.js';
 
@@ -30,6 +30,21 @@ describe('Rs 1 test payments', () => {
     expect(stepsFrom('lite')).toEqual({ up: 'solo', down: '' });
   });
 
+  it('turns Subscribe off while paid, and into Pay again after a failed renewal', () => {
+    const paid = { tenantId: 'a', plan: 'lite', ended: false, until: '15-12-2026' };
+    const failed = { tenantId: 'b', plan: 'solo', ended: true, cancelledByOwner: false };
+    const mine = { tenantId: 'c', plan: 'starter', ended: true, cancelledByOwner: true };
+    expect(subscribeState('lite', [paid])).toEqual({ kind: 'paid', tenantId: 'a', until: '15-12-2026' });
+    expect(subscribeState('solo', [failed])).toMatchObject({ kind: 'lapsed', tenantId: 'b' });
+    expect(subscribeState('starter', [mine])).toEqual({ kind: 'new' });
+    expect(subscribeState('growth', [paid, failed])).toEqual({ kind: 'new' });
+    const html = testPayments([paid, failed]);
+    expect(html).toContain('Paid till 15-12-2026');
+    expect(html).toContain('Pay again ₹1.20');
+    expect(html).toContain('Subscribe ₹1.30');
+    expect(billingMail({ kind: 'renewed', plan: 'solo', workspace: 'w', until: '15-12-2026' }).text).toContain('15-12-2026');
+  });
+
   it('checks the order signature', () => {
     const secret = 's3cret';
     const signature = createHmac('sha256', secret).update('order_1|pay_1').digest('hex');
@@ -54,7 +69,7 @@ describe('Rs 1 test payments', () => {
     expect((html.match(/<tr data-plan=/g) || []).length).toBe(6);
     expect((html.match(/data-do="upgrade"/g) || []).length).toBe(5);
     expect((html.match(/data-do="downgrade"/g) || []).length).toBe(5);
-    for (const b of ['Subscribe ₹1.10', 'Subscribe ₹1.60', 'Upgrade to Solo ₹1.20', 'Upgrade to Agency ₹1.60', 'Downgrade to Starter Lite', 'Downgrade to Growth', 'Cancel']) expect(html).toContain(b);
+    for (const b of ['Paid till 12-12-2026', 'Subscribe ₹1.20', 'Subscribe ₹1.60', 'Upgrade to Solo ₹1.20', 'Upgrade to Agency ₹1.60', 'Downgrade to Starter Lite', 'Downgrade to Growth', 'Cancel']) expect(html).toContain(b);
     const owner = planBody({ superAdmin: true, pay: { keyId: '', tests: [] }, origin: 'https://x' });
     expect(owner).toContain('test-payments');
     expect(planBody({ superAdmin: false })).not.toContain('test-payments');

@@ -28,12 +28,16 @@ import * as tenantSettings from '../core/tenantSettings.js';
 import { mailFor } from './inviteService.js';
 import { settings } from '../settings/index.js';
 import { OWNER_TENANT } from '../utils/cancelSpec.js';
-import { planKey, cleanBuyer, expiryAfter } from '../utils/billingSpec.js';
-import { TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, upgradeAmount, upgradePrice, orderSigOk, billingMail } from '../utils/billingTestSpec.js';
+import { planKey, cleanBuyer, expiryAfter, checkoutSigOk } from '../utils/billingSpec.js';
+import { TEST_CANCELLED_KEY, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, upgradeAmount, upgradePrice, orderSigOk, billingMail } from '../utils/billingTestSpec.js';
 import { formatIst } from '../utils/time.js';
 import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'billing-test' });
+
+async function readList(key) {
+  try { return JSON.parse((await tenantConfig.get(OWNER_TENANT, key)) || '[]') || []; } catch { return []; }
+}
 
 async function testSubs() {
   try { return JSON.parse((await tenantConfig.get(OWNER_TENANT, TEST_SUBS_KEY)) || '[]') || []; } catch { return []; }
@@ -150,6 +154,8 @@ export async function cancel({ tenantId }) {
     razorpay = err.message;
   }
   const now = new Date();
+  const gone = await readList(TEST_CANCELLED_KEY);
+  if (!gone.includes(t.id)) await tenantConfig.set(OWNER_TENANT, TEST_CANCELLED_KEY, JSON.stringify([...gone, t.id].slice(-100)));
   await tenantRepo.setCancelled(t.id, now);
   await tenantRepo.setExpiry(t.id, now);
   planService.invalidate();
@@ -158,19 +164,67 @@ export async function cancel({ tenantId }) {
   return { tenant: t.id, razorpay, email: sent };
 }
 
-/** The owner's test workspaces, newest first. */
+/**
+ * Pay again: the renewal of a test workspace failed (or its mandate was
+ * refused), so start a fresh subscription for the same workspace. The buyer
+ * can pick any payment method, and autopay runs on the new one.
+ */
+export async function startRenew({ tenantId }) {
+  const { t, email } = await testWorkspace(tenantId);
+  if ((await readList(TEST_CANCELLED_KEY)).includes(t.id)) throw new Error('You cancelled this one: Subscribe makes a new test workspace instead');
+  const k = await billing.keys();
+  const q = testQuote(t.plan);
+  const old = await repo.findCheckout(t.billing_sub_id).catch(() => null);
+  const sub = await rzp.createSubscription(k, {
+    plan_id: await billing.razorpayPlanFor(k, q), total_count: 12, customer_notify: 1,
+    notes: { plan: q.plan, bill: 'mo', units: 1, users: 0, email, country: 'IN', test: '1', renews: t.id },
+  });
+  await repo.createCheckout({ id: sub.id, ...q, name: (old && old.name) || '', business: (old && old.business) || t.name || '', email, phone: (old && old.phone) || '', country: 'IN' });
+  // The workspace already exists: the confirm and the webhook must not make another.
+  await repo.markProvisioned(sub.id, t.id);
+  const list0 = await testSubs();
+  list0.push(sub.id);
+  await tenantConfig.set(OWNER_TENANT, TEST_SUBS_KEY, JSON.stringify(list0.slice(-50)));
+  return { keyId: k.keyId, subscriptionId: sub.id, description: `Test: pay again for ${t.name || t.id} at ${testPrice(t.plan)} a month`, prefill: { email } };
+}
+
+export async function confirmRenew({ paymentId = '', subscriptionId = '', signature = '' }) {
+  const k = await billing.keys();
+  if (!checkoutSigOk({ paymentId, subscriptionId, signature, secret: k.keySecret })) throw new Error('The payment could not be verified');
+  const c = await repo.findCheckout(subscriptionId);
+  if (!c || !c.tenant_id || !(await isTestSub(subscriptionId))) throw new Error('No such test payment');
+  const t = await tenantRepo.findById(c.tenant_id);
+  if (!t) throw new Error('The workspace is gone');
+  const oldSub = t.billing_sub_id;
+  await repo.setTenantBilling(t.id, subscriptionId, 'INR');
+  const until = expiryAfter(new Date(), 'mo');
+  await tenantRepo.setExpiry(t.id, until);
+  if (t.cancelled_at) await tenantRepo.setCancelled(t.id, null);
+  await repo.logPayment({ paymentId, subId: subscriptionId, tenantId: t.id, currency: 'INR', amount: c.amount, base: 1, gst: 0, gstin: null }).catch(() => {});
+  // The old mandate failed: stop it so only the new one charges.
+  if (oldSub && oldSub !== subscriptionId) await rzp.cancelNow(k, oldSub).catch(() => {});
+  planService.invalidate();
+  tenantSettings.invalidate();
+  const sent = await mail(c.email, billingMail({ kind: 'renewed', plan: t.plan, workspace: t.name || t.id, base: settings.app.publicBaseUrl, until: formatIst(until, { withTime: false }), test: true }));
+  return { tenant: t.id, plan: t.plan, email: sent };
+}
+
+/** The owner's test workspaces, newest first, one entry each. */
 export async function list() {
   const out = [];
+  const seen = new Set();
+  const gone = await readList(TEST_CANCELLED_KEY);
   for (const subId of (await testSubs()).slice().reverse()) {
     const c = await repo.findCheckout(subId).catch(() => null);
-    if (!c || !c.tenant_id) continue;
+    if (!c || !c.tenant_id || seen.has(c.tenant_id)) continue;
     const t = await tenantRepo.findById(c.tenant_id).catch(() => null);
     if (!t) continue;
+    seen.add(t.id);
     const exp = t.expires_at ? new Date(t.expires_at) : null;
     const ended = !!t.cancelled_at || (exp && exp.getTime() <= Date.now());
-    out.push({ tenantId: t.id, name: t.name || t.id, email: c.email, plan: t.plan, ended, until: exp ? formatIst(exp, { withTime: false }) : '' });
+    out.push({ tenantId: t.id, name: t.name || t.id, email: c.email, plan: t.plan, ended, cancelledByOwner: gone.includes(t.id), until: exp ? formatIst(exp, { withTime: false }) : '' });
   }
   return out;
 }
 
-export default { isTestSub, mail, startSubscribe, startUpgrade, confirmUpgrade, downgrade, cancel, list };
+export default { isTestSub, mail, startSubscribe, startUpgrade, confirmUpgrade, downgrade, cancel, startRenew, confirmRenew, list };

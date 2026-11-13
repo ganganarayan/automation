@@ -15,6 +15,8 @@ export const TEST_PLANS = ['lite', 'solo', 'starter', 'brand', 'growth', 'agency
 /** Where the owner's test subscriptions are listed (tenant_config of the owner's workspace). */
 export const TEST_SUBS_KEY = 'billing_test_subs';
 export const TEST_ORDER_PREFIX = 'billing_test_order_';
+/** Test workspaces the owner cancelled on purpose (not a failed renewal). */
+export const TEST_CANCELLED_KEY = 'billing_test_cancelled';
 
 /** A plan's place in the price order, -1 when it is not a test plan. */
 export function rankOf(plan) {
@@ -57,6 +59,22 @@ export function upgradePrice(plan) {
 }
 
 /**
+ * What a row's Subscribe cell shows:
+ *   paid:   a test workspace on this plan is paid up, so Subscribe is off
+ *   lapsed: its renewal failed (not cancelled by you), so pay again for it
+ *   new:    no live test workspace on this plan, Subscribe makes one
+ * `tests` is the list from billingTestService.list(), newest first.
+ */
+export function subscribeState(plan, tests = []) {
+  const on = (tests || []).filter((t) => t && t.plan === plan);
+  const paid = on.find((t) => !t.ended);
+  if (paid) return { kind: 'paid', tenantId: paid.tenantId, until: paid.until || '' };
+  const lapsed = on.find((t) => t.ended && !t.cancelledByOwner);
+  if (lapsed) return { kind: 'lapsed', tenantId: lapsed.tenantId, until: lapsed.until || '' };
+  return { kind: 'new' };
+}
+
+/**
  * A row is the plan the picked workspace is on now: its Upgrade goes one plan
  * up, its Downgrade one plan down, its Cancel ends it. Only that row is live.
  */
@@ -75,7 +93,7 @@ export function orderSigOk({ orderId, paymentId, signature, secret }) {
 const label = (plan) => (PLANS[plan] && PLANS[plan].label) || plan;
 
 /**
- * The email a buyer gets. kind: welcome | upgraded | downgraded | cancelled.
+ * The email a buyer gets. kind: welcome | upgraded | downgraded | renewed | cancelled.
  * `base` is the app's sign-in address; `until` is already DD-MM-YYYY.
  */
 export function billingMail({ kind, plan = '', from = '', workspace = '', email = '', tempPassword = '', base = '', until = '', test = false }) {
@@ -106,6 +124,17 @@ export function billingMail({ kind, plan = '', from = '', workspace = '', email 
       ].join('\n'),
     };
   }
+  if (kind === 'renewed') {
+    return {
+      subject: `Your Content Engine plan is paid again${tag}`,
+      text: [
+        `Thank you. ${workspace} (${label(plan)}) is paid again${tag} and open now.`,
+        until ? `Paid until: ${until}` : '',
+        'Renewals now use the payment method you just paid with.',
+        `Sign in: ${signIn}`,
+      ].filter(Boolean).join('\n'),
+    };
+  }
   if (kind === 'cancelled') {
     return {
       subject: `Your Content Engine subscription is cancelled${tag}`,
@@ -119,4 +148,4 @@ export function billingMail({ kind, plan = '', from = '', workspace = '', email 
   throw new Error(`unknown billing email: ${kind}`);
 }
 
-export default { TEST_PLANS, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, upgradeAmount, upgradePrice, stepsFrom, rowActions, orderSigOk, billingMail };
+export default { TEST_CANCELLED_KEY, subscribeState, TEST_PLANS, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, upgradeAmount, upgradePrice, stepsFrom, rowActions, orderSigOk, billingMail };

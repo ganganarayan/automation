@@ -15,7 +15,7 @@
  *         POST /api/v1/admin/plan/resume       form post, back to the page
  *         POST /api/v1/admin/plan/solo         form post: move to Solo from the next renewal
  *         POST /api/v1/admin/plan/exit-link    super admin: { url }
- *         POST /api/v1/admin/plan/test/:step   super admin, test payments: subscribe | upgrade | upgrade-paid | downgrade | cancel
+ *         POST /api/v1/admin/plan/test/:step   super admin, test payments: subscribe | upgrade | upgrade-paid | downgrade | cancel | renew | renew-paid
  */
 import * as tenantRepo from '../repositories/tenantRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
@@ -145,6 +145,8 @@ export function register(ctx) {
     'upgrade-paid': (b) => billingTest.confirmUpgrade({ orderId: String(b.orderId || ''), paymentId: String(b.paymentId || ''), signature: String(b.signature || '') }),
     downgrade: (b) => billingTest.downgrade({ tenantId: String(b.tenantId || ''), plan: String(b.plan || '') }),
     cancel: (b) => billingTest.cancel({ tenantId: String(b.tenantId || '') }),
+    renew: (b) => billingTest.startRenew({ tenantId: String(b.tenantId || '') }),
+    'renew-paid': (b) => billingTest.confirmRenew({ paymentId: String(b.paymentId || ''), subscriptionId: String(b.subscriptionId || ''), signature: String(b.signature || '') }),
   };
   router.post('/admin/plan/test/:step', async (req, res) => {
     try {
