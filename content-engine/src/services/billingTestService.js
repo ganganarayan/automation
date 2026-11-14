@@ -29,7 +29,7 @@ import { mailFor } from './inviteService.js';
 import { settings } from '../settings/index.js';
 import { OWNER_TENANT } from '../utils/cancelSpec.js';
 import { planKey, cleanBuyer, expiryAfter, checkoutSigOk } from '../utils/billingSpec.js';
-import { TEST_CANCELLED_KEY, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, upgradeAmount, upgradePrice, orderSigOk, billingMail } from '../utils/billingTestSpec.js';
+import { TEST_CANCELLED_KEY, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, money, orderSigOk, billingMail } from '../utils/billingTestSpec.js';
 import { formatIst } from '../utils/time.js';
 import { childLogger } from '../core/logger.js';
 
@@ -62,23 +62,24 @@ export async function mail(to, msg) {
 }
 
 /** Subscribe: a small monthly test subscription for a new buyer on this plan. */
-export async function startSubscribe({ plan, name = '', email = '', phone = '' }) {
+export async function startSubscribe({ plan, name = '', email = '', phone = '', currency = 'INR', price }) {
   const k = await billing.keys();
   if (!k.keyId || !k.keySecret) throw new Error('Save the Razorpay keys above first');
-  const q = testQuote(plan);
-  const buyer = cleanBuyer({ name: name || 'Test buyer', business: `Test ${plan}`, email, phone, country: 'IN' });
+  const q = testQuote(plan, { currency, price });
+  const country = q.currency === 'INR' ? 'IN' : 'US';
+  const buyer = cleanBuyer({ name: name || 'Test buyer', business: `Test ${plan}`, email, phone, country });
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(buyer.email)) throw new Error('Type the test buyer email (a new one, for example you+lite@gmail.com)');
   if (await users.findByEmail(buyer.email)) throw new Error('That email already has an account: use a new one (you+plan@gmail.com works with Gmail)');
   const planId = await billing.razorpayPlanFor(k, q);
   const sub = await rzp.createSubscription(k, {
     plan_id: planId, total_count: 12, customer_notify: 1,
-    notes: { plan, bill: 'mo', units: 1, users: 0, email: buyer.email, country: 'IN', test: '1' },
+    notes: { plan, bill: 'mo', units: 1, users: 0, email: buyer.email, country, test: '1' },
   });
   await repo.createCheckout({ id: sub.id, ...q, ...buyer });
   const list = await testSubs();
   list.push(sub.id);
   await tenantConfig.set(OWNER_TENANT, TEST_SUBS_KEY, JSON.stringify(list.slice(-50)));
-  return { keyId: k.keyId, subscriptionId: sub.id, description: `Test: ${q.plan} at ${testPrice(q.plan)} a month`, prefill: { name: buyer.name, email: buyer.email, contact: buyer.phone } };
+  return { keyId: k.keyId, subscriptionId: sub.id, description: `Test: ${q.plan} at ${money(q.currency, q.amount)} a month`, prefill: { name: buyer.name, email: buyer.email, contact: buyer.phone } };
 }
 
 async function testWorkspace(tenantId) {
@@ -89,8 +90,8 @@ async function testWorkspace(tenantId) {
 }
 
 /** Put the workspace on a plan now, reopen it, and point its renewals at that plan's test price. */
-async function moveTo(t, plan) {
-  const q = testQuote(plan);
+async function moveTo(t, plan, price = {}) {
+  const q = testQuote(plan, price);
   await billing.applyPlanKey(t.id, planKey(q));
   const until = expiryAfter(new Date(), 'mo');
   await tenantRepo.setExpiry(t.id, until);
@@ -108,14 +109,14 @@ async function moveTo(t, plan) {
 }
 
 /** Upgrade: a one-time order at the plan's test price; the move happens when it is paid. */
-export async function startUpgrade({ tenantId, plan }) {
+export async function startUpgrade({ tenantId, plan, currency = 'INR', price }) {
   const { t, email } = await testWorkspace(tenantId);
   if (rankOf(plan) !== rankOf(t.plan) + 1 || rankOf(t.plan) < 0) throw new Error('An upgrade goes one plan up');
   const k = await billing.keys();
-  const amount = upgradeAmount(plan);
-  const order = await rzp.createOrder(k, { amount, currency: 'INR', receipt: `up-${t.id}`.slice(0, 40), notes: { tenant: t.id, plan, test: '1' } });
-  await tenantConfig.set(OWNER_TENANT, `${TEST_ORDER_PREFIX}${order.id}`, JSON.stringify({ tenantId: t.id, plan }));
-  return { keyId: k.keyId, orderId: order.id, amount, description: `Test upgrade of ${t.name || t.id} to ${plan} (${upgradePrice(plan)})`, prefill: { email } };
+  const q = testQuote(plan, { currency, price });
+  const order = await rzp.createOrder(k, { amount: q.amount, currency: q.currency, receipt: `up-${t.id}`.slice(0, 40), notes: { tenant: t.id, plan, test: '1' } });
+  await tenantConfig.set(OWNER_TENANT, `${TEST_ORDER_PREFIX}${order.id}`, JSON.stringify({ tenantId: t.id, plan, currency: q.currency, amount: q.amount }));
+  return { keyId: k.keyId, orderId: order.id, amount: q.amount, currency: q.currency, description: `Test upgrade of ${t.name || t.id} to ${plan} (${money(q.currency, q.amount)})`, prefill: { email } };
 }
 
 export async function confirmUpgrade({ orderId = '', paymentId = '', signature = '' }) {
@@ -127,19 +128,20 @@ export async function confirmUpgrade({ orderId = '', paymentId = '', signature =
   const { t, email } = await testWorkspace(pending.tenantId);
   const from = t.plan;
   if (from !== pending.plan) {
-    await moveTo(t, pending.plan);
-    await repo.logPayment({ paymentId, subId: t.billing_sub_id, tenantId: t.id, currency: 'INR', amount: upgradeAmount(pending.plan), base: 1, gst: 0, gstin: null }).catch(() => {});
+    const price = pending.amount ? { currency: pending.currency || 'INR', price: pending.amount / 100 } : {};
+    await moveTo(t, pending.plan, price);
+    await repo.logPayment({ paymentId, subId: t.billing_sub_id, tenantId: t.id, currency: pending.currency || 'INR', amount: pending.amount || testQuote(pending.plan).amount, base: 1, gst: 0, gstin: null }).catch(() => {});
   }
   const sent = await mail(email, billingMail({ kind: 'upgraded', plan: pending.plan, from, workspace: t.name || t.id, base: settings.app.publicBaseUrl, test: true }));
   return { tenant: t.id, plan: pending.plan, email: sent };
 }
 
 /** Downgrade: move down now, no charge. */
-export async function downgrade({ tenantId, plan }) {
+export async function downgrade({ tenantId, plan, currency = 'INR', price }) {
   const { t, email } = await testWorkspace(tenantId);
   if (rankOf(plan) < 0 || rankOf(plan) !== rankOf(t.plan) - 1) throw new Error('A downgrade goes one plan down');
   const from = t.plan;
-  await moveTo(t, plan);
+  await moveTo(t, plan, { currency, price });
   const sent = await mail(email, billingMail({ kind: 'downgraded', plan, from, workspace: t.name || t.id, base: settings.app.publicBaseUrl, test: true }));
   return { tenant: t.id, plan, email: sent };
 }
@@ -169,23 +171,24 @@ export async function cancel({ tenantId }) {
  * refused), so start a fresh subscription for the same workspace. The buyer
  * can pick any payment method, and autopay runs on the new one.
  */
-export async function startRenew({ tenantId }) {
+export async function startRenew({ tenantId, currency = 'INR', price }) {
   const { t, email } = await testWorkspace(tenantId);
   if ((await readList(TEST_CANCELLED_KEY)).includes(t.id)) throw new Error('You cancelled this one: Subscribe makes a new test workspace instead');
   const k = await billing.keys();
-  const q = testQuote(t.plan);
+  const q = testQuote(t.plan, { currency, price });
+  const country = q.currency === 'INR' ? 'IN' : 'US';
   const old = await repo.findCheckout(t.billing_sub_id).catch(() => null);
   const sub = await rzp.createSubscription(k, {
     plan_id: await billing.razorpayPlanFor(k, q), total_count: 12, customer_notify: 1,
-    notes: { plan: q.plan, bill: 'mo', units: 1, users: 0, email, country: 'IN', test: '1', renews: t.id },
+    notes: { plan: q.plan, bill: 'mo', units: 1, users: 0, email, country, test: '1', renews: t.id },
   });
-  await repo.createCheckout({ id: sub.id, ...q, name: (old && old.name) || '', business: (old && old.business) || t.name || '', email, phone: (old && old.phone) || '', country: 'IN' });
+  await repo.createCheckout({ id: sub.id, ...q, name: (old && old.name) || '', business: (old && old.business) || t.name || '', email, phone: (old && old.phone) || '', country });
   // The workspace already exists: the confirm and the webhook must not make another.
   await repo.markProvisioned(sub.id, t.id);
   const list0 = await testSubs();
   list0.push(sub.id);
   await tenantConfig.set(OWNER_TENANT, TEST_SUBS_KEY, JSON.stringify(list0.slice(-50)));
-  return { keyId: k.keyId, subscriptionId: sub.id, description: `Test: pay again for ${t.name || t.id} at ${testPrice(t.plan)} a month`, prefill: { email } };
+  return { keyId: k.keyId, subscriptionId: sub.id, description: `Test: pay again for ${t.name || t.id} at ${money(q.currency, q.amount)} a month`, prefill: { email } };
 }
 
 export async function confirmRenew({ paymentId = '', subscriptionId = '', signature = '' }) {
@@ -196,11 +199,11 @@ export async function confirmRenew({ paymentId = '', subscriptionId = '', signat
   const t = await tenantRepo.findById(c.tenant_id);
   if (!t) throw new Error('The workspace is gone');
   const oldSub = t.billing_sub_id;
-  await repo.setTenantBilling(t.id, subscriptionId, 'INR');
+  await repo.setTenantBilling(t.id, subscriptionId, c.currency || 'INR');
   const until = expiryAfter(new Date(), 'mo');
   await tenantRepo.setExpiry(t.id, until);
   if (t.cancelled_at) await tenantRepo.setCancelled(t.id, null);
-  await repo.logPayment({ paymentId, subId: subscriptionId, tenantId: t.id, currency: 'INR', amount: c.amount, base: 1, gst: 0, gstin: null }).catch(() => {});
+  await repo.logPayment({ paymentId, subId: subscriptionId, tenantId: t.id, currency: c.currency || 'INR', amount: c.amount, base: 1, gst: 0, gstin: null }).catch(() => {});
   // The old mandate failed: stop it so only the new one charges.
   if (oldSub && oldSub !== subscriptionId) await rzp.cancelNow(k, oldSub).catch(() => {});
   planService.invalidate();

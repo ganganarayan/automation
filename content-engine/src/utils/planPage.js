@@ -9,7 +9,7 @@
  */
 import { cancelProblem } from './cancelSpec.js';
 import { planLabel, PLANS, limitsForTenant } from './planSpec.js';
-import { TEST_PLANS, testPrice, upgradePrice, stepsFrom, subscribeState } from './billingTestSpec.js';
+import { TEST_PLANS, TEST_CURRENCIES, defaultTestAmount, testPrice, upgradePrice, stepsFrom, subscribeState } from './billingTestSpec.js';
 
 export const PLAN_PATH = '/api/v1/admin/plan';
 
@@ -106,8 +106,8 @@ export default { PLAN_PATH, planBody, soloOffer };
 function subCell(p, tests) {
   const s = subscribeState(p, tests);
   if (s.kind === 'paid') return `<button class="act" type="button" disabled title="A test workspace on this plan is paid up">Paid till ${s.until}</button>`;
-  if (s.kind === 'lapsed') return `<button class="act" type="button" data-do="renew" data-ws="${s.tenantId}" title="The renewal did not go through: pay with any method, autopay continues on it">Pay again ${testPrice(p)}</button>`;
-  return `<button class="act" type="button" data-do="subscribe">Subscribe ${testPrice(p)}</button>`;
+  if (s.kind === 'lapsed') return `<button class="act" type="button" data-do="renew" data-ws="${s.tenantId}" data-word="Pay again" title="The renewal did not go through: pay with any method, autopay continues on it">Pay again ${testPrice(p)}</button>`;
+  return `<button class="act" type="button" data-do="subscribe" data-word="Subscribe">Subscribe ${testPrice(p)}</button>`;
 }
 
 /** Owner only: test payments on every plan, one row each, with the live keys. */
@@ -116,25 +116,35 @@ export function testPayments(tests = []) {
   const opts = tests.length
     ? tests.map((t) => `<option value="${esc2(t.tenantId)}">${esc2(t.name)}: ${esc2(planLabel(t.plan))}, ${esc2(t.email)}, ${t.ended ? 'cancelled' : `paid until ${esc2(t.until)}`}</option>`).join('')
     : '<option value="">No test workspace yet: Subscribe on a row first</option>';
+  const curOpts = Object.keys(TEST_CURRENCIES).map((c) => `<option>${c}</option>`).join('');
   const rows = TEST_PLANS.map((p) => `<tr data-plan="${p}"><td><b>${esc2(PLANS[p].label)}</b></td>
+      <td><span class="inl"><select class="tp-cur" aria-label="Currency">${curOpts}</select><input class="tp-amt" inputmode="decimal" aria-label="Amount" value="${defaultTestAmount(p).toFixed(2)}" data-def="${defaultTestAmount(p).toFixed(2)}"></span><small class="tp-range">a month (1.00 to 100.00)</small></td>
       <td>${subCell(p, tests)}</td>
-      <td>${stepsFrom(p).up ? `<button class="act" type="button" data-do="upgrade" data-to="${stepsFrom(p).up}">Upgrade to ${esc2(PLANS[stepsFrom(p).up].label)} ${upgradePrice(stepsFrom(p).up)}</button>` : ''}</td>
+      <td>${stepsFrom(p).up ? `<button class="act" type="button" data-do="upgrade" data-to="${stepsFrom(p).up}" data-word="Upgrade to ${esc2(PLANS[stepsFrom(p).up].label)}">Upgrade to ${esc2(PLANS[stepsFrom(p).up].label)} ${upgradePrice(stepsFrom(p).up)}</button>` : ''}</td>
       <td>${stepsFrom(p).down ? `<button class="act" type="button" data-do="downgrade" data-to="${stepsFrom(p).down}">Downgrade to ${esc2(PLANS[stepsFrom(p).down].label)}</button>` : ''}</td>
       <td><button class="act" type="button" data-do="cancel">Cancel</button></td></tr>`).join('');
-  const data = JSON.stringify({ order: TEST_PLANS, tests }).replace(/</g, '\\u003c');
+  const data = JSON.stringify({ order: TEST_PLANS, tests, cur: TEST_CURRENCIES }).replace(/</g, '\\u003c');
   return `<h2 id="test-payments">Test payments (owner only)</h2>
-    <p class="hint">Real money with the keys above. Each plan has its own small monthly price (₹1.10 for the cheapest, ₹1.20 the next, and so on) so you can tell every charge apart in Razorpay. Each row is the plan the picked workspace is on now: only that row's Upgrade, Downgrade and Cancel are live. Subscribe makes a new workspace on that plan and emails its sign-in to the buyer email. Upgrade moves it one plan up and charges that plan's price once (Starter Lite to Solo: ₹1.20), opens its features now, and the renewals then charge the new plan's price. Downgrade moves it one plan down and charges nothing: the features outside the new plan switch off now, and the renewals charge the new plan's price from the next month. Cancel ends the subscription and locks the workspace. Once a plan is paid its Subscribe turns off; if a monthly renewal fails it turns into Pay again, which takes any payment method and carries the autopay on it. Each step emails the buyer. Renewals go on every month until you cancel.</p>
+    <p class="hint">Real money with the keys above. Pick INR or USD and type the amount on each plan (INR 1.00 to 100.00, USD 0.50 to 100.00); by default each plan has its own small monthly price (1.10 for the cheapest, 1.20 the next, and so on) so you can tell every charge apart in Razorpay. Upgrade charges the amount on the plan it moves to; Downgrade bills the amount on the plan it moves to from the next renewal. USD needs international payments switched on in Razorpay. Each row is the plan the picked workspace is on now: only that row's Upgrade, Downgrade and Cancel are live. Subscribe makes a new workspace on that plan and emails its sign-in to the buyer email. Upgrade moves it one plan up and charges that plan's price once (Starter Lite to Solo: ₹1.20), opens its features now, and the renewals then charge the new plan's price. Downgrade moves it one plan down and charges nothing: the features outside the new plan switch off now, and the renewals charge the new plan's price from the next month. Cancel ends the subscription and locks the workspace. Once a plan is paid its Subscribe turns off; if a monthly renewal fails it turns into Pay again, which takes any payment method and carries the autopay on it. Each step emails the buyer. Renewals go on every month until you cancel.</p>
     <div class="grid2">
       <label>Test buyer email (new for each Subscribe)<input id="tp-email" type="email" placeholder="you+lite@gmail.com" autocomplete="off"></label>
       <label>Test buyer name and phone<span class="inl"><input id="tp-name" placeholder="Name"><input id="tp-phone" placeholder="Phone"></span></label>
     </div>
     <label>Test workspace for Upgrade, Downgrade and Cancel<select id="tp-ws">${opts}</select></label>
-    <style>table.tp button[disabled]{opacity:.35;cursor:not-allowed}</style>
-    <table class="tp"><thead><tr><th>Plan</th><th></th><th></th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <style>table.tp button[disabled]{opacity:.35;cursor:not-allowed}table.tp .tp-cur{width:5.5em}table.tp .tp-amt{width:6em}table.tp small{display:block;opacity:.7}</style>
+    <table class="tp"><thead><tr><th>Plan</th><th>Price</th><th></th><th></th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table>
     <p id="tp-msg" class="hint"></p>
     <script>(function(){var D=${data};var M=document.getElementById('tp-msg');var W=document.getElementById('tp-ws');
     function picked(){for(var i=0;i<D.tests.length;i++){if(D.tests[i].tenantId===W.value)return D.tests[i];}return null;}
     function rank(p){return D.order.indexOf(p);}
+    function row(p){return document.querySelector('table.tp tr[data-plan="'+p+'"]');}
+    function price(p){var r=row(p);if(!r)return {};var c=r.querySelector('.tp-cur').value,a=r.querySelector('.tp-amt').value.trim(),n=Number(a),L=D.cur[c];
+      if(!a||!isFinite(n)||n<L.min||n>L.max)throw new Error('Type an amount from '+L.min.toFixed(2)+' to '+L.max.toFixed(2)+' '+c+' on '+p);return {currency:c,price:n.toFixed(2)};}
+    function shown(p){try{var x=price(p);return x.currency+' '+x.price;}catch(e){return '';}}
+    function relabel(){document.querySelectorAll('table.tp tr[data-plan]').forEach(function(r){var p=r.getAttribute('data-plan'),c=r.querySelector('.tp-cur').value,L=D.cur[c];
+      r.querySelector('.tp-range').textContent='a month ('+L.min.toFixed(2)+' to '+L.max.toFixed(2)+')';
+      r.querySelectorAll('button[data-word]').forEach(function(b){var to=b.getAttribute('data-to')||p;b.textContent=b.getAttribute('data-word')+' '+shown(to);});});}
+    document.querySelectorAll('table.tp .tp-cur, table.tp .tp-amt').forEach(function(el){el.addEventListener('input',relabel);el.addEventListener('change',relabel);});
     function paint(){var t=picked();var on=t&&!t.ended?rank(t.plan):-2;document.querySelectorAll('table.tp tr[data-plan]').forEach(function(r){var x=rank(r.getAttribute('data-plan'));
       var live=on>=0&&x===on;var u=r.querySelector('[data-do=upgrade]'),d=r.querySelector('[data-do=downgrade]');if(u)u.disabled=!live;if(d)d.disabled=!live;r.querySelector('[data-do=cancel]').disabled=!live;r.style.fontWeight=(on===x)?'700':'';});}
     async function post(u,b){var r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});var j=await r.json().catch(function(){return {ok:false,error:'The app answered '+r.status};});if(!j.ok)throw new Error(j.error||'failed');return j;}
@@ -142,22 +152,23 @@ export function testPayments(tests = []) {
     function mailed(e){return e&&e.sent?' Email sent.':' 🟡 Email not sent'+(e&&e.error?': '+e.error:'')+'.';}
     function later(){setTimeout(function(){location.reload();},3500);}
     async function run(step,plan,ws){M.textContent='Working…';try{
-      if(step==='subscribe'){var s=await post('/api/v1/admin/plan/test/subscribe',{plan:plan,email:document.getElementById('tp-email').value,name:document.getElementById('tp-name').value,phone:document.getElementById('tp-phone').value});await rzp();
+      var pr=step==='cancel'?{}:price(plan);
+      if(step==='subscribe'){var s=await post('/api/v1/admin/plan/test/subscribe',{currency:pr.currency,price:pr.price,plan:plan,email:document.getElementById('tp-email').value,name:document.getElementById('tp-name').value,phone:document.getElementById('tp-phone').value});await rzp();
         new window.Razorpay({key:s.keyId,subscription_id:s.subscriptionId,name:'Content Engine',description:s.description,prefill:s.prefill,
           handler:async function(r){try{var j=await post('/buy/confirm',{paymentId:r.razorpay_payment_id,subscriptionId:r.razorpay_subscription_id,signature:r.razorpay_signature});M.textContent='🟢 Paid. Workspace '+j.tenant+' made for '+j.email+(j.tempPassword?', one-time password '+j.tempPassword:'')+'. The sign-in was emailed. Reloading…';setTimeout(function(){location.reload();},8000);}catch(e){M.textContent='🔴 '+e.message;}},
           modal:{ondismiss:function(){M.textContent='🟡 Payment window closed.';}}}).open();return;}
-      if(step==='renew'){var rn=await post('/api/v1/admin/plan/test/renew',{tenantId:ws});await rzp();
+      if(step==='renew'){var rn=await post('/api/v1/admin/plan/test/renew',{tenantId:ws,currency:pr.currency,price:pr.price});await rzp();
         new window.Razorpay({key:rn.keyId,subscription_id:rn.subscriptionId,name:'Content Engine',description:rn.description,prefill:rn.prefill,
           handler:async function(r){try{var j=await post('/api/v1/admin/plan/test/renew-paid',{paymentId:r.razorpay_payment_id,subscriptionId:r.razorpay_subscription_id,signature:r.razorpay_signature});M.textContent='🟢 Paid again, '+j.tenant+' is open.'+mailed(j.email)+' Reloading…';later();}catch(e){M.textContent='🔴 '+e.message;}},
           modal:{ondismiss:function(){M.textContent='🟡 Payment window closed.';}}}).open();return;}
       var t=picked();if(!t)throw new Error('Pick a test workspace first');
-      if(step==='upgrade'){var o=await post('/api/v1/admin/plan/test/upgrade',{tenantId:t.tenantId,plan:plan});await rzp();
-        new window.Razorpay({key:o.keyId,order_id:o.orderId,amount:o.amount,currency:'INR',name:'Content Engine',description:o.description,prefill:o.prefill,
+      if(step==='upgrade'){var o=await post('/api/v1/admin/plan/test/upgrade',{tenantId:t.tenantId,plan:plan,currency:pr.currency,price:pr.price});await rzp();
+        new window.Razorpay({key:o.keyId,order_id:o.orderId,amount:o.amount,currency:o.currency||'INR',name:'Content Engine',description:o.description,prefill:o.prefill,
           handler:async function(r){try{var j=await post('/api/v1/admin/plan/test/upgrade-paid',{orderId:r.razorpay_order_id,paymentId:r.razorpay_payment_id,signature:r.razorpay_signature});M.textContent='🟢 Upgraded to '+j.plan+'.'+mailed(j.email)+' Reloading…';later();}catch(e){M.textContent='🔴 '+e.message;}},
           modal:{ondismiss:function(){M.textContent='🟡 Payment window closed.';}}}).open();return;}
-      if(step==='downgrade'){if(!confirm('Move '+t.name+' down to '+plan+' now?')){M.textContent='';return;}var d=await post('/api/v1/admin/plan/test/downgrade',{tenantId:t.tenantId,plan:plan});M.textContent='🟢 Downgraded to '+d.plan+'.'+mailed(d.email)+' Reloading…';later();return;}
+      if(step==='downgrade'){if(!confirm('Move '+t.name+' down to '+plan+' now?')){M.textContent='';return;}var d=await post('/api/v1/admin/plan/test/downgrade',{tenantId:t.tenantId,plan:plan,currency:pr.currency,price:pr.price});M.textContent='🟢 Downgraded to '+d.plan+'.'+mailed(d.email)+' Reloading…';later();return;}
       if(step==='cancel'){if(!confirm('Cancel the subscription of '+t.name+' and lock it now?')){M.textContent='';return;}var c=await post('/api/v1/admin/plan/test/cancel',{tenantId:t.tenantId});M.textContent=(c.razorpay==='cancelled'?'🟢 Cancelled on Razorpay and locked.':'🟡 Locked here, Razorpay said: '+c.razorpay)+mailed(c.email)+' Reloading…';later();}
     }catch(e){M.textContent='🔴 '+e.message;}}
     document.querySelectorAll('table.tp button[data-do]').forEach(function(b){b.addEventListener('click',function(){run(b.getAttribute('data-do'),b.getAttribute('data-to')||b.closest('tr').getAttribute('data-plan'),b.getAttribute('data-ws'));});});
-    W.addEventListener('change',paint);paint();})();</script>`;
+    W.addEventListener('change',paint);paint();relabel();})();</script>`;
 }

@@ -23,21 +23,41 @@ export function rankOf(plan) {
   return TEST_PLANS.indexOf(String(plan || ''));
 }
 
+/** The currencies a test can charge in, with the smallest and largest amount (major units). */
+export const TEST_CURRENCIES = { INR: { min: 1, max: 100 }, USD: { min: 0.5, max: 100 } };
+
+/** A plan's default test price in major units: 1.10 for the cheapest, 1.20 the next and so on. */
+export function defaultTestAmount(plan) {
+  const r = rankOf(plan);
+  return r < 0 ? 0 : (110 + 10 * r) / 100;
+}
+
+/** A typed test price in paise or cents, checked against the currency's range. */
+export function testAmount(currency = 'INR', price) {
+  const c = TEST_CURRENCIES[currency];
+  if (!c) throw new Error('Pick INR or USD');
+  const n = Number(String(price ?? '').trim());
+  if (!Number.isFinite(n) || n < c.min || n > c.max) throw new Error(`Type an amount from ${c.min.toFixed(2)} to ${c.max.toFixed(2)} ${currency}`);
+  return Math.round(n * 100);
+}
+
 /**
- * What a test charge costs: Rs 1.10 for the cheapest plan, Rs 1.20 for the
- * next and so on, so each plan's charges are told apart in Razorpay. No GST,
- * monthly, one funnel or client. `base` is whole rupees (the column is whole).
+ * What a test charge costs: by default Rs 1.10 for the cheapest plan, Rs 1.20
+ * for the next and so on, so each plan's charges are told apart in Razorpay.
+ * The owner can pick USD and type another amount. No GST, monthly, one funnel
+ * or client. `base` is whole units (the column is whole).
  */
-export function testQuote(plan) {
+export function testQuote(plan, { currency = 'INR', price } = {}) {
   const r = rankOf(plan);
   if (r < 0) throw new Error('Pick a plan to test');
-  const amount = 100 + 10 * (r + 1);
-  return { plan, bill: 'mo', currency: 'INR', units: 1, users: 0, base: 1, gst: 0, total: amount / 100, amount, test: true };
+  const cur = String(currency || 'INR').toUpperCase();
+  const amount = testAmount(cur, price === undefined || price === null || price === '' ? defaultTestAmount(plan) : price);
+  return { plan, bill: 'mo', currency: cur, units: 1, users: 0, base: 1, gst: 0, total: amount / 100, amount, test: true };
 }
 
 /** What a test upgrade to this plan costs, once: that plan's own price (Rs 1.20 for Solo). Paise. */
-export function upgradeAmount(plan) {
-  return testQuote(plan).amount;
+export function upgradeAmount(plan, opts) {
+  return testQuote(plan, opts).amount;
 }
 
 /** The plan one step up and one step down from this one ('' at either end). */
@@ -46,16 +66,18 @@ export function stepsFrom(plan) {
   return { up: r >= 0 ? (TEST_PLANS[r + 1] || '') : '', down: r > 0 ? TEST_PLANS[r - 1] : '' };
 }
 
-const rupees = (paise) => `₹${(paise / 100).toFixed(2)}`;
+/** "INR 1.10" or "USD 0.50". */
+export const money = (currency, minor) => `${currency} ${(minor / 100).toFixed(2)}`;
 
-/** The monthly price of a plan's test subscription: "₹1.10". */
-export function testPrice(plan) {
-  return rupees(testQuote(plan).amount);
+/** The monthly price of a plan's test subscription: "INR 1.10". */
+export function testPrice(plan, opts) {
+  const q = testQuote(plan, opts);
+  return money(q.currency, q.amount);
 }
 
-/** The one-time price of a test upgrade to a plan, the same as its own price: "₹1.20" for Solo. */
-export function upgradePrice(plan) {
-  return rupees(upgradeAmount(plan));
+/** The one-time price of a test upgrade to a plan, the same as its own price: "INR 1.20" for Solo. */
+export function upgradePrice(plan, opts) {
+  return testPrice(plan, opts);
 }
 
 /**
@@ -148,4 +170,4 @@ export function billingMail({ kind, plan = '', from = '', workspace = '', email 
   throw new Error(`unknown billing email: ${kind}`);
 }
 
-export default { TEST_CANCELLED_KEY, subscribeState, TEST_PLANS, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, upgradeAmount, upgradePrice, stepsFrom, rowActions, orderSigOk, billingMail };
+export default { TEST_CURRENCIES, defaultTestAmount, testAmount, money, TEST_CANCELLED_KEY, subscribeState, TEST_PLANS, TEST_SUBS_KEY, TEST_ORDER_PREFIX, rankOf, testQuote, testPrice, upgradeAmount, upgradePrice, stepsFrom, rowActions, orderSigOk, billingMail };

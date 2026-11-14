@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { subscribeState, TEST_PLANS, rankOf, testQuote, testPrice, upgradePrice, stepsFrom, rowActions, orderSigOk, billingMail } from '../src/utils/billingTestSpec.js';
+import { testAmount, defaultTestAmount, subscribeState, TEST_PLANS, rankOf, testQuote, testPrice, upgradePrice, stepsFrom, rowActions, orderSigOk, billingMail } from '../src/utils/billingTestSpec.js';
 import { planKey, readPlanKey } from '../src/utils/billingSpec.js';
 import { planBody, testPayments } from '../src/utils/planPage.js';
 
@@ -12,12 +12,24 @@ describe('Rs 1 test payments', () => {
 
   it('charges each plan its own small price, and the plan key still names the plan', () => {
     expect(TEST_PLANS.map((p) => testQuote(p).amount)).toEqual([110, 120, 130, 140, 150, 160]);
-    expect(testPrice('lite')).toBe('₹1.10');
-    expect(upgradePrice('solo')).toBe('₹1.20');
+    expect(testPrice('lite')).toBe('INR 1.10');
+    expect(upgradePrice('solo')).toBe('INR 1.20');
     const q = testQuote('growth');
     expect(q).toMatchObject({ currency: 'INR', amount: 150, total: 1.5, gst: 0, bill: 'mo' });
     expect(readPlanKey(planKey(q))).toMatchObject({ plan: 'growth', units: 1, users: 0 });
     expect(() => testQuote('custom')).toThrow();
+  });
+
+  it('takes INR or USD and a typed amount in range', () => {
+    expect(defaultTestAmount('lite')).toBe(1.1);
+    expect(testQuote('lite', { currency: 'USD', price: '0.50' })).toMatchObject({ currency: 'USD', amount: 50 });
+    expect(testQuote('solo', { currency: 'INR', price: '' }).amount).toBe(120);
+    expect(testPrice('agency', { currency: 'USD', price: 2 })).toBe('USD 2.00');
+    expect(() => testAmount('INR', '0.50')).toThrow(/1.00 to 100.00/);
+    expect(() => testAmount('USD', '0.49')).toThrow();
+    expect(() => testAmount('USD', '100.01')).toThrow();
+    expect(() => testAmount('EUR', '1')).toThrow();
+    expect(testAmount('USD', '0.5')).toBe(50);
   });
 
   it('makes only the current plan row live: one step up, one step down, cancel', () => {
@@ -40,8 +52,8 @@ describe('Rs 1 test payments', () => {
     expect(subscribeState('growth', [paid, failed])).toEqual({ kind: 'new' });
     const html = testPayments([paid, failed]);
     expect(html).toContain('Paid till 15-12-2026');
-    expect(html).toContain('Pay again ₹1.20');
-    expect(html).toContain('Subscribe ₹1.30');
+    expect(html).toContain('Pay again INR 1.20');
+    expect(html).toContain('Subscribe INR 1.30');
     expect(billingMail({ kind: 'renewed', plan: 'solo', workspace: 'w', until: '15-12-2026' }).text).toContain('15-12-2026');
   });
 
@@ -67,9 +79,11 @@ describe('Rs 1 test payments', () => {
   it('shows one row per plan with all four buttons, for the owner only', () => {
     const html = testPayments([{ tenantId: 't1', name: 'Test lite', email: 'a@b.co', plan: 'lite', ended: false, until: '12-12-2026' }]);
     expect((html.match(/<tr data-plan=/g) || []).length).toBe(6);
+    expect((html.match(/class="tp-cur"/g) || []).length).toBe(6);
+    expect(html).toContain('value="1.60"');
     expect((html.match(/data-do="upgrade"/g) || []).length).toBe(5);
     expect((html.match(/data-do="downgrade"/g) || []).length).toBe(5);
-    for (const b of ['Paid till 12-12-2026', 'Subscribe ₹1.20', 'Subscribe ₹1.60', 'Upgrade to Solo ₹1.20', 'Upgrade to Agency ₹1.60', 'Downgrade to Starter Lite', 'Downgrade to Growth', 'Cancel']) expect(html).toContain(b);
+    for (const b of ['Paid till 12-12-2026', 'Subscribe INR 1.20', 'Subscribe INR 1.60', 'Upgrade to Solo INR 1.20', 'Upgrade to Agency INR 1.60', 'Downgrade to Starter Lite', 'Downgrade to Growth', 'Cancel']) expect(html).toContain(b);
     const owner = planBody({ superAdmin: true, pay: { keyId: '', tests: [] }, origin: 'https://x' });
     expect(owner).toContain('test-payments');
     expect(planBody({ superAdmin: false })).not.toContain('test-payments');

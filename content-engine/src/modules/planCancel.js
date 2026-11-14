@@ -139,13 +139,15 @@ export function register(ctx) {
   });
 
   // Owner only: test payments on every plan with the live keys (Payments).
+  // The currency and amount typed on the row; blank means the plan's default.
+  const price = (b) => ({ currency: String(b.currency || 'INR').toUpperCase(), price: b.price === undefined ? undefined : String(b.price) });
   const TEST_STEPS = {
-    subscribe: (b) => billingTest.startSubscribe({ plan: String(b.plan || ''), name: String(b.name || ''), email: String(b.email || ''), phone: String(b.phone || '') }),
-    upgrade: (b) => billingTest.startUpgrade({ tenantId: String(b.tenantId || ''), plan: String(b.plan || '') }),
+    subscribe: (b) => billingTest.startSubscribe({ plan: String(b.plan || ''), name: String(b.name || ''), email: String(b.email || ''), phone: String(b.phone || ''), ...price(b) }),
+    upgrade: (b) => billingTest.startUpgrade({ tenantId: String(b.tenantId || ''), plan: String(b.plan || ''), ...price(b) }),
     'upgrade-paid': (b) => billingTest.confirmUpgrade({ orderId: String(b.orderId || ''), paymentId: String(b.paymentId || ''), signature: String(b.signature || '') }),
-    downgrade: (b) => billingTest.downgrade({ tenantId: String(b.tenantId || ''), plan: String(b.plan || '') }),
+    downgrade: (b) => billingTest.downgrade({ tenantId: String(b.tenantId || ''), plan: String(b.plan || ''), ...price(b) }),
     cancel: (b) => billingTest.cancel({ tenantId: String(b.tenantId || '') }),
-    renew: (b) => billingTest.startRenew({ tenantId: String(b.tenantId || '') }),
+    renew: (b) => billingTest.startRenew({ tenantId: String(b.tenantId || ''), ...price(b) }),
     'renew-paid': (b) => billingTest.confirmRenew({ paymentId: String(b.paymentId || ''), subscriptionId: String(b.subscriptionId || ''), signature: String(b.signature || '') }),
   };
   router.post('/admin/plan/test/:step', async (req, res) => {
