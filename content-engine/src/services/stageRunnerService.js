@@ -108,11 +108,22 @@ async function genImage(providers, cfg, prompt, size) {
 async function genRaw(providers, cfg, prompt, size) {
   const choice = String(cfg.image_provider || 'auto').toLowerCase();
   const r = providers.resolved || {};
-  if (choice === 'gemini') return providers.llm.generateImageGemini({ prompt });
   if (choice === 'openai') return providers.llm.generateImage({ prompt, size });
-  if (!r.openai?.apiKey && r.gemini?.apiKey) return providers.llm.generateImageGemini({ prompt });
+  if (choice === 'gemini' || (!r.openai?.apiKey && r.gemini?.apiKey)) {
+    try {
+      return await providers.llm.generateImageGemini({ prompt });
+    } catch (err) {
+      // Gemini out of quota (limit 0 on the Free Tier, or the day spent): draw
+      // with OpenAI when its key is set, instead of failing the whole video.
+      if (!err.geminiQuota || !r.openai?.apiKey) throw err;
+      log.warn({ reason: err.message }, 'Gemini image quota refused, drawing with OpenAI');
+      return providers.llm.generateImage({ prompt, size });
+    }
+  }
   return providers.llm.generateImage({ prompt, size });
 }
+
+export const _test = { genRaw };
 
 /**
  * The daily router's marks on a Lane 2 instance (script artifacts): the

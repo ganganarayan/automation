@@ -17,6 +17,9 @@
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ExternalAPIError } from '../core/errors.js';
+import { geminiQuotaOf, geminiQuotaReason, quotaRetryWait } from '../utils/geminiQuota.js';
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * @param {object} cfg - { openai: {apiKey, imageModel, textModel}, gemini: {apiKey, imageModel} }
@@ -149,10 +152,33 @@ export function createLlmProvider(cfg, log) {
       return { ...(await this.generateJsonDetailed({ system, user, images, maxTokens })), provider: 'openai' };
     },
 
+    /**
+     * A 429 is read in plain words: a per-minute limit waits Google's retry
+     * delay and tries once more; limit 0 or a spent daily quota throws at once
+     * with the reason, and err.geminiQuota set so a caller can switch provider.
+     */
     async generateImageGemini({ prompt, model }) {
       if (!gemini) throw new ExternalAPIError('Gemini not configured (GEMINI_API_KEY missing)');
       const m = gemini.getGenerativeModel({ model: model || cfg.gemini.imageModel });
-      const res = await m.generateContent(prompt);
+      let res;
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          res = await m.generateContent(prompt);
+          break;
+        } catch (err) {
+          const q = geminiQuotaOf(err);
+          if (!q) throw err;
+          const wait = attempt === 0 ? quotaRetryWait(q) : null;
+          if (wait != null) {
+            log?.warn?.({ wait, model: q.model }, 'Gemini per-minute limit, waiting once');
+            await sleep(wait * 1000);
+            continue;
+          }
+          const e = new ExternalAPIError(geminiQuotaReason(q), { status: 429, cause: err });
+          e.geminiQuota = q;
+          throw e;
+        }
+      }
       const parts = res.response?.candidates?.[0]?.content?.parts || [];
       for (const p of parts) {
         if (p.inlineData?.data) return Buffer.from(p.inlineData.data, 'base64');
