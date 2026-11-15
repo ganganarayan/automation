@@ -54,7 +54,7 @@ import { createTtsProvider } from '../providers/ttsProvider.js';
 import { costImages, costAnimation, costTts, costClaude } from '../utils/pricing.js';
 import sharp from 'sharp';
 import { LEAN_VOICE_MODEL, FULL_VOICE_MODEL } from '../utils/planSpec.js';
-import { placeText, drawText } from './textPlaceService.js';
+import { placeChecked, drawText } from './textPlaceService.js';
 import { eyebrowClean } from '../utils/thumbSpec.js';
 import { SPLIT_SCHEMA, splitSystem, splitUser, splitResult } from '../utils/imageSplitSpec.js';
 import { totalClipSeconds } from '../utils/stageSpec.js';
@@ -365,7 +365,7 @@ async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
     const tag = eyebrowClean(split.tag);
     const sub = split.sub;
     const notes = [];
-    const places = await placeText({ claude: providers.claude, pictures: pics, text: split.headline, sub, tag, bottomClear: SUB_CLEAR, costs, notes, log });
+    const places = await placeChecked({ claude: providers.claude, pictures: pics, text: split.headline, sub, tag, bottomClear: SUB_CLEAR, costs, notes, log });
     if (notes.length) log.warn({ instance: instanceId, notes }, 'image post text in the fixed top band for some sizes');
     for (const [size, p] of Object.entries(pics)) {
       const png = await drawText(p.buf, { text: split.headline, sub, tag, place: places[size] || null });

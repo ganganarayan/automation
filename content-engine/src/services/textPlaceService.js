@@ -1,71 +1,168 @@
 /**
- * Text on a finished picture, put where the picture is empty.
+ * Text on a finished picture, put where the picture is empty, then checked.
  *
  * Purpose:      Pictures are drawn with no text. Claude looks at them once and
  *               marks, for each, the subject and the calm empty box; the app
- *               writes the words into that box. Used by Ready video thumbnails
- *               and by image posts.
+ *               writes the words into that box. Claude then looks once at the
+ *               finished picture: when text touches a face, the picture without
+ *               text is read once more, keeping clear of the faces it found,
+ *               and checked once more. Never more: at most four Claude calls,
+ *               and the picture itself is never drawn again. Used by Ready video
+ *               thumbnails and by image posts.
  * Responsibility:
- *               - placeText({ claude, pictures, text, sub, tag, bottomClear, costs, notes, log }): key -> checked box;
- *                 every size left without a box gets a note (shown on the page), never silence
- *               - placeNoteText(notes): those notes as one line for the page
+ *               - placeChecked({ claude, pictures, text, sub, tag, bottomClear, costs, notes, log }):
+ *                 key -> box, null (fixed layout) or { none: true } (no text on the picture);
+ *                 anything not proven clear of faces gets a note (shown on the page)
+ *               - placeText({ claude, pictures, text, ..., avoid, hints, last, raws }): one placement call
+ *               - checkText({ claude, pictures, places, text, ... }): one look at the finished pictures
+ *               - placeNoteText(notes): the notes as one line for the page
  *               - drawText(buf, { text, sub, tag, place, accent }): the picture with the words on it (PNG)
  * Dependencies: sharp, thumbPlaceSpec, thumbSpec, pricing.
  */
 import sharp from 'sharp';
-import { PLACE_SCHEMA, placeSystem, placeUser, placeFor, placeWhyNot } from '../utils/thumbPlaceSpec.js';
+import { PLACE_SCHEMA, placeSystem, placeUser, placeFor, placeWhyNot, CHECK_SCHEMA, checkSystem, checkUser, checkFor, overlapShare } from '../utils/thumbPlaceSpec.js';
 import { thumbSvg, thumbSvgPlaced, textLayer, THUMB_ACCENT } from '../utils/thumbSpec.js';
 import { costClaude } from '../utils/pricing.js';
 
+const small = async (buf) => (await sharp(buf).resize({ width: 768, height: 768, fit: 'inside' }).jpeg({ quality: 80 }).toBuffer()).toString('base64');
+
 /**
- * pictures: { key: { buf, w, h, label } }. One Claude call for all of them.
- * Returns key -> box. A key missing keeps the fixed top layout, which knows
- * nothing about the picture and can sit on a face: so each one also gets a
- * note { size, label, reason } pushed onto `notes`, for the page to show.
- * bottomClear: share of the height kept free (subtitles).
+ * One placement call. pictures: { key: { buf, w, h, label, layout? } }.
+ * Returns key -> box; a key missing keeps the fixed top layout and gets a note
+ * { size, label, reason } on `notes`. avoid: key -> pixel boxes the text must
+ * not touch (faces found by the check); hints: key -> what the last try got
+ * wrong; last: the final try (a smaller box rather than none); raws: filled
+ * with the model's answer per key. bottomClear: share of the height kept free.
  */
-export async function placeText({ claude, pictures, text, sub = '', tag = '', bottomClear = 0, costs = [], notes = [], log }) {
+export async function placeText({ claude, pictures, text, sub = '', tag = '', bottomClear = 0, costs = [], notes = [], log, avoid = {}, hints = {}, last = false, raws = {} }) {
   const entries = Object.entries(pictures || {});
   if (!entries.length || !String(text || '').trim()) return {};
   const note = (size, reason) => notes.push({ size, label: (pictures[size] && pictures[size].label) || size, reason });
   if (!claude) {
-    for (const [size] of entries) note(size, 'no Claude key, so the text could not be placed from the picture');
+    for (const [size] of entries) note(size, 'no Claude key, so the text is in the fixed top band and was not checked for faces');
     return {};
   }
   try {
-    const items = await Promise.all(entries.map(async ([size, p]) => {
-      const small = await sharp(p.buf).resize({ width: 768, height: 768, fit: 'inside' }).jpeg({ quality: 80 }).toBuffer();
-      return { size, label: p.label, w: p.w, h: p.h, b64: small.toString('base64') };
-    }));
+    const items = await Promise.all(entries.map(async ([size, p]) => ({ size, label: p.label, w: p.w, h: p.h, b64: await small(p.buf), hint: hints[size] || '' })));
     const { data, model, usage } = await claude.generateJsonDetailed({ system: placeSystem({ bottomClear }), user: placeUser(items, { text, sub, tag }), schema: PLACE_SCHEMA, maxTokens: 8000 });
     costs.push({ step: 'images', ...costClaude({ ...usage, model }) });
     const answers = new Map(((data && data.sizes) || []).filter((r) => r && pictures[r.size]).map((r) => [r.size, r]));
     const out = {};
     for (const [size, p] of entries) {
       const raw = answers.get(size) || null;
-      const place = placeFor(raw, { w: p.w, h: p.h, bottomClear });
+      raws[size] = raw;
+      const place = placeFor(raw, { w: p.w, h: p.h, bottomClear, avoid: avoid[size] || [], last });
       if (place) {
         out[size] = place;
         if (place.how !== 'picked') log?.info?.({ size, how: place.how, raw }, 'text box moved off the subject');
       } else {
-        note(size, placeWhyNot(raw, { w: p.w, h: p.h }));
-        log?.warn?.({ size, raw }, 'no free text box, fixed layout used (shown on the page)');
+        note(size, `${placeWhyNot(raw, { w: p.w, h: p.h })}, so the text is in the fixed top band`);
+        log?.warn?.({ size, raw }, 'no free text box, fixed layout used');
       }
     }
-    log?.info?.({ placed: Object.keys(out) }, 'text placed from the picture');
+    log?.info?.({ placed: Object.keys(out), last }, 'text placed from the picture');
     return out;
   } catch (err) {
-    for (const [size] of entries) note(size, `the placement check failed (${err.message})`);
-    log?.warn?.({ err: err.message }, 'text placement failed, fixed layout used (shown on the page)');
-    return {};
+    // The call failed: on a last try the faces already found still give a place.
+    const out = {};
+    for (const [size, p] of entries) {
+      const place = (avoid[size] || []).length ? placeFor(null, { w: p.w, h: p.h, bottomClear, avoid: avoid[size], last }) : null;
+      if (place) out[size] = place;
+      else note(size, `the placement call failed (${err.message}), so the text is in the fixed top band`);
+    }
+    log?.warn?.({ err: err.message }, 'text placement failed');
+    return out;
   }
 }
 
-/** The notes from placeText as one line for the page; '' when every size was placed. */
+/**
+ * One look at the finished pictures (the text drawn as it will be posted).
+ * Returns key -> { ok, faces, problem }, or null when the call failed. ok is
+ * false when Claude says the text touches a face, or when a face it marked
+ * lies under the drawn letters (measured, not taken on trust).
+ */
+export async function checkText({ claude, pictures, places, text, sub = '', tag = '', accent = THUMB_ACCENT, costs = [], log }) {
+  const entries = Object.entries(pictures || {});
+  if (!claude || !entries.length) return null;
+  try {
+    const drawn = await Promise.all(entries.map(async ([size, p]) => {
+      const svg = await fittedOverlay({ w: p.w, h: p.h, text, sub, tag, accent, place: places[size] || null, layout: p.layout || 'top' });
+      const buf = await sharp(p.buf).resize(p.w, p.h, { fit: 'fill' }).composite([{ input: Buffer.from(svg) }]).png().toBuffer();
+      return { size, label: p.label, w: p.w, h: p.h, b64: await small(buf), ink: await inkBox(svg) };
+    }));
+    const { data, model, usage } = await claude.generateJsonDetailed({ system: checkSystem(), user: checkUser(drawn, { text }), schema: CHECK_SCHEMA, maxTokens: 4000 });
+    costs.push({ step: 'images', ...costClaude({ ...usage, model }) });
+    const answers = new Map(((data && data.sizes) || []).filter((r) => r && pictures[r.size]).map((r) => [r.size, r]));
+    const out = {};
+    for (const d of drawn) {
+      const seen = checkFor(answers.get(d.size), { w: d.w, h: d.h }) || { ok: false, faces: [], problem: 'the check gave no answer for this size' };
+      const under = d.ink ? seen.faces.some((f) => overlapShare(f, d.ink) > 0.1) : false;
+      out[d.size] = { ok: seen.ok && !under, faces: seen.faces, problem: seen.problem || (under ? 'a face lies under the text' : '') };
+    }
+    log?.info?.({ check: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.ok])) }, 'finished text checked');
+    return out;
+  } catch (err) {
+    log?.warn?.({ err: err.message }, 'text check failed');
+    return null;
+  }
+}
+
+/**
+ * Place, draw, check; when text touches a face, place once more (the picture
+ * without text, read again, keeping clear of every face found) and check once
+ * more. Then stop: a size still failing is moved clear of every face either
+ * check found, with no further AI call, or gets no text at all when no space
+ * is clear. Returns key -> box, null (fixed top layout) or { none: true }.
+ * Every size not proven clear gets a note on `notes`, for the page.
+ */
+export async function placeChecked({ claude, pictures, text, sub = '', tag = '', bottomClear = 0, accent = THUMB_ACCENT, costs = [], notes = [], log }) {
+  const entries = Object.entries(pictures || {});
+  if (!entries.length || !String(text || '').trim()) return {};
+  const note = (size, reason) => notes.push({ size, label: (pictures[size] && pictures[size].label) || size, reason });
+  const first = [];
+  const places = await placeText({ claude, pictures, text, sub, tag, bottomClear, costs, notes: first, log });
+  if (!claude) { notes.push(...first); return places; }
+  const look1 = await checkText({ claude, pictures, places, text, sub, tag, accent, costs, log });
+  if (!look1) {
+    notes.push(...first);
+    for (const [size] of entries) if (!first.some((n) => n.size === size)) note(size, 'the check after drawing failed, so this one was not checked for faces');
+    return places;
+  }
+  const bad = entries.filter(([size]) => !look1[size].ok).map(([size]) => size);
+  if (!bad.length) return places;
+
+  // The one more try, for the sizes that failed only.
+  const again = Object.fromEntries(bad.map((size) => [size, pictures[size]]));
+  const avoid = Object.fromEntries(bad.map((size) => [size, look1[size].faces]));
+  const hints = Object.fromEntries(bad.map((size) => [size, `the text placed last time covered ${look1[size].problem || 'a face'}. Pick an area well away from every face and head.`]));
+  const raws = {};
+  const second = [];
+  const retry = await placeText({ claude, pictures: again, text, sub, tag, bottomClear, costs, notes: second, log, avoid, hints, last: true, raws });
+  for (const size of bad) places[size] = retry[size] || (look1[size].faces.length ? { none: true } : null);
+  const shown = Object.fromEntries(bad.filter((size) => !(places[size] && places[size].none)).map((size) => [size, pictures[size]]));
+  const look2 = Object.keys(shown).length ? await checkText({ claude, pictures: shown, places, text, sub, tag, accent, costs, log }) : {};
+  for (const size of bad) {
+    const p = pictures[size];
+    if (places[size] && places[size].none) { note(size, `no space clear of the faces after a second try, so the picture has no text on it (${look1[size].problem || 'text on a face'})`); continue; }
+    if (!look2) { note(size, 'moved off a face on the second try, but the second check failed, so it was not checked again'); continue; }
+    if (look2[size] && look2[size].ok) { log?.info?.({ size }, 'text fixed on the second try'); continue; }
+    // Stop here: no third call. Clear of every face either look found, or no text.
+    const faces = [...look1[size].faces, ...((look2[size] && look2[size].faces) || [])];
+    const place = placeFor(raws[size] || null, { w: p.w, h: p.h, bottomClear, avoid: faces, last: true });
+    places[size] = place || { none: true };
+    note(size, place
+      ? `still on a face after the second try (${(look2[size] && look2[size].problem) || 'text on a face'}), moved clear of every face found, not checked a third time`
+      : `still on a face after the second try, and no space is clear of the faces, so the picture has no text on it`);
+  }
+  log?.warn?.({ sizes: bad, notes: notes.length }, 'text over a face on the first try, placed again');
+  return places;
+}
+
+/** The notes from placeChecked as one line for the page; '' when every size is clear. */
 export function placeNoteText(notes = []) {
   if (!notes.length) return '';
   const parts = notes.map((n) => `${n.label}: ${n.reason}`);
-  return `Text drawn in the fixed top band, check it is not over a face. ${[...new Set(parts)].join('; ')}`;
+  return `Check the text on these thumbnails. ${[...new Set(parts)].join('; ')}`;
 }
 
 /** Where the drawn letters really are: the bounding box of every visible pixel, or null. */
@@ -108,6 +205,7 @@ export function shrinkFor(ink, box, w, h) {
  * never split: a long word makes the text smaller, not broken.
  */
 export async function fittedOverlay({ w, h, text, sub = '', tag = '', accent = THUMB_ACCENT, place = null, layout = 'top' }) {
+  if (place && place.none) return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"></svg>`;
   let shrink = 1;
   for (let i = 0; i < 5; i += 1) {
     const { box, svg } = textLayer({ w, h, text, sub, tag, accent, place, layout, shrink });
@@ -120,11 +218,11 @@ export async function fittedOverlay({ w, h, text, sub = '', tag = '', accent = T
     : thumbSvg({ w, h, text, sub, tag, accent, layout, shrink });
 }
 
-/** The words over a picture at its own size: in the box, else the fixed top layout. PNG. */
+/** The words over a picture at its own size: in the box, else the fixed top layout; none = no words. PNG. */
 export async function drawText(buf, { text, sub = '', tag = '', place = null, accent = THUMB_ACCENT }) {
   const { width: w, height: h } = await sharp(buf).metadata();
   const svg = await fittedOverlay({ w, h, text, sub, tag, accent, place, layout: 'top' });
   return sharp(buf).composite([{ input: Buffer.from(svg) }]).png().toBuffer();
 }
 
-export default { placeText, placeNoteText, drawText, fittedOverlay, shrinkFor, inkBox };
+export default { placeChecked, placeText, checkText, placeNoteText, drawText, fittedOverlay, shrinkFor, inkBox };

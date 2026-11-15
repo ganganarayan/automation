@@ -15,6 +15,9 @@
  *               - placeFor(raw, { w, h }): a checked box in pixels (with how it was found), or null
  *               - placeWhyNot(raw, { w, h }): why placeFor gave null, in words
  *               - overlapShare(a, b): how much of box a lies on box b
+ *               - freeParts(rect, blocks, { w, h }): the parts of rect clear of every block
+ *               - CHECK_SCHEMA, checkSystem(), checkUser(items, { text }): the look at the
+ *                 finished thumbnail (text on a face?), and checkFor(raw, { w, h }) its answer in pixels
  * Dependencies: none.
  */
 
@@ -52,6 +55,9 @@ export const PLACE_SCHEMA = {
 // narrow box wraps the headline onto more lines; it never puts it on a face.
 const MIN_W = 0.22;
 const MIN_H = 0.14;
+// The last try only: a smaller box (smaller letters) beats text on a face.
+const LAST_W = 0.12;
+const LAST_H = 0.08;
 const EDGE = 0.03; // kept clear on every side
 const MAX_OVERLAP = 0.06; // of the text box allowed on the subject
 const GAP = 0.015; // kept between the subject and text moved off it
@@ -70,7 +76,7 @@ export function placeSystem({ bottomClear = 0 } = {}) {
   ].filter(Boolean).join('\n');
 }
 
-/** items: [{ size, label, w, h, b64 }] (JPEG base64). Returns the user content blocks. */
+/** items: [{ size, label, w, h, b64, hint? }] (JPEG base64; hint = what the last try got wrong). Returns the user content blocks. */
 export function placeUser(items, { text = '', sub = '', tag = '' } = {}) {
   const words = [
     `Headline: "${String(text).trim()}"`,
@@ -79,7 +85,7 @@ export function placeUser(items, { text = '', sub = '', tag = '' } = {}) {
   ].filter(Boolean).join('\n');
   const blocks = [{ type: 'text', text: `${words}\n\nReturn one entry per image, in this order, with its size name.` }];
   for (const it of items) {
-    blocks.push({ type: 'text', text: `Image "${it.size}" (${it.label}, ${it.w}x${it.h}):` });
+    blocks.push({ type: 'text', text: `Image "${it.size}" (${it.label}, ${it.w}x${it.h}):${it.hint ? `\nSecond try: ${it.hint}` : ''}` });
     blocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: it.b64 } });
   }
   return blocks;
@@ -114,47 +120,64 @@ function frameFor(w, h, bottomClear) {
 }
 
 const clip = (b, f) => ({ x0: Math.max(b.x0, f.x0), y0: Math.max(b.y0, f.y0), x1: Math.min(b.x1, f.x1), y1: Math.min(b.y1, f.y1) });
+const touches = (a, b) => Math.min(a.x1, b.x1) > Math.max(a.x0, b.x0) && Math.min(a.y1, b.y1) > Math.max(a.y0, b.y0);
 
-/** The four parts of box b that lie fully left of, right of, above and below the subject. */
-function sidesOff(b, s, w, h) {
+/**
+ * The parts of rect that touch none of the blocks (with a small gap): each block
+ * splits every part it touches into the pieces left of, right of, above and
+ * below it. Parts too small to matter are dropped as it goes. Pure.
+ */
+export function freeParts(rect, blocks, { w, h, minW = 0, minH = 0 }) {
   const gx = w * GAP; const gy = h * GAP;
-  return [
-    { ...b, x1: Math.min(b.x1, s.x0 - gx) },
-    { ...b, x0: Math.max(b.x0, s.x1 + gx) },
-    { ...b, y1: Math.min(b.y1, s.y0 - gy) },
-    { ...b, y0: Math.max(b.y0, s.y1 + gy) },
-  ];
+  let parts = [rect];
+  for (const s of blocks.filter(Boolean)) {
+    const next = [];
+    for (const b of parts) {
+      if (!touches(b, { x0: s.x0 - gx, y0: s.y0 - gy, x1: s.x1 + gx, y1: s.y1 + gy })) { next.push(b); continue; }
+      next.push({ ...b, x1: Math.min(b.x1, s.x0 - gx) }, { ...b, x0: Math.max(b.x0, s.x1 + gx) }, { ...b, y1: Math.min(b.y1, s.y0 - gy) }, { ...b, y0: Math.max(b.y0, s.y1 + gy) });
+    }
+    parts = next.filter((b) => b.x1 - b.x0 >= minW && b.y1 - b.y0 >= minH).slice(0, 400);
+  }
+  return parts;
 }
+
+const largest = (parts) => parts.sort((a, b) => areaOf(b) - areaOf(a))[0] || null;
 
 /**
  * The checked text box for one size, in pixels: { x0, y0, x1, y1, align, color, how },
  * how = 'picked' (the model's box as it was), 'trimmed' (cut back off the
  * subject) or 'beside' (the widest free strip next to the subject, when the
- * model's own box was unusable). null when the model gave nothing usable and no
- * strip beside the subject is big enough: the caller must then say so.
+ * model's own box was unusable). avoid: more boxes in pixels the text must not
+ * touch at all (faces the check found on the last try). last: the final try,
+ * which also takes a smaller box rather than none. null when nothing is free:
+ * the caller must then say so.
  */
-export function placeFor(raw, { w, h, bottomClear = 0 }) {
-  if (!raw) return null;
+export function placeFor(raw, { w, h, bottomClear = 0, avoid = [], last = false }) {
+  const away = (avoid || []).filter(Boolean);
+  if (!raw && !away.length) return null;
   const frame = frameFor(w, h, bottomClear);
-  const subject = toPx(raw.subject, w, h);
-  const big = (b) => b.x1 - b.x0 >= w * MIN_W && b.y1 - b.y0 >= h * MIN_H;
-  const clear = (b) => overlapShare(b, subject) <= MAX_OVERLAP;
-  const fits = (b) => big(b) && clear(b);
-  const picked = toPx(raw.text, w, h);
+  const subject = raw ? toPx(raw.subject, w, h) : null;
+  const blocks = [subject, ...away].filter(Boolean);
+  const picked = raw ? toPx(raw.text, w, h) : null;
+  const clear = (b) => overlapShare(b, subject) <= MAX_OVERLAP && away.every((a) => !touches(b, a));
   let box = null;
   let how = '';
-  if (picked && fits(clip(picked, frame))) { box = clip(picked, frame); how = 'picked'; }
-  if (!box && picked && subject) {
-    const trims = sidesOff(clip(picked, frame), subject, w, h).filter(fits).sort((a, b) => areaOf(b) - areaOf(a));
-    if (trims.length) { box = trims[0]; how = 'trimmed'; }
-  }
-  if (!box && subject) {
-    const strips = sidesOff(frame, subject, w, h).filter(fits).sort((a, b) => areaOf(b) - areaOf(a));
-    if (strips.length) { box = strips[0]; how = 'beside'; }
+  for (const [mw, mh] of last ? [[MIN_W, MIN_H], [LAST_W, LAST_H]] : [[MIN_W, MIN_H]]) {
+    const minW = w * mw; const minH = h * mh;
+    const big = (b) => b.x1 - b.x0 >= minW && b.y1 - b.y0 >= minH;
+    if (picked && big(clip(picked, frame)) && clear(clip(picked, frame))) { box = clip(picked, frame); how = 'picked'; break; }
+    if (picked && blocks.length) {
+      box = largest(freeParts(clip(picked, frame), blocks, { w, h, minW, minH }));
+      if (box) { how = 'trimmed'; break; }
+    }
+    if (blocks.length) {
+      box = largest(freeParts(frame, blocks, { w, h, minW, minH }));
+      if (box) { how = 'beside'; break; }
+    }
   }
   if (!box) return null;
-  const align = ['left', 'center', 'right'].includes(raw.align) ? raw.align : 'center';
-  const color = raw.color === 'dark' ? 'dark' : 'light';
+  const align = raw && ['left', 'center', 'right'].includes(raw.align) ? raw.align : 'center';
+  const color = raw && raw.color === 'dark' ? 'dark' : 'light';
   return { x0: Math.round(box.x0), y0: Math.round(box.y0), x1: Math.round(box.x1), y1: Math.round(box.y1), align, color, how };
 }
 
@@ -165,4 +188,55 @@ export function placeWhyNot(raw, { w, h }) {
   return 'the subject fills the picture: no free area is big enough for the headline';
 }
 
-export default { PLACE_SCHEMA, placeSystem, placeUser, placeFor, placeWhyNot, overlapShare };
+// The look at the finished thumbnail: is any text on a face?
+export const CHECK_SCHEMA = {
+  type: 'object',
+  properties: {
+    sizes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          size: { type: 'string' },
+          ok: { type: 'boolean' },
+          faces: { type: 'array', items: pctBox },
+          problem: { type: 'string' },
+        },
+        required: ['size', 'ok', 'faces', 'problem'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['sizes'],
+  additionalProperties: false,
+};
+
+export function checkSystem() {
+  return [
+    'You check finished social media thumbnails before they are posted. The app wrote text on each picture.',
+    'For each image, return:',
+    '- faces: one box around every face and head in the picture (people and animals), in percent of that image (x, y = top-left corner; w, h = size; 0 to 100). An empty list when there are none.',
+    '- ok: true only when no letter of the text covers or touches any face, eyes, mouth or head, nor hands or the main product. Text on plain background, wall, table, sky or blur is fine.',
+    '- problem: when ok is false, say in a few words what the text covers; else an empty string.',
+    'Judge each image on its own.',
+  ].join('\n');
+}
+
+/** items: [{ size, label, w, h, b64 }] finished thumbnails (JPEG base64). */
+export function checkUser(items, { text = '' } = {}) {
+  const blocks = [{ type: 'text', text: `The headline written on them: "${String(text).trim()}"\n\nReturn one entry per image, in this order, with its size name.` }];
+  for (const it of items) {
+    blocks.push({ type: 'text', text: `Image "${it.size}" (${it.label}, ${it.w}x${it.h}):` });
+    blocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: it.b64 } });
+  }
+  return blocks;
+}
+
+/** One size's check answer: { ok, faces: [pixel boxes], problem }; null when unusable. */
+export function checkFor(raw, { w, h }) {
+  if (!raw || typeof raw.ok !== 'boolean') return null;
+  const faces = (Array.isArray(raw.faces) ? raw.faces : []).map((b) => toPx(b, w, h)).filter((b) => b && areaOf(b) > 0);
+  return { ok: raw.ok, faces, problem: String(raw.problem || '').slice(0, 200) };
+}
+
+export default { PLACE_SCHEMA, placeSystem, placeUser, placeFor, placeWhyNot, overlapShare, freeParts, CHECK_SCHEMA, checkSystem, checkUser, checkFor };

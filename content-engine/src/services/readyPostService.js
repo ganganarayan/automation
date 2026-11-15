@@ -55,7 +55,7 @@ import * as imageShort from './imageShortService.js';
 import { shortTitle } from '../utils/shortSpec.js';
 import { stepDownOf } from '../utils/stepDownSpec.js';
 import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbArt, thumbImagePrompt, eyebrowClean, IMAGE_PROMPT_MAX } from '../utils/thumbSpec.js';
-import { placeText, placeNoteText, fittedOverlay } from './textPlaceService.js';
+import { placeChecked, placeNoteText, fittedOverlay } from './textPlaceService.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
 import sharp from 'sharp';
@@ -761,10 +761,14 @@ async function composeThumb(picture, spec, { text, sub = '', tag = '', place = n
   return sharp(picture).composite([{ input: Buffer.from(svg) }]).jpeg({ quality: 90 }).toBuffer();
 }
 
-/** Claude marks where the text fits on each size (textPlaceService); a size missing keeps the fixed layout and gets a note. */
+/**
+ * Claude marks where the text fits on each size, then checks the finished
+ * thumbnail once and places again at most once (textPlaceService.placeChecked).
+ * A size not proven clear of faces gets a note.
+ */
 async function placeThumbText({ providers, pictures, text, sub = '', tag = '', costs = [], notes = [] }) {
   const pics = Object.fromEntries(Object.entries(pictures).map(([size, buf]) => [size, { buf, ...THUMB_SIZES[size] }]));
-  return placeText({ claude: providers.claude, pictures: pics, text, sub, tag, costs, notes, log });
+  return placeChecked({ claude: providers.claude, pictures: pics, text, sub, tag, accent: THUMB_ACCENT, costs, notes, log });
 }
 
 

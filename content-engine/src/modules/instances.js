@@ -1561,7 +1561,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       thumbs[id]=j.thumbs||{};
       $('th',id).innerHTML=(j.sizes||[]).map(z=>'<a class="'+(z.size==='landscape'?'wide':'tall')+'" href="'+z.url+'" target="_blank" rel="noopener" title="Open full size"><img src="'+z.url+'"><span>'+z.label+' · '+z.platforms.join(', ')+'</span></a>').join('')
         +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':', the first frame will be used')+'</div>':'')
-        +(j.thumbWarn&&(j.sizes||[]).length?'<div class="hint thumbwarn">🟡 '+String(j.thumbWarn).replace(/</g,'&lt;')+'. Press Generate thumbnail again, or change the image prompt.</div>':'');
+        +(j.thumbWarn&&(j.sizes||[]).length?'<div class="hint thumbwarn">🟡 '+String(j.thumbWarn).replace(/</g,'&lt;')+'. Generate thumbnail again, or change the image prompt.</div>':'');
     }
     // 🖼 Thumbnail only: from step 2's headline / sub-head / image prompt; the copy on the page and on the instance is left alone.
     // Its own busy flag: the thumbnail and the copy can run at the same time (separate OpenAI calls).
@@ -1574,7 +1574,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         if(!j.ok) throw new Error(j.error||'failed');
         showThumbs(id, j); setInst(id, j.instanceId);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
-        $('gs',id).textContent=(!(j.sizes||[]).length?'🟡 No thumbnail made':j.thumbError?'🟡 Saved, but on a frame of the video, the AI artwork failed (see below)':j.thumbWarn?'🟡 Saved, but the text could not be placed beside the subject (see below)':'🟢 Thumbnail saved to the instance')+' · $'+usd.toFixed(4)+' · copy unchanged';
+        $('gs',id).textContent=(!(j.sizes||[]).length?'🟡 No thumbnail made':j.thumbError?'🟡 Saved, but on a frame of the video, the AI artwork failed (see below)':j.thumbWarn?'🟡 Saved, but check the text on it (see below)':'🟢 Thumbnail saved to the instance')+' · $'+usd.toFixed(4)+' · copy unchanged';
       }catch(e){ $('gs',id).textContent='⚠ '+e.message; }
       thumbBusy[id]=false; $('gt',id).disabled=false;
     }
