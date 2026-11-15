@@ -1560,7 +1560,8 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
     function showThumbs(id, j){
       thumbs[id]=j.thumbs||{};
       $('th',id).innerHTML=(j.sizes||[]).map(z=>'<a class="'+(z.size==='landscape'?'wide':'tall')+'" href="'+z.url+'" target="_blank" rel="noopener" title="Open full size"><img src="'+z.url+'"><span>'+z.label+' · '+z.platforms.join(', ')+'</span></a>').join('')
-        +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':', the first frame will be used')+'</div>':'');
+        +(j.thumbError?'<div class="hint">⚠ '+String(j.thumbError).replace(/</g,'&lt;')+(Object.keys(thumbs[id]).length?'':', the first frame will be used')+'</div>':'')
+        +(j.thumbWarn&&(j.sizes||[]).length?'<div class="hint thumbwarn">🟡 '+String(j.thumbWarn).replace(/</g,'&lt;')+'. Press Generate thumbnail again, or change the image prompt.</div>':'');
     }
     // 🖼 Thumbnail only: from step 2's headline / sub-head / image prompt; the copy on the page and on the instance is left alone.
     // Its own busy flag: the thumbnail and the copy can run at the same time (separate OpenAI calls).
@@ -1573,7 +1574,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
         if(!j.ok) throw new Error(j.error||'failed');
         showThumbs(id, j); setInst(id, j.instanceId);
         const usd=(j.costs||[]).reduce((t,c)=>t+(Number(c.costUsd)||0),0);
-        $('gs',id).textContent=(!(j.sizes||[]).length?'🟡 No thumbnail made':j.thumbError?'🟡 Saved, but on a frame of the video, the AI artwork failed (see below)':'🟢 Thumbnail saved to the instance')+' · $'+usd.toFixed(4)+' · copy unchanged';
+        $('gs',id).textContent=(!(j.sizes||[]).length?'🟡 No thumbnail made':j.thumbError?'🟡 Saved, but on a frame of the video, the AI artwork failed (see below)':j.thumbWarn?'🟡 Saved, but the text could not be placed beside the subject (see below)':'🟢 Thumbnail saved to the instance')+' · $'+usd.toFixed(4)+' · copy unchanged';
       }catch(e){ $('gs',id).textContent='⚠ '+e.message; }
       thumbBusy[id]=false; $('gt',id).disabled=false;
     }
@@ -1652,6 +1653,7 @@ function readyAiPickerPage({ funnel, videos, prefills = [], drafts = {}, single 
       if(d.hasTranscript) $('tg',id).textContent=d.approved?('🟢 Approved '+d.approvedIst+(d.srt?' · SRT kept':'')):'🟡 Waiting for you. Check the names, type the headline, check the image prompt, then ✅ Approve + generate copy and 🖼 Generate thumbnail.';
       if(d.noSpeech && !compOn[id]) $('tg',id).textContent='🟡 No speech found in this video. Paste what it says, or pick its comparison above. The daily router leaves it alone until then.';
       if(d.copy){ applyGen(id, d); $('gs',id).textContent='💾 Saved draft from '+d.atIst+' · $'+Number(d.costUsd||0).toFixed(4); }
+      else if((d.sizes||[]).length) showThumbs(id, d);
     });
     document.querySelectorAll('.cleansb').forEach(e=>subsNote(e.id.slice(3)));
     document.querySelectorAll('[id^="gb-"]').forEach(b=>gateUi(b.id.slice(3)));

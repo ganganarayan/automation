@@ -364,7 +364,9 @@ async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
     }
     const tag = eyebrowClean(split.tag);
     const sub = split.sub;
-    const places = await placeText({ claude: providers.claude, pictures: pics, text: split.headline, sub, tag, bottomClear: SUB_CLEAR, costs, log });
+    const notes = [];
+    const places = await placeText({ claude: providers.claude, pictures: pics, text: split.headline, sub, tag, bottomClear: SUB_CLEAR, costs, notes, log });
+    if (notes.length) log.warn({ instance: instanceId, notes }, 'image post text in the fixed top band for some sizes');
     for (const [size, p] of Object.entries(pics)) {
       const png = await drawText(p.buf, { text: split.headline, sub, tag, place: places[size] || null });
       const up = await providers.storage.uploadPng(f.driveFolder, name(size), png);

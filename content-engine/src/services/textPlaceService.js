@@ -6,23 +6,32 @@
  *               writes the words into that box. Used by Ready video thumbnails
  *               and by image posts.
  * Responsibility:
- *               - placeText({ claude, pictures, text, sub, tag, bottomClear, costs, log }): key -> checked box
+ *               - placeText({ claude, pictures, text, sub, tag, bottomClear, costs, notes, log }): key -> checked box;
+ *                 every size left without a box gets a note (shown on the page), never silence
+ *               - placeNoteText(notes): those notes as one line for the page
  *               - drawText(buf, { text, sub, tag, place, accent }): the picture with the words on it (PNG)
  * Dependencies: sharp, thumbPlaceSpec, thumbSpec, pricing.
  */
 import sharp from 'sharp';
-import { PLACE_SCHEMA, placeSystem, placeUser, placeFor } from '../utils/thumbPlaceSpec.js';
+import { PLACE_SCHEMA, placeSystem, placeUser, placeFor, placeWhyNot } from '../utils/thumbPlaceSpec.js';
 import { thumbSvg, thumbSvgPlaced, textLayer, THUMB_ACCENT } from '../utils/thumbSpec.js';
 import { costClaude } from '../utils/pricing.js';
 
 /**
  * pictures: { key: { buf, w, h, label } }. One Claude call for all of them.
- * Returns key -> box; a key missing (no Claude, a failure, a box on the subject)
- * keeps the fixed layout. bottomClear: share of the height kept free (subtitles).
+ * Returns key -> box. A key missing keeps the fixed top layout, which knows
+ * nothing about the picture and can sit on a face: so each one also gets a
+ * note { size, label, reason } pushed onto `notes`, for the page to show.
+ * bottomClear: share of the height kept free (subtitles).
  */
-export async function placeText({ claude, pictures, text, sub = '', tag = '', bottomClear = 0, costs = [], log }) {
+export async function placeText({ claude, pictures, text, sub = '', tag = '', bottomClear = 0, costs = [], notes = [], log }) {
   const entries = Object.entries(pictures || {});
-  if (!claude || !entries.length || !String(text || '').trim()) return {};
+  if (!entries.length || !String(text || '').trim()) return {};
+  const note = (size, reason) => notes.push({ size, label: (pictures[size] && pictures[size].label) || size, reason });
+  if (!claude) {
+    for (const [size] of entries) note(size, 'no Claude key, so the text could not be placed from the picture');
+    return {};
+  }
   try {
     const items = await Promise.all(entries.map(async ([size, p]) => {
       const small = await sharp(p.buf).resize({ width: 768, height: 768, fit: 'inside' }).jpeg({ quality: 80 }).toBuffer();
@@ -30,19 +39,33 @@ export async function placeText({ claude, pictures, text, sub = '', tag = '', bo
     }));
     const { data, model, usage } = await claude.generateJsonDetailed({ system: placeSystem({ bottomClear }), user: placeUser(items, { text, sub, tag }), schema: PLACE_SCHEMA, maxTokens: 8000 });
     costs.push({ step: 'images', ...costClaude({ ...usage, model }) });
+    const answers = new Map(((data && data.sizes) || []).filter((r) => r && pictures[r.size]).map((r) => [r.size, r]));
     const out = {};
-    for (const raw of (data && data.sizes) || []) {
-      const p = pictures[raw && raw.size];
-      const place = p ? placeFor(raw, { w: p.w, h: p.h, bottomClear }) : null;
-      if (place) out[raw.size] = place;
-      else if (p) log?.warn?.({ size: raw.size, raw }, 'text box refused (on the subject or too small), fixed layout used');
+    for (const [size, p] of entries) {
+      const raw = answers.get(size) || null;
+      const place = placeFor(raw, { w: p.w, h: p.h, bottomClear });
+      if (place) {
+        out[size] = place;
+        if (place.how !== 'picked') log?.info?.({ size, how: place.how, raw }, 'text box moved off the subject');
+      } else {
+        note(size, placeWhyNot(raw, { w: p.w, h: p.h }));
+        log?.warn?.({ size, raw }, 'no free text box, fixed layout used (shown on the page)');
+      }
     }
     log?.info?.({ placed: Object.keys(out) }, 'text placed from the picture');
     return out;
   } catch (err) {
-    log?.warn?.({ err: err.message }, 'text placement failed, fixed layout used');
+    for (const [size] of entries) note(size, `the placement check failed (${err.message})`);
+    log?.warn?.({ err: err.message }, 'text placement failed, fixed layout used (shown on the page)');
     return {};
   }
+}
+
+/** The notes from placeText as one line for the page; '' when every size was placed. */
+export function placeNoteText(notes = []) {
+  if (!notes.length) return '';
+  const parts = notes.map((n) => `${n.label}: ${n.reason}`);
+  return `Text drawn in the fixed top band, check it is not over a face. ${[...new Set(parts)].join('; ')}`;
 }
 
 /** Where the drawn letters really are: the bounding box of every visible pixel, or null. */
@@ -104,4 +127,4 @@ export async function drawText(buf, { text, sub = '', tag = '', place = null, ac
   return sharp(buf).composite([{ input: Buffer.from(svg) }]).png().toBuffer();
 }
 
-export default { placeText, drawText, fittedOverlay, shrinkFor, inkBox };
+export default { placeText, placeNoteText, drawText, fittedOverlay, shrinkFor, inkBox };

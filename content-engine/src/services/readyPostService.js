@@ -55,7 +55,7 @@ import * as imageShort from './imageShortService.js';
 import { shortTitle } from '../utils/shortSpec.js';
 import { stepDownOf } from '../utils/stepDownSpec.js';
 import { THUMB_SPECS, THUMB_SIZES, PLATFORM_SIZE, THUMB_ACCENT, THUMB_ART_SIZE, thumbArt, thumbImagePrompt, eyebrowClean, IMAGE_PROMPT_MAX } from '../utils/thumbSpec.js';
-import { placeText, fittedOverlay } from './textPlaceService.js';
+import { placeText, placeNoteText, fittedOverlay } from './textPlaceService.js';
 import { comparisonFor, comparisonHeadline, comparisonSvg, isNoSpeech, parseComparisons } from '../utils/comparisonSpec.js';
 import { DEFAULT_COMPARISONS } from '../utils/comparisonFacts.js';
 import sharp from 'sharp';
@@ -511,13 +511,13 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
   const imagePromptWas = String(tArt.imagePrompt || '');
   const imagePrompt = nextImagePrompt(imagePromptWas, lastCopy.thumbPrompt, copy.thumbPrompt);
   // A thumbnail failure never loses the copy; the video's first frame is used instead.
-  const { thumbs, sizes, thumbError } = withThumbs
+  const { thumbs, sizes, thumbError, thumbWarn } = withThumbs
     ? await makeThumbs({
       providers, resolved, driveId, ext, accessToken, costs, comparison,
       imagePrompt: imagePrompt || copy.title, text: comparison ? tArt.headline || '' : tArt.headline || copy.thumbText || copy.title, sub: tArt.subhead || copy.thumbSub || '', tag: tArt.audience || copy.thumbTag,
     })
-    : { thumbs: saved.thumbs || {}, sizes: saved.sizes || [], thumbError: '' };
-  const instanceId = await saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, keepThumbs: !withThumbs }).catch((err) => {
+    : { thumbs: saved.thumbs || {}, sizes: saved.sizes || [], thumbError: '', thumbWarn: saved.thumbWarn || '' };
+  const instanceId = await saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, thumbWarn, costs, keepThumbs: !withThumbs }).catch((err) => {
     log.warn({ err: err.message, driveId }, 'draft save failed (generation still returned)');
     return null;
   });
@@ -531,13 +531,15 @@ async function writeCopy({ tenantId = 'default', funnelId, driveId, name = '', a
       log.warn({ err: err.message, driveId }, 'image prompt not saved (still returned)');
     }
   }
-  return { copy, transcript, costs, thumbs, sizes, thumbError, instanceId, imagePrompt, imagePromptWas, stage: 'review' };
+  return { copy, transcript, costs, thumbs, sizes, thumbError, thumbWarn, instanceId, imagePrompt, imagePromptWas, stage: 'review' };
 }
 
 /**
  * Thumbnails: one AI artwork (else a frame of the video), rendered in each size
  * the funnel's platforms need with the operator's headline. Never throws: a
- * failure comes back as thumbError. Image costs are pushed onto `costs`.
+ * failure comes back as thumbError; a size whose text could not be placed
+ * beside the subject comes back as thumbWarn, for the page to show. Image
+ * costs are pushed onto `costs`.
  */
 async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessToken = '', costs, imagePrompt, text, sub = '', tag = '', comparison = null }) {
   const ffmpeg = createFfmpegProvider({}, log);
@@ -546,6 +548,7 @@ async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessTok
   let thumbs = {};
   let sizes = [];
   let thumbError = '';
+  let thumbWarn = '';
   try {
     const platforms = thumbPlatforms(resolved);
     // A comparison is drawn from its facts: no AI picture, no cost, no people.
@@ -554,7 +557,7 @@ async function makeThumbs({ providers, resolved, driveId, ext = 'mp4', accessTok
       const headline = comparisonHeadline(text);
       const draw = (spec) => sharp(Buffer.from(comparisonSvg({ ...spec, ...comparison, headline, logo }))).jpeg({ quality: 88 }).toBuffer();
       ({ thumbs, sizes } = await renderThumbs({ providers, platforms, draw }));
-      return { thumbs, sizes, thumbError };
+      return { thumbs, sizes, thumbError, thumbWarn: '' };
     }
     const imageModel = /^gpt-image/.test(String(providers.resolved.openai?.imageModel || '')) ? providers.resolved.openai.imageModel : 'gpt-image-1';
     // Each shape gets its own drawing: a wide one for 16:9, a tall one for 9:16 and 4:5.
@@ -585,12 +588,12 @@ ${ART_FRAME[shape]}`, size, model: imageModel });
     // The operator's headline + sub-head (typed at the transcript stage) go on the image.
     // The audience line always shows: yours, else the copy writer's from the transcript, else the funnel's.
     const pill = eyebrowClean(tag) || eyebrowClean(resolved.thumbTagDefault);
-    ({ thumbs, sizes } = await renderThumbs({ providers, platforms, base, text, sub, tag: pill, costs }));
+    ({ thumbs, sizes, thumbWarn } = await renderThumbs({ providers, platforms, base, text, sub, tag: pill, costs }));
   } catch (err) {
     thumbError = err.message;
     log.warn({ err: err.message, driveId }, 'thumbnail generation failed (first frame will be used)');
   }
-  return { thumbs, sizes, thumbError };
+  return { thumbs, sizes, thumbError, thumbWarn: thumbWarn || '' };
 }
 
 /**
@@ -618,20 +621,21 @@ export async function generateThumbnail({ tenantId = 'default', funnelId, driveI
   if (!head && !comparison) throw new Error('Type the thumbnail headline, or write the copy first');
   const costs = [];
   const ext = ((String(name).match(/\.(\w{2,4})$/) || [])[1] || 'mp4').toLowerCase();
-  const { thumbs, sizes, thumbError } = await makeThumbs({ providers, resolved, driveId: id, ext, accessToken, costs, imagePrompt: prompt || copy.thumbPrompt || copy.title || head, text: head, sub, tag: aud || copy.thumbTag, comparison });
+  const { thumbs, sizes, thumbError, thumbWarn } = await makeThumbs({ providers, resolved, driveId: id, ext, accessToken, costs, imagePrompt: prompt || copy.thumbPrompt || copy.title || head, text: head, sub, tag: aud || copy.thumbTag, comparison });
   let steps = patchStep(base, 'transcript', { artifacts: { headline: typed, subhead: typedSub, audience: aud, imagePrompt: prompt } });
-  if (sizes.length) steps = patchStep(steps, 'images', { status: 'done', artifacts: { thumbs, sizes } });
+  if (sizes.length) steps = patchStep(steps, 'images', { status: 'done', artifacts: { thumbs, sizes, thumbWarn } });
   const at = new Date().toISOString();
   for (const { step, ...c } of costs) steps = addCostToSteps(steps, 'images', { ...c, costUsd: Number(c.costUsd) || 0, at });
   await instanceRepo.saveSteps(inst.id, steps, sumInstanceCost(steps));
   log.info({ funnel: funnel.name, driveId: id, sizes: sizes.length }, 'ready video thumbnail generated (copy untouched)');
-  return { thumbs, sizes, thumbError, costs, instanceId: inst.id };
+  return { thumbs, sizes, thumbError, thumbWarn, costs, instanceId: inst.id };
 }
 
 /**
  * Render the artwork in each size the funnel's platforms need (cover crop + the
  * hook headline) and upload it to Post for Me. Returns { thumbs: platform ->
- * url, sizes: [{ size, label, url, platforms }] }.
+ * url, sizes: [{ size, label, url, platforms }], thumbWarn: '' or the sizes
+ * whose text went in the fixed top band }.
  */
 async function renderThumbs({ providers, platforms, base, text, sub = '', tag = '', draw = null, costs = [] }) {
   const postformeKey = providers.resolved.postformeKey || '';
@@ -642,7 +646,8 @@ async function renderThumbs({ providers, platforms, base, text, sub = '', tag = 
   const wanted = Object.entries(THUMB_SIZES).filter(([size]) => platforms.some((k) => PLATFORM_SIZE[k] === size));
   // Each size's picture without text, then Claude marks where the text fits on each.
   const pictures = draw ? {} : Object.fromEntries(await Promise.all(wanted.map(async ([size, spec]) => [size, await composeBase(base, spec)])));
-  const places = draw ? {} : await placeThumbText({ providers, pictures, text, sub, tag, costs });
+  const notes = [];
+  const places = draw ? {} : await placeThumbText({ providers, pictures, text, sub, tag, costs, notes });
   for (const [size, spec] of wanted) {
     const users = platforms.filter((k) => PLATFORM_SIZE[k] === size);
     const jpg = draw ? await draw(spec) : await composeThumb(pictures[size], spec, { text, sub, tag, place: places[size] });
@@ -651,7 +656,7 @@ async function renderThumbs({ providers, platforms, base, text, sub = '', tag = 
     sizes.push({ size, label: spec.label, url, platforms: users });
   }
   log.info({ sizes: sizes.map((x) => x.label) }, 'thumbnails rendered + uploaded');
-  return { thumbs, sizes };
+  return { thumbs, sizes, thumbWarn: placeNoteText(notes) };
 }
 
 /** The Settings logo link as a data: URI for the drawn thumbnail; '' (the name is typed) when it can't be read. */
@@ -756,10 +761,10 @@ async function composeThumb(picture, spec, { text, sub = '', tag = '', place = n
   return sharp(picture).composite([{ input: Buffer.from(svg) }]).jpeg({ quality: 90 }).toBuffer();
 }
 
-/** Claude marks where the text fits on each size (textPlaceService); a size missing keeps the fixed layout. */
-async function placeThumbText({ providers, pictures, text, sub = '', tag = '', costs = [] }) {
+/** Claude marks where the text fits on each size (textPlaceService); a size missing keeps the fixed layout and gets a note. */
+async function placeThumbText({ providers, pictures, text, sub = '', tag = '', costs = [], notes = [] }) {
   const pics = Object.fromEntries(Object.entries(pictures).map(([size, buf]) => [size, { buf, ...THUMB_SIZES[size] }]));
-  return placeText({ claude: providers.claude, pictures: pics, text, sub, tag, costs, log });
+  return placeText({ claude: providers.claude, pictures: pics, text, sub, tag, costs, notes, log });
 }
 
 
@@ -1345,7 +1350,7 @@ export async function cleanStatus({ funnelId, driveId }) {
  * transcript and thumbnails as JSON on the steps (all generations kept in
  * script.artifacts.generations), and every generation's real cost added.
  */
-async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, costs, edit = false, ctaLink, keepThumbs = false }) {
+async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, thumbWarn, costs, edit = false, ctaLink, keepThumbs = false }) {
   const { inst, steps: base, existing } = await ensureInstance({ funnel, driveId, title: copy.title || 'Ready video' });
   let steps = base;
   if (edit) copy = keepHiddenCopy(copy, ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).copy);
@@ -1353,10 +1358,10 @@ async function saveDraft({ funnel, driveId, copy, thumbs, sizes, thumbError, cos
   const prev = ((steps.find((x) => x.key === 'script') || {}).artifacts || {}).generations || [];
   // A manual save (edits) updates the current copy; only a real generation is
   // added to the history.
-  const generations = edit ? prev : [...prev, { at, copy, thumbs, sizes, thumbError }].slice(-20);
+  const generations = edit ? prev : [...prev, { at, copy, thumbs, sizes, thumbError, thumbWarn: thumbWarn || '' }].slice(-20);
   // The transcript belongs to its own stage (transcribe / approve): never touched here.
   steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: copy.description, copy, generations, ...(ctaLink !== undefined ? { ctaLink } : {}) } });
-  if (!keepThumbs && (sizes.length || !edit)) steps = patchStep(steps, 'images', { status: sizes.length ? 'done' : 'skipped', artifacts: { thumbs, sizes } });
+  if (!keepThumbs && (sizes.length || !edit)) steps = patchStep(steps, 'images', { status: sizes.length ? 'done' : 'skipped', artifacts: { thumbs, sizes, ...(thumbWarn !== undefined ? { thumbWarn } : {}) } });
   const durationSec = durationCache.get(driveId) || 0;
   steps = patchStep(steps, 'stitch', { status: 'done', artifacts: { video: videoArt(steps, driveId, durationSec) } });
   // An edit save carries a generation's cost only the first time (no draft yet).
@@ -1419,7 +1424,7 @@ function draftView(row) {
   return {
     instanceId: row.id, stage: readyStage(row, steps), clean, copy: art('script').copy || null, ctaLink: art('script').ctaLink || '',
     comparison: t.comparison || '', noSpeech: isNoSpeech(steps), transcript: t.text || '', headline: t.headline || '', subhead: t.subhead || '', audience: t.audience || '', imagePrompt: t.imagePrompt || '', hasTranscript, srt: !!t.srt, timed: !!transcriptSrt(t), approved: !!t.approvedAt, approvedIst: t.approvedAt ? formatIst(t.approvedAt) : '',
-    thumbs: art('images').thumbs || {}, sizes: art('images').sizes || [], costUsd, atIst: formatIst(row.updated_at),
+    thumbs: art('images').thumbs || {}, sizes: art('images').sizes || [], thumbWarn: art('images').thumbWarn || '', costUsd, atIst: formatIst(row.updated_at),
   };
 }
 

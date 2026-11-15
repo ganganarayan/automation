@@ -27,12 +27,15 @@ describe('sheet prompt split into picture and words', () => {
 });
 
 describe('subtitle band kept clear', () => {
-  it('a box running into the bottom quarter is cut above it, or refused when too little is left', () => {
+  it('a box running into the bottom quarter is cut above it, or moved to the free strip under the subject when too little is left', () => {
     const size = { w: 1080, h: 1920, bottomClear: 0.25 };
     const subject = { x: 0, y: 0, w: 100, h: 30 };
     const p = placeFor({ subject, text: { x: 5, y: 40, w: 90, h: 50 }, align: 'center', color: 'light' }, size);
     expect(p.y1).toBe(1440);
-    expect(placeFor({ subject, text: { x: 5, y: 72, w: 90, h: 25 }, align: 'center', color: 'light' }, size)).toBeNull();
+    const moved = placeFor({ subject, text: { x: 5, y: 72, w: 90, h: 25 }, align: 'center', color: 'light' }, size);
+    expect(moved.how).toBe('beside');
+    expect(moved.y0).toBeGreaterThanOrEqual(1920 * 0.3);
+    expect(moved.y1).toBeLessThanOrEqual(1440);
     expect(placeSystem({ bottomClear: 0.25 })).toContain('bottom 25%');
     expect(placeSystem()).not.toContain('subtitles');
   });

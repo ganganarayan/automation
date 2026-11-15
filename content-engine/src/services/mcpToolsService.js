@@ -377,7 +377,7 @@ export async function runThumbnailJob(job) {
     headline: p.headline, subhead: p.subhead, audience: p.audience, imagePrompt: p.imagePrompt,
   });
   await jobRepo.setResult(job.id, {
-    post_id: r.instanceId, sizes: (r.sizes || []).map((x) => ({ size: x.label || x.size, url: x.url })), ...(r.thumbError ? { warning: String(r.thumbError) } : {}),
+    post_id: r.instanceId, sizes: (r.sizes || []).map((x) => ({ size: x.label || x.size, url: x.url })), ...(r.thumbError || r.thumbWarn ? { warning: [r.thumbError, r.thumbWarn].filter(Boolean).join('; ') } : {}),
   });
 }
 
