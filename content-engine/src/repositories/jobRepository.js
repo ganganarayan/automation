@@ -48,6 +48,21 @@ export async function nextDue({ types }) {
   return rows[0] && rows[0].at ? new Date(rows[0].at) : null;
 }
 
+/** Keep a job's outcome in its payload (payload.result), for callers that poll it. */
+export async function setResult(id, result) {
+  await query(
+    `UPDATE jobs SET payload = payload || jsonb_build_object('result', $2::jsonb), updated_at = now() WHERE id = $1`,
+    [id, JSON.stringify(result ?? null)],
+  );
+}
+
+/** One job of a tenant (null when it is not that tenant's). */
+export async function getForTenant(id, tenantId) {
+  if (!/^\d+$/.test(String(id))) return null;
+  const { rows } = await query('SELECT * FROM jobs WHERE id = $1 AND tenant_id = $2', [String(id), tenantId]);
+  return rows[0] || null;
+}
+
 /** Mark a claimed job done. */
 export async function markDone(id) {
   await query(

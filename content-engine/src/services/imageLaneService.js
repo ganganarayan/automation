@@ -503,7 +503,7 @@ export async function retry({ instanceId, log = baseLog }) {
  * Line up the image post for one funnel at `scheduledFor` (Luxon DateTime).
  * Returns the created instance row; throws LaneError / Error with the reason.
  */
-export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
+export async function prepare({ funnelRow, scheduledFor, rowKey = '', log = baseLog }) {
   const f = await funnels.resolve(funnelRow);
   if (!f.sheetId) throw new LaneError('no content sheet on this funnel');
   if (!(f.accounts || []).length) throw new LaneError('no Post for Me accounts ticked on this funnel');
@@ -529,7 +529,9 @@ export async function prepare({ funnelRow, scheduledFor, log = baseLog }) {
     });
     refillSpan = [from, new Date().toISOString()];
   }
-  const pick = pickReadyRow(rows, open);
+  // A row named by the caller (MCP schedule_post) must still be Ready and not already lined up.
+  const pick = rowKey ? readyRows(rows).find((r) => r.key === String(rowKey) && !open.includes(r.key)) : pickReadyRow(rows, open);
+  if (!pick && rowKey) throw new LaneError(`row ${rowKey} is not a Ready row in the content sheet, or it is already lined up`);
   if (!pick) throw new LaneError('no Ready row in the content sheet, and the refill wrote none');
 
   const inst = await instanceService.createForFunnel({

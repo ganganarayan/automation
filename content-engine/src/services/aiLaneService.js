@@ -51,26 +51,20 @@ export class LaneSkip extends Error {}
  * Line up tomorrow's AI video for one funnel. Returns the instance (at
  * script_review, approval 1 open); throws LaneSkip or Error.
  */
-export async function prepare({ funnelRow, scheduledFor, postDate, log = baseLog }) {
+export async function prepare({ funnelRow, scheduledFor, postDate, prompt = '', model = '', log = baseLog }) {
   const f = await funnels.resolve(funnelRow);
   if (!(f.accounts || []).length) throw new LaneSkip('no Post for Me accounts ticked on this funnel');
-  const cfg = await funnels.getConfig(f.id).catch(() => ({}));
+  const saved = await funnels.getConfig(f.id).catch(() => ({}));
+  // A model picked by the caller (MCP create_video) is tried first, then the funnel's own order.
+  const cfg = model ? { ...saved, video_provider_order: [model, saved.video_provider_order].filter(Boolean).join(',') } : saved;
   const verdict = await credit.check({ tenantId: f.tenantId, funnelCfg: cfg });
   await credit.noteVerdict(f.tenantId, verdict);
   if (!verdict.ok) throw new LaneSkip(`AI video lane out: ${verdict.missing.join(', ')}`);
 
   const providers = await buildProviders(f.tenantId);
   const researchFrom = new Date().toISOString();
-  const [page, recent] = await Promise.all([
-    imageLane.landingText(f.landingPageUrl, log),
-    instanceRepo.recentForFunnel(f.id, f.tenantId, 40).catch(() => []),
-  ]);
-  const { system, user } = researchPrompt({
-    funnelName: f.name, landingUrl: f.landingPageUrl, landingText: page, history: historyLines(recent.map(instanceHistoryLine), 40),
-  });
-  const researched = await providers.llm.generateJsonDetailed({ system, user, maxTokens: 2000 });
-  meter(providers, costText({ ...(researched.usage || {}), model: researched.model }), 'lane 2 research');
-  const brief = normalizeResearch(researched.data);
+  // A typed topic (MCP create_video) skips the research step.
+  const brief = prompt ? normalizeResearch({ topic: prompt, title: prompt.slice(0, 120) }) : await research({ f, providers, log });
   const researchTo = new Date().toISOString();
 
   const inst = await instanceService.createForFunnel({
@@ -93,6 +87,20 @@ export async function prepare({ funnelRow, scheduledFor, postDate, log = baseLog
   }
   log.info({ funnel: f.name, instance: inst.id, provider: verdict.provider, topic: brief.topic }, 'AI video lined up (script sent for approval)');
   return inst;
+}
+
+/** The research step: a new topic from the landing page and the post history. */
+async function research({ f, providers, log }) {
+  const [page, recent] = await Promise.all([
+    imageLane.landingText(f.landingPageUrl, log),
+    instanceRepo.recentForFunnel(f.id, f.tenantId, 40).catch(() => []),
+  ]);
+  const { system, user } = researchPrompt({
+    funnelName: f.name, landingUrl: f.landingPageUrl, landingText: page, history: historyLines(recent.map(instanceHistoryLine), 40),
+  });
+  const researched = await providers.llm.generateJsonDetailed({ system, user, maxTokens: 2000 });
+  meter(providers, costText({ ...(researched.usage || {}), model: researched.model }), 'lane 2 research');
+  return normalizeResearch(researched.data);
 }
 
 // Which credit an out-of-credit error at a step uses up.

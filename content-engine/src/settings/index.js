@@ -85,6 +85,8 @@ const schema = z.object({
 
   WA_GATEWAY_URL: z.string().optional().default(''),
   INTERNAL_API_KEY: z.string().optional().default(''),
+  // The internal MCP gateway (/mcp-internal) proves itself with this shared secret.
+  GATEWAY_SERVICE_SECRET: z.string().optional().default(''),
   ADMIN_KEY: z.string().optional().default(''),
   // Lockout escape hatch: lets the super admin set a new password on /admin/reset.
   SUPER_ADMIN_RESET_CODE: z.string().optional().default(''),
@@ -194,7 +196,7 @@ function build(rawEnv) {
 
     links: Object.freeze({ gitaAssessment: e.GITA_ASSESSMENT_LINK, gitaSimpleAssessment: e.GITA_SIMPLE_ASSESSMENT_LINK }),
 
-    auth: Object.freeze({ internalApiKey: e.INTERNAL_API_KEY, adminKey: e.ADMIN_KEY, resetCode: e.SUPER_ADMIN_RESET_CODE }),
+    auth: Object.freeze({ internalApiKey: e.INTERNAL_API_KEY, adminKey: e.ADMIN_KEY, resetCode: e.SUPER_ADMIN_RESET_CODE, gatewaySecret: e.GATEWAY_SERVICE_SECRET }),
 
     schedulerInternal: e.SCHEDULER_MODE.toLowerCase() !== 'external',
 

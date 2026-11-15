@@ -16,6 +16,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",
     "@google/generative-ai": "^0.21.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "geoip-country": "^5.0.202611110258",

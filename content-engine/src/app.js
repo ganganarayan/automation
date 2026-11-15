@@ -55,6 +55,7 @@ import * as agencyPages from './modules/agencyPages.js';
 import * as connectPage from './modules/connectPage.js';
 import * as onboardingTour from './modules/onboardingTour.js';
 import * as festivalPage from './modules/festival.js';
+import * as mcpInternal from './modules/mcpInternal.js';
 
 export function createApp() {
   const app = express();
@@ -190,6 +191,8 @@ export function createApp() {
   registry.registerAll(ctx);
 
   app.use('/api/v1', router);
+  // Internal MCP for the gateway (service secret + mapped email), not public.
+  mcpInternal.mount(app);
   app.use(notFound);
   app.use(errorHandler);
 

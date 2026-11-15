@@ -154,6 +154,34 @@ export function createPostForMeProvider(cfg, log) {
       return rows.filter((r) => r && mine.has(String(r.social_account_id)));
     },
 
+    /**
+     * Replace a post that hasn't gone out yet (PUT takes the whole create body:
+     * caption, accounts, media, time). Same args as createPost.
+     */
+    async updatePost(id, { accountIds, caption, mediaUrl, scheduledAt, platformConfigurations }) {
+      await guardPost(id);
+      await guardAccounts(accountIds || []);
+      const body = { caption, social_accounts: accountIds, media: mediaUrl ? [{ url: mediaUrl }] : undefined, scheduled_at: scheduledAt };
+      if (platformConfigurations) body.platform_configurations = platformConfigurations;
+      if (scope) body.external_id = scope.tenantId;
+      const res = await request(`${BASE}/social-posts/${encodeURIComponent(id)}`, { method: 'PUT', headers: requireKey(), body, label: 'postforme.updatePost', log, retries: 0 });
+      if (!res.ok) throw new ExternalAPIError(`Post for Me update failed (${res.status})${pfmReason(res) ? `: ${pfmReason(res)}` : ''}`, { details: res.text?.slice(0, 300) });
+      return res.data;
+    },
+
+    /**
+     * One account's copy of a post with its analytics (the feed, expand=metrics):
+     * { platform, platform_url, posted_at, metrics } or null when the platform has not listed it yet.
+     */
+    async postMetrics({ accountId, postId }) {
+      await guardAccounts([accountId]);
+      const qs = `social_post_id=${encodeURIComponent(postId)}&expand=metrics&limit=5`;
+      const res = await request(`${BASE}/social-account-feeds/${encodeURIComponent(accountId)}?${qs}`, { headers: requireKey(), label: 'postforme.postMetrics', log, retries: 1 });
+      if (!res.ok) throw new ExternalAPIError(`Post for Me metrics lookup failed (${res.status})`, { details: res.text?.slice(0, 300) });
+      const rows = Array.isArray(res.data?.data) ? res.data.data : [];
+      return rows.find((r) => r && String(r.social_post_id) === String(postId)) || rows[0] || null;
+    },
+
     /** Delete a post that hasn't gone out yet (a scheduled one). */
     async deletePost(id) {
       await guardPost(id);
