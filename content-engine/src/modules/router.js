@@ -70,6 +70,7 @@ export function register(ctx) {
   readyPost.onPosted((row, info) => imageLane.onPosted(row, info));
   readyPost.onPosted((row, info) => postedLog.onPosted(row, info));
   stageRunner.onStageFailed((id, step, err) => aiLane.onStageFailed(id, step, err));
+  stageRunner.onBeforePost((id) => aiLane.claimFromStepDown(id));
   // The evening email waits for the app to fall quiet, so it carries every approval the day made.
   heartbeat.onIdle(() => import('../services/digestService.js').then((d) => d.runAllDue()));
   const yes = (v) => ['1', 'true', 'yes'].includes(String(v || '').toLowerCase());

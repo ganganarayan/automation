@@ -151,6 +151,14 @@ function scriptTextOf(instance) {
   return (s && s.artifacts && s.artifacts.text) || '';
 }
 
+// Before-post listeners: fn(instanceId), awaited before a reel is posted; a throw
+// stops the post. The router uses this so a retried video takes its day back
+// from its own step-down image post.
+const beforePostHooks = [];
+export function onBeforePost(fn) {
+  if (typeof fn === 'function') beforePostHooks.push(fn);
+}
+
 async function markFailed(instanceId, stepKey, err) {
   log.error({ err: err.message, instance: instanceId, step: stepKey }, 'stage failed');
   try {
@@ -362,6 +370,7 @@ export async function postInstance({ instanceId, captionOverride = '' }) {
   const stitch = steps.find((s) => s.key === 'stitch');
   const videoId = stitch && stitch.artifacts && stitch.artifacts.video ? stitch.artifacts.video.driveId : '';
   if (!videoId) throw new Error('no final reel to post');
+  for (const fn of beforePostHooks) await fn(instanceId);
   await stepLog.start(instanceId, 'publish');
 
   const accountIds = Array.isArray(resolved.accounts) ? resolved.accounts : [];

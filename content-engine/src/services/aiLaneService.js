@@ -44,6 +44,10 @@ import { childLogger } from '../core/logger.js';
 
 const baseLog = childLogger({ module: 'aiLane' });
 
+// Videos whose sheet step-down is being made right now (it takes a minute or
+// two): a second failure meanwhile must not take another row.
+const steppingDown = new Set();
+
 /** Lane 2 can't run today (out of credit / not set up): the router moves on. */
 export class LaneSkip extends Error {}
 
@@ -131,6 +135,18 @@ export async function onStageFailed(instanceId, stepKey, err) {
   // A re-run (or a later decision) already replaced this video: nothing to do.
   if (!day || (day.instance_id && String(day.instance_id) !== String(instanceId))) return;
 
+  // A video steps down once. A retry that fails again (or a second failure while
+  // the first step-down is still being made) never takes another sheet row.
+  if (router.stepDownTo || steppingDown.has(String(instanceId))) {
+    const held = router.stepDownTo ? await instanceRepo.get(router.stepDownTo).catch(() => null) : null;
+    if (held && !['failed', 'superseded'].includes(held.status)) {
+      await routerDays.update(day.id, { lane: 'image', reason: `AI video retry failed (${reason}); its earlier image post keeps the day`, instanceId: held.id });
+    }
+    await stepLog.mark(instanceId, 'step_down', `Failed again, no new sheet row taken${held ? ': the image post made the first time keeps the day' : ''}. Why: ${reason}`.slice(0, 300));
+    log.warn({ reason, stepDownTo: router.stepDownTo || null }, 'AI video failed again; already stepped down once, no new sheet row');
+    return;
+  }
+
   // Animation failed: the still is already made and paid for, so that goes first.
   // Everything else, and a still that can't be used, takes the next sheet row.
   let still = '';
@@ -147,12 +163,18 @@ export async function onStageFailed(instanceId, stepKey, err) {
     }
   }
 
+  steppingDown.add(String(instanceId));
   try {
     const inst = await imageLane.prepare({ funnelRow, scheduledFor, log });
+    // Remembered on the video, so a retry keeps this post instead of taking another row.
+    const now = stageRunner.routerInfo(await instanceRepo.get(instanceId)).router || router;
+    await instanceService.updateStep(instanceId, 'script', { artifacts: { router: { ...now, stepDownTo: inst.id } } });
     await routerDays.update(day.id, { lane: 'image', reason: `AI video failed (${reason}${still}); image lane: waiting for approval`, instanceId: inst.id });
     await stepLog.mark(instanceId, 'step_down', stepDownNote(`${reason}${still}`, 'sheet'));
   } catch (e) {
     await routerDays.update(day.id, { lane: 'none', reason: `AI video failed (${reason}${still}); image lane failed: ${e.message}` });
+  } finally {
+    steppingDown.delete(String(instanceId));
   }
   log.warn({ reason }, 'AI video failed mid-render; dropped to the image lane');
 }
@@ -202,6 +224,9 @@ async function takeDay(row, action) {
   const day = await routerDays.get(row.funnel_id, postDate);
   if (!day) return;
   if (day.instance_id && String(day.instance_id) !== String(row.id)) {
+    // The video's own step-down post keeps the day while the video is retried;
+    // it is replaced only when the video is posted (claimFromStepDown).
+    if (!IMAGE_ACTIONS.includes(action) && router && router.stepDownTo && String(router.stepDownTo) === String(day.instance_id)) return;
     const other = await instanceRepo.get(day.instance_id);
     const act = rerunAction(other);
     if (act === 'keep' && !['failed', 'superseded'].includes(other.status)) {
@@ -246,4 +271,29 @@ export async function retry({ instanceId, action, moved = null }) {
   return { instanceId: row.id, action };
 }
 
-export default { LaneSkip, prepare, onStageFailed, retry };
+/**
+ * Before a retried router video is posted: its step-down image post gives the
+ * day back (superseded), so the funnel never posts twice. An image post already
+ * approved or scheduled stops the video with a plain reason instead.
+ */
+export async function claimFromStepDown(instanceId) {
+  const row = await instanceRepo.get(instanceId);
+  if (!row || !row.funnel_id) return;
+  const { router } = stageRunner.routerInfo(row);
+  if (!router || !router.stepDownTo) return;
+  const held = await instanceRepo.get(router.stepDownTo).catch(() => null);
+  if (!held || ['failed', 'superseded'].includes(held.status)) return;
+  const when = row.scheduled_for ? formatIst(row.scheduled_for, { withTime: false }) : 'that day';
+  if (rerunAction(held) === 'keep') {
+    throw new Error(`${when} already has this video's image post (${held.title || held.id}) approved, so the video would post twice. Retry the video for a new date, or take the image post down first.`);
+  }
+  await instanceRepo.supersede(held.id, 'replaced by its retried AI video');
+  const postDate = router.postDate || DateTime.fromJSDate(new Date(row.scheduled_for)).setZone(ZONE).toFormat('yyyy-MM-dd');
+  const day = await routerDays.get(row.funnel_id, postDate);
+  if (day && (!day.instance_id || String(day.instance_id) === String(held.id))) {
+    await routerDays.update(day.id, { lane: 'ai_video', reason: 'the retried AI video replaced its image post', instanceId: row.id });
+  }
+  await stepLog.mark(row.id, 'step_down', `Posted as the video; its image post ${String(held.id).slice(0, 8)} was withdrawn.`);
+}
+
+export default { LaneSkip, prepare, onStageFailed, retry, claimFromStepDown };
