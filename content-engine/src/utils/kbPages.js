@@ -171,7 +171,7 @@ ${landingNav('/')}
 </div></section>
 <section class="final"><div class="wrap">
   <h2>Stop making posts. Start revenue from posts.</h2>
-  <div class="cta"><a class="btn" href="/#pricing">See pricing</a><a class="btn ghost" href="/kb">All answers</a></div>
+  <div class="cta"><a class="btn" href="https://assess360.divineleads.guru/a/content-engine-fit">Check your fit</a><a class="btn ghost" href="/#pricing">See pricing</a><a class="btn ghost" href="/kb">All answers</a></div>
 </div></section>
 ${landingFooter(email)}`;
 }

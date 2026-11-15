@@ -47,7 +47,7 @@ describe('comparison pages', () => {
       expect(h).toContain(`Content Engine vs <em>${c.name}</em>`);
       expect(h).toContain(c.rows.entryPrice[2]);
       expect(h).toContain(`What ${c.name} does better`);
-      expect(h).toContain('mailto:a@b.co');
+      expect(h).toContain('content-engine-fit');
       expect(h).not.toContain(EM);
       expect(h).not.toContain('undefined');
     }

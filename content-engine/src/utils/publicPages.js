@@ -421,11 +421,12 @@ const HOME_CSS = `
  @media (max-width:760px){.links{display:none}.hero{padding:3.5rem 0 2.5rem}section{padding:3rem 0}}
 `;
 
-/** Plan-button target: a prefilled email to the contact, or sign-in without one. */
-export function contactHrefFor(email = '') {
-  return (plan) => (email
-    ? `mailto:${esc(email)}?subject=${encodeURIComponent(`Content Engine: ${plan} plan`)}`
-    : LOGIN_PATH);
+/** Where every call-to-action button goes (all but Sign in and the plan Buy buttons): the fit assessment. */
+export const FIT_URL = 'https://assess360.divineleads.guru/a/content-engine-fit';
+
+/** Call-to-action target: the fit assessment. Kept as a factory so the callers stay as they are. */
+export function contactHrefFor() {
+  return () => FIT_URL;
 }
 
 /** <head> and the opening <body> shared by the landing and comparison pages. */

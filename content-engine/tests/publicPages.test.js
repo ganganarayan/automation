@@ -46,7 +46,7 @@ describe('public pages', () => {
     expect(h).toContain('Done-with-you setup');
   });
   it('home plan buttons mail the contact, or open sign-in without one', () => {
-    expect(homePage({ email: 'a@b.co' })).toContain('mailto:a@b.co?subject=');
+    expect(homePage({ email: 'a@b.co' })).toContain('assess360.divineleads.guru/a/content-engine-fit');
     expect(homePage()).not.toContain('mailto:');
     expect(homePage({ email: '<x>' })).toContain('&lt;x&gt;');
   });
