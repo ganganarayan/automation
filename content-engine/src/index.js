@@ -39,6 +39,11 @@ async function main() {
     logger.info({ port: settings.port }, 'content-engine listening');
   });
 
+  // A new version updates the landing on Cloudflare too, without the Deploy button.
+  setTimeout(() => {
+    import('./services/landingDeployService.js').then((m) => m.autoDeploy()).catch(() => {});
+  }, 20000).unref();
+
   const stop = async (signal) => {
     logger.info({ signal }, 'shutting down');
     jobRunner.stop();

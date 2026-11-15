@@ -6,6 +6,7 @@
  * Responsibility:
  *               - deploy({ domain }): render, upload, attach; never throws, the
  *                 outcome is kept under landing_deployed on the default tenant.
+ *               - autoDeploy: on start, redeploy when this is a new version.
  *               - status: the outcome in plain words.
  *               - liveDomain: the domain the app sends its own public pages to
  *                 (cached a minute), blank until a deploy has worked.
@@ -24,6 +25,9 @@ import { formatIst } from '../utils/time.js';
 import { childLogger } from '../core/logger.js';
 
 const log = childLogger({ module: 'landing-deploy' });
+
+/** This build and this Railway environment, so a staging copy of the settings never overwrites the live landing. */
+const BUILD = () => ({ sha: process.env.RAILWAY_GIT_COMMIT_SHA || '', env: process.env.RAILWAY_ENVIRONMENT_NAME || '' });
 
 async function call({ url, init }) {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(60000) });
@@ -74,7 +78,7 @@ export async function deploy({ domain = '', appDomain } = {}) {
     const zoneName = zoneId ? '' : zoneCandidates(host).slice(-1)[0];
     if (!mine) await call(landingRequests.putDomain(String(account).trim(), String(token).trim(), { hostname: host, service: name, zoneId, zoneName }))
       .catch((err) => { throw new Error(`the pages are up, but ${host} was not attached: ${err.message}`); });
-    outcome = { ok: true, at, worker: name, domain: host, appUrl, pages: Object.keys(pages).length };
+    outcome = { ok: true, at, worker: name, domain: host, appUrl, pages: Object.keys(pages).length, ...BUILD() };
     log.info(outcome, 'landing deployed to Cloudflare');
   } catch (err) {
     outcome = { ok: false, at, worker: name, domain: host, message: err.message };
@@ -83,6 +87,33 @@ export async function deploy({ domain = '', appDomain } = {}) {
   await tenantConfig.set('default', LANDING_DEPLOY_KEY, JSON.stringify(outcome)).catch(() => {});
   cache = { at: 0, domain: '', appHost: '' };
   return status();
+}
+
+/**
+ * On start: if the landing was deployed from this environment before and this
+ * is a newer build, upload the pages again, so a push updates the landing too.
+ * Never throws; a failure shows on the Tenants panel like a manual deploy.
+ */
+export async function autoDeploy() {
+  try {
+    const d = JSON.parse((await tenantConfig.get('default', LANDING_DEPLOY_KEY)) || 'null');
+    const b = BUILD();
+    if (!shouldAutoDeploy(d, b)) return { skipped: true };
+    log.info({ from: d.sha || '', to: b.sha }, 'new version: redeploying the landing');
+    return await deploy({ domain: d.domain });
+  } catch (err) {
+    log.warn({ err: err.message }, 'landing auto deploy skipped');
+    return { skipped: true, error: err.message };
+  }
+}
+
+/** Redeploy only a landing that worked, on a real build, from the environment that deployed it, when the build changed. */
+export function shouldAutoDeploy(d, b) {
+  if (!d || !d.ok || !d.domain || !b || !b.sha) return false;
+  if (d.env && b.env && d.env !== b.env) return false;
+  // An old record without env: only production may take it over.
+  if (!d.env && b.env && b.env !== 'production') return false;
+  return d.sha !== b.sha;
 }
 
 export async function status() {
