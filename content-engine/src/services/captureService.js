@@ -180,7 +180,7 @@ export async function processMessageEvent({ tenantId = 'default', event, selfIds
   if (e.senderId && selfIds.map(String).includes(String(e.senderId))) return { outcome: 'self' };
 
   const lead = await leads.findAwaitingFollowup({ tenantId, accountId: e.accountId, commenterId: e.senderId });
-  if (!lead) return { outcome: 'no_lead' };            // a reply we never prompted
+  if (!lead) return processKeywordDm({ tenantId, event: e }, deps); // a DM we never prompted
 
   const claimed = await leads.claimFollowup(lead.id);
   if (!claimed) return { outcome: 'already_handled' }; // duplicate reply webhook
@@ -232,6 +232,74 @@ export async function processMessageEvent({ tenantId = 'default', event, selfIds
   }
 }
 
+/**
+ * Someone DMs a keyword (instead of commenting it). They messaged us, so the
+ * 24h window is open and a normal message is allowed. Same rule, same text,
+ * same personal link as a comment would get. One reply per message id.
+ */
+export async function processKeywordDm({ tenantId = 'default', event }, deps) {
+  const { rules, leads, senders = null, log = console, tokenFor, captureCfg, trackLink = null } = deps;
+  const e = event || {};
+  if (!rules.activeForPlatform || !e.text || !e.messageId) return { outcome: 'no_lead' };
+  const rule = firstMatchingRule(e.text, await rules.activeForPlatform({ tenantId, platform: e.platform, accountId: e.accountId }));
+  if (!rule) return { outcome: 'no_lead' };
+
+  const lead = await leads.insertIfNew({
+    tenantId,
+    ruleId: rule.id,
+    platform: e.platform,
+    commentId: `dm:${e.messageId}`,
+    accountId: e.accountId,
+    postId: null,
+    keyword: rule.keyword,
+    lane: rule.lane,
+    commenterId: e.senderId,
+    commentText: e.text,
+    commentCreatedAt: e.at || null,
+    dmStatus: 'pending',
+    publicReplyStatus: 'skipped',
+  });
+  if (!lead) return { outcome: 'duplicate' };
+  if (!senders) return { outcome: 'captured_pending', leadId: lead.id };
+
+  const pageToken = tokenFor ? tokenFor(captureCfg, e.accountId) : '';
+  if (!pageToken) {
+    await leads.updateStatus(lead.id, { dmStatus: 'failed', error: `no access token for account ${e.accountId || '?'}` });
+    return { outcome: 'no_token', leadId: lead.id };
+  }
+
+  // Follow gate: readable now, because they messaged us.
+  let follows = null;
+  const gate = !!rule.require_follow && e.platform === 'instagram';
+  if (gate) {
+    try {
+      const prof = await senders.getUserProfile({ accountId: e.accountId, pageToken, userId: e.senderId });
+      follows = typeof prof?.follows === 'boolean' ? prof.follows : null;
+    } catch (err) {
+      log.warn?.({ err: err.message, leadId: lead.id }, 'capture: follow check failed, delivering anyway');
+    }
+  }
+  const deliver = !gate || follows !== false;
+  const text = deliver ? (rule.dm_text || '') : (rule.not_following_text || 'Follow the account and reply here. I will send it straight over.');
+  const link = deliver ? await personalLink(trackLink, lead, rule.dm_link || null, log) : null;
+
+  try {
+    await senders.sendMessage({ accountId: e.accountId, pageToken, recipientId: e.senderId, text, link });
+    await leads.updateStatus(lead.id, { dmStatus: 'sent', dmSentAt: new Date() });
+    // Not following yet: their next reply runs the normal follow-up path.
+    await leads.setFollowup(lead.id, { status: deliver ? 'delivered' : 'pending', follows, repliedAt: e.at });
+    log.info?.({ leadId: lead.id, deliver }, 'capture: keyword DM answered');
+    return { outcome: deliver ? 'dm_delivered' : 'dm_nudged', leadId: lead.id, follows };
+  } catch (err) {
+    if (err && err.retryable) {
+      await leads.updateStatus(lead.id, { error: `dm retry: ${err.message}` });
+      throw err;
+    }
+    await leads.updateStatus(lead.id, { dmStatus: 'failed', error: `dm: ${err.message}` });
+    return { outcome: 'dm_failed', leadId: lead.id };
+  }
+}
+
 /** The lead's own tracked link for url; the plain url if tracking is off or fails. */
 async function personalLink(trackLink, lead, url, log) {
   if (!trackLink || !url) return url;
@@ -243,4 +311,4 @@ async function personalLink(trackLink, lead, url, log) {
   }
 }
 
-export default { processCommentEvent, processMessageEvent };
+export default { processCommentEvent, processMessageEvent, processKeywordDm };

@@ -19,6 +19,9 @@ import * as jobRunner from '../core/jobRunner.js';
 import * as captureService from '../services/captureService.js';
 import * as captureConfig from '../services/captureConfig.js';
 import { captureSenders } from '../services/captureSenders.js';
+import { metaConnect } from '../services/metaConnect.js';
+import * as tenantConfig from '../repositories/tenantConfigRepository.js';
+import { randomBytes } from 'node:crypto';
 import * as leadVisits from '../services/leadVisitService.js';
 import { verifyMetaSignature, parseCommentEvents, parseMessageEvents } from '../utils/captureSpec.js';
 import { splitByTenant } from '../utils/metaRoute.js';
@@ -41,12 +44,50 @@ export function register(ctx) {
   router.get('/admin/capture', async (req, res, next) => {
     try {
       if (!(await guardHtml(req, res))) return;
-      const [ruleRows, leadRows, session] = await Promise.all([
+      const [ruleRows, leadRows, session, meta] = await Promise.all([
         rules.listByTenant({ tenantId: req.tenantId }),
         leads.listByTenant({ tenantId: req.tenantId }),
         currentSession(req),
+        metaPanelData(req).catch((err) => ({ error: err.message })),
       ]);
-      res.type('html').send(capturePage(ruleRows, leadRows, session));
+      res.type('html').send(capturePage(ruleRows, leadRows, session, meta));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Meta must be told where to send comments and DMs; without it nothing arrives.
+  const callbackUrl = (req) => {
+    const prefix = (String(req.originalUrl || '').match(/^\/t\/[^/]+/) || [''])[0];
+    return `https://${req.get('host')}${prefix}/api/v1/webhook/meta-comments`;
+  };
+  const connectUrl = (req) => `${(String(req.originalUrl || '').match(/^\/t\/[^/]+/) || [''])[0]}/api/v1/admin/capture/meta/connect`;
+  async function metaPanelData(req) {
+    const cfg = await captureConfig.forTenant(req.tenantId);
+    const [st, last, bad] = await Promise.all([
+      metaConnect.status(cfg, callbackUrl(req)),
+      tenantConfig.get(req.tenantId, 'meta_last_event_at').catch(() => null),
+      tenantConfig.get(req.tenantId, 'meta_last_bad_signature_at').catch(() => null),
+    ]);
+    return { ...st, connectUrl: connectUrl(req), lastEventAt: last || null, lastBadSignatureAt: bad || null };
+  }
+
+  router.post('/admin/capture/meta/connect', async (req, res, next) => {
+    try {
+      if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
+      let cfg = await captureConfig.forTenant(req.tenantId);
+      if (!cfg.verifyToken) {
+        await tenantConfig.set(req.tenantId, 'meta_verify_token', randomBytes(16).toString('hex'));
+        cfg = await captureConfig.forTenant(req.tenantId);
+      }
+      const out = await metaConnect.connect(cfg, callbackUrl(req));
+      captureConfig.forgetOwners();
+      log.info({ tenantId: req.tenantId, errors: out.errors }, 'capture: Meta connect');
+      const ruleRows = await rules.listByTenant({ tenantId: req.tenantId });
+      const leadRows = await leads.listByTenant({ tenantId: req.tenantId });
+      const last = await tenantConfig.get(req.tenantId, 'meta_last_event_at').catch(() => null);
+      const bad = await tenantConfig.get(req.tenantId, 'meta_last_bad_signature_at').catch(() => null);
+      res.type('html').send(capturePage(ruleRows, leadRows, await currentSession(req), { ...out, connectUrl: connectUrl(req), lastEventAt: last, lastBadSignatureAt: bad, ran: true }));
     } catch (err) {
       next(err);
     }
@@ -123,9 +164,11 @@ export function register(ctx) {
     const ok = verifyMetaSignature(req.rawBody, req.headers['x-hub-signature-256'], cfg.appSecret);
     if (!ok) {
       req.log?.warn?.('capture: bad or missing webhook signature');
+      tenantConfig.set(req.tenantId, 'meta_last_bad_signature_at', new Date().toISOString()).catch(() => {});
       return res.sendStatus(403);
     }
     res.sendStatus(200); // ack immediately
+    tenantConfig.set(req.tenantId, 'meta_last_event_at', new Date().toISOString()).catch(() => {});
 
     try {
       // The owner's app on the plain URL serves every tenant: each entry goes to
@@ -229,7 +272,29 @@ function dmStatusDot(status) {
  * every other comment that arrived. An unmatched comment is NOT a lead, nothing
  * is sent for it, but it is still shown so it can be answered by hand.
  */
-function capturePage(ruleRows, leadRows, session = null) {
+/** Is Meta sending us anything, and is everything subscribed? Shown on top. */
+function metaPanel(meta) {
+  if (!meta) return '';
+  if (meta.error) return `<h2>Meta connection</h2><div class="card pad">🟡 Could not check: ${esc(meta.error)}</div>`;
+  const line = (ok, label, note) => `<li>${ok ? '🟢' : '🔴'} ${esc(label)} <span class="muted">${esc(note || '')}</span></li>`;
+  const app = (meta.app || []).map((a) => line(a.ok, a.object === 'instagram' ? 'Instagram events to this app' : 'Facebook Page events to this app', a.note)).join('');
+  const pages = (meta.pages || []).length
+    ? meta.pages.map((p) => line(p.ok, `Page ${p.name}`, p.note)).join('')
+    : line(false, 'Pages', 'no Facebook Page token saved in Settings');
+  const allOk = (meta.app || []).every((a) => a.ok) && (meta.pages || []).length && meta.pages.every((p) => p.ok);
+  const last = meta.lastEventAt ? `🟢 Last event from Meta: ${esc(formatIst(meta.lastEventAt))}` : '🔴 Meta has never sent this app a comment or DM.';
+  const bad = meta.lastBadSignatureAt ? `<div>🔴 Meta events refused (wrong app secret) at ${esc(formatIst(meta.lastBadSignatureAt))}. Check the app secret in Settings.</div>` : '';
+  const errs = (meta.errors || []).length ? `<div class="errs">${meta.errors.map((x) => `🔴 ${esc(x)}`).join('<br>')}</div>` : (meta.ran ? '<div>🟢 Connected.</div>' : '');
+  return `<h2>Meta connection</h2><div class="card pad">
+    <div>${last}</div>${bad}
+    <ul class="checks">${app}${pages}</ul>
+    ${errs}
+    <form method="post" action="${esc(meta.connectUrl || '/api/v1/admin/capture/meta/connect')}" class="inline"><button class="btn-toggle">${allOk ? 'Connect again' : 'Connect Meta'}</button></form>
+    <p class="muted">Sends to ${esc(meta.callbackUrl || '')}. Strangers' comments and DMs only arrive once the Meta app is Live (not Development) with Advanced Access to instagram_manage_comments, instagram_manage_messages and pages_messaging.</p>
+  </div>`;
+}
+
+function capturePage(ruleRows, leadRows, session = null, meta = null) {
   const leadsOnly = leadRows.filter((l) => l.dm_status !== 'no_rule');
   const others = leadRows.filter((l) => l.dm_status === 'no_rule');
 
@@ -271,12 +336,16 @@ function capturePage(ruleRows, leadRows, session = null) {
  .btn-toggle{background:#2a2a44;color:#fff}
  .btn-del{background:#5a1d1d;color:#ffd7d7}
  form.inline{display:inline;margin:0}
+ .pad{padding:.9rem 1rem;font-size:.86rem;line-height:1.6}
+ .checks{list-style:none;padding:0;margin:.5rem 0}
+ .errs{margin:.4rem 0 .6rem}
 </style>
 <div class="layout">
   <aside>${navHtml({ current: 'capture', session })}</aside>
   <main><div class="wrap">
     <h1>🎯 Comments</h1>
-    <p class="sub">Instagram &amp; Facebook. A comment matching an armed keyword becomes a lead and gets a DM; everything else is just listed here for you to answer yourself.</p>
+    <p class="sub">Instagram &amp; Facebook. A comment or DM matching an armed keyword becomes a lead and gets a DM; everything else is just listed here for you to answer yourself.</p>
+    ${metaPanel(meta)}
 
     <h2>Keyword rules</h2>
     <div class="card"><table>

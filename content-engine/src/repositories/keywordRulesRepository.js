@@ -83,6 +83,19 @@ export async function activeUnlinkedForPlatform({ tenantId = 'default', platform
   return rows;
 }
 
+/** Active rules for a platform (any post) on this account, newest first.
+ *  Used when someone DMs a keyword instead of commenting it. */
+export async function activeForPlatform({ tenantId = 'default', platform, accountId = null }) {
+  const { rows } = await query(
+    `SELECT * FROM keyword_rules
+      WHERE tenant_id = $1 AND platform = $2 AND active = true
+        AND ($3::text IS NULL OR account_id IS NULL OR account_id = $3)
+      ORDER BY created_at DESC`,
+    [tenantId, platform, accountId || null],
+  );
+  return rows;
+}
+
 /** Bind a rule to the native post + account learned from a comment (once). */
 export async function bindNativePost({ ruleId, platformPostId, accountId = null }) {
   await query(
@@ -117,4 +130,4 @@ export async function setActive(id, active) {
   await query('UPDATE keyword_rules SET active = $2, updated_at = now() WHERE id = $1', [id, !!active]);
 }
 
-export default { moveToPost, upsert, activeForPost, activeUnlinkedForPlatform, bindNativePost, listByTenant, get, setActive };
+export default { moveToPost, upsert, activeForPost, activeUnlinkedForPlatform, activeForPlatform, bindNativePost, listByTenant, get, setActive };
