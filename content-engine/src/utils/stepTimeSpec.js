@@ -343,4 +343,16 @@ export const LIVE_STEPS_SCRIPT = `
 })();
 `;
 
-export default { LANE_STEPS, timeLane, workLabel, reviewLabel, parseStepLog, stepEvent, formatSpan, buildTimeline, stepTotals, currentStep, LIVE_STEPS_SCRIPT };
+/** How many times Retry was pressed on this instance (its 'retry' marks). */
+export function retryPasses(log) {
+  return parseStepLog(log).filter((e) => e && e.k === 'retry' && e.s === 'mark').length;
+}
+
+/** The Log line for one Retry click: pass number, who, what runs again, and the error it replaces. */
+export function retryNote({ pass, by = '', action = '', lastError = '' }) {
+  const what = { channels: 'post again to the failed channels', festival: 'festival post again' }[action] || (action ? `run again from ${action}` : 'run again');
+  const err = String(lastError || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  return `Retry pass ${pass}${by ? ` by ${by}` : ''}: ${what}.${err ? ` Error before it: ${err}` : ''}`;
+}
+
+export default { retryPasses, retryNote, LANE_STEPS, timeLane, workLabel, reviewLabel, parseStepLog, stepEvent, formatSpan, buildTimeline, stepTotals, currentStep, LIVE_STEPS_SCRIPT };

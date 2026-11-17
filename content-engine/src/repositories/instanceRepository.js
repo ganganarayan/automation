@@ -111,11 +111,17 @@ export async function saveSteps(id, steps, costUsd) {
 
 export async function setStatus(id, status, note) {
   const { rowCount } = await query(
-    `UPDATE instances SET status = $2, note = COALESCE($3, note), updated_at = now()
+    `UPDATE instances SET status = $2, note = COALESCE($3, note), updated_at = now(),
+            step_log = CASE WHEN $2 = 'failed' THEN COALESCE(step_log, '[]'::jsonb) || $4::jsonb ELSE step_log END
        WHERE id = $1 AND locked = false`,
-    [id, status, note ?? null],
+    [id, status, note ?? null, failEvent(note)],
   );
   return rowCount > 0;
+}
+
+/** Every failure keeps its reason on the Log, so a later pass's error never hides an earlier one. */
+function failEvent(note) {
+  return JSON.stringify([{ k: 'failed', s: 'mark', at: new Date().toISOString(), note: `Failed: ${String(note || 'no reason given').replace(/\s+/g, ' ').trim().slice(0, 300)}` }]);
 }
 
 /**
@@ -124,9 +130,10 @@ export async function setStatus(id, status, note) {
  */
 export async function transition(id, from, to, note) {
   const { rowCount } = await query(
-    `UPDATE instances SET status = $3, note = COALESCE($4, note), updated_at = now()
+    `UPDATE instances SET status = $3, note = COALESCE($4, note), updated_at = now(),
+            step_log = CASE WHEN $3 = 'failed' THEN COALESCE(step_log, '[]'::jsonb) || $5::jsonb ELSE step_log END
        WHERE id = $1 AND status = $2 AND locked = false`,
-    [id, from, to, note ?? null],
+    [id, from, to, note ?? null, failEvent(note)],
   );
   return rowCount > 0;
 }

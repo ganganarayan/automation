@@ -56,7 +56,8 @@ import { keyOk, currentSession, canApprove } from '../services/accessService.js'
 import * as approvalService from '../services/approvalService.js';
 import * as approvalsRepo from '../repositories/approvalRepository.js';
 import { retryAction, isStuck, parseRetryDate, retryDateDefaults, RETRY_PICK_SCRIPT } from '../utils/retrySpec.js';
-import { buildTimeline, stepTotals, currentStep, formatSpan, LIVE_STEPS_SCRIPT } from '../utils/stepTimeSpec.js';
+import { buildTimeline, stepTotals, currentStep, formatSpan, LIVE_STEPS_SCRIPT, retryPasses, retryNote } from '../utils/stepTimeSpec.js';
+import * as stepLog from '../services/stepLogService.js';
 import { stepDownOf } from '../utils/stepDownSpec.js';
 import { pendingByInstance, approvalButtons, reviewFields, applyReviewEdit, parsePostAt, postAtText } from '../utils/approvalButtons.js';
 
@@ -460,16 +461,37 @@ export function register(ctx) {
       const action = retryAction(row, instances.parseSteps(row));
       if (!action) return res.status(409).json({ ok: false, error: 'nothing failed on this instance' });
       if (action === 'open') return res.status(409).json({ ok: false, error: 'open it and post it again' });
-      if (action === 'channels') return res.json({ ok: true, ...(await readyPost.retryFailed({ instanceId: row.id })) });
-      if (action === 'festival') return res.json({ ok: true, ...(await festivalService.retry({ tenantId: row.tenant_id, id: row.id })) });
+      // Every pass on the instance's own Log: number, who, what runs again, the error it replaces.
+      const s = await currentSession(req).catch(() => null);
+      const pass = retryPasses(row.step_log) + 1;
+      const passNote = retryNote({ pass, by: (s && s.email) || '', action, lastError: row.note || '' });
+      const refused = (msg) => stepLog.mark(row.id, 'retry-refused', `Retry pass ${pass} did not start: ${String(msg || '').slice(0, 300)}`);
+      const startPass = async () => {
+        await stepLog.mark(row.id, 'retry', passNote);
+        log.info({ instance: row.id, pass, action }, 'retry pressed');
+      };
+      if (action === 'channels' || action === 'festival') {
+        await startPass();
+        try {
+          const out = action === 'channels'
+            ? await readyPost.retryFailed({ instanceId: row.id })
+            : await festivalService.retry({ tenantId: row.tenant_id, id: row.id });
+          return res.json({ ok: true, pass, ...out });
+        } catch (err) {
+          await refused(err.message);
+          throw err;
+        }
+      }
       // The retry's day is taken: the page asks for a date and calls back with it.
       const picker = { pickDate: true, ...retryDateDefaults(row) };
       const asked = req.body?.postAt;
       const moved = asked ? parseRetryDate(asked) : null;
       if (asked && !moved) return res.status(400).json({ ok: false, error: 'Pick a date and time still to come.', ...picker });
       try {
-        res.json({ ok: true, ...(await aiLane.retry({ instanceId: row.id, action, moved })) });
+        await startPass();
+        res.json({ ok: true, pass, ...(await aiLane.retry({ instanceId: row.id, action, moved })) });
       } catch (err) {
+        await refused(err.dayTaken ? `${err.message} (asked for a new date)` : err.message);
         res.status(err.dayTaken ? 409 : 400).json({ ok: false, error: err.message, ...(err.dayTaken ? picker : {}) });
       }
     } catch (err) {
@@ -856,7 +878,7 @@ function listPage(all, { status = null, label = '', funnel = '', funnelList = []
       const ra = retryAction(r, steps);
       const retry = ra === 'open'
         ? `<div class="apbtns"><a class="act big" href="/api/v1/admin/instances/${esc(r.id)}">↻ Retry</a></div>`
-        : ra ? `<div class="apbtns"><button class="act big" onclick="retryRow(this,'${esc(r.id)}')">↻ Retry</button></div>` : '';
+        : ra ? `<div class="apbtns"><button class="act big" onclick="retryRow(this,'${esc(r.id)}')">↻ Retry</button>${retryCount(r)}</div>` : '';
       const stuck = isStuck(r) ? '<div class="hint">🟡 No progress for a while: the run was probably lost. Retry carries on from where it stopped.</div>' : '';
       const why = r.status === 'failed' && r.note ? `<div class="hint">🔴 ${esc(String(r.note).slice(0, 200))}</div>` : '';
       return `<tr>
@@ -1057,6 +1079,12 @@ function detailPage(row, steps) {
 function imagePromptBlock(steps) {
   const prompt = imagePromptOf(steps);
   return prompt ? `<h3>Image prompt</h3><p class="ro" style="white-space:pre-wrap">${esc(prompt)}</p><p class="hint">Settings adds its Thumbnail image rules after this. Change it in the video's Image prompt box on the ready video page.</p>` : '';
+}
+
+/** "Tried 3 times" under Retry, from the instance's Log; '' before the first try. */
+function retryCount(r) {
+  const n = retryPasses(r.step_log);
+  return n ? `<span class="hint">Retried ${n} time${n === 1 ? '' : 's'}, each pass is in Steps</span>` : '';
 }
 
 /** An array as is, an object's values, anything else empty: step artifacts differ by lane. */
