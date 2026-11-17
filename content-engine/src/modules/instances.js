@@ -58,7 +58,7 @@ import * as approvalsRepo from '../repositories/approvalRepository.js';
 import { retryAction, isStuck, parseRetryDate, retryDateDefaults, RETRY_PICK_SCRIPT } from '../utils/retrySpec.js';
 import { buildTimeline, stepTotals, currentStep, formatSpan, LIVE_STEPS_SCRIPT } from '../utils/stepTimeSpec.js';
 import { stepDownOf } from '../utils/stepDownSpec.js';
-import { pendingByInstance, approvalButtons, reviewFields, applyReviewEdit } from '../utils/approvalButtons.js';
+import { pendingByInstance, approvalButtons, reviewFields, applyReviewEdit, parsePostAt, postAtText } from '../utils/approvalButtons.js';
 
 const MANUAL_JOB = 'manual_stage';
 
@@ -621,11 +621,19 @@ export function register(ctx) {
   router.post('/admin/instances/:id/approve', async (req, res) => {
     try {
       if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to approve' });
-      const { row, steps, approval } = await approvalFor(req);
+      const { row, steps, approval, buttons } = await approvalFor(req);
       if (!row) return res.status(404).json({ ok: false, error: 'instance not found' });
       if (!approval) return res.status(409).json({ ok: false, error: 'this is no longer waiting for approval' });
       if (row.status === 'script_review' && !scriptArtifacts(steps).text) {
         return res.status(409).json({ ok: false, error: 'There is no script to approve. Type one and press Save, or use Retry in the Library.' });
+      }
+      // The post time from the Review screen's box (DD-MM-YYYY HH:MM IST): it
+      // replaces the router's slot. A time already past posts at once.
+      const postAt = parsePostAt(req.body?.postAt);
+      if (postAt && buttons && buttons.approveLabel === 'Approve & post') {
+        await instances.setMeta(row.id, { scheduledFor: postAt });
+        await approvalsRepo.setPayload(approval.id, { ...(approval.payload || {}), scheduledFor: postAt.toISOString() });
+        approval.payload = { ...(approval.payload || {}), scheduledFor: postAt.toISOString() };
       }
       const r = await approvalService.approveById(approval.id);
       if (!r.ok) return res.status(409).json({ ok: false, error: 'already approved or sent back (maybe from the email)' });
@@ -989,8 +997,9 @@ function detailPage(row, steps) {
   const data = {
     script: (steps.find((s) => s.key === 'script')?.artifacts?.text) || '',
     transcript: (steps.find((s) => s.key === 'transcript')?.artifacts?.text) || '',
-    images: ((steps.find((s) => s.key === 'images')?.artifacts?.images) || []).map((i) => i.driveId),
-    clips: ((steps.find((s) => s.key === 'animate')?.artifacts?.clips) || []).map((c) => c.driveId),
+    // Image posts keep their pictures keyed by size (an object), the AI lane as a list.
+    images: listOf(steps.find((s) => s.key === 'images')?.artifacts?.images).map((i) => (i && i.driveId) || '').filter(Boolean),
+    clips: listOf(steps.find((s) => s.key === 'animate')?.artifacts?.clips).map((c) => (c && c.driveId) || '').filter(Boolean),
     voiceover: (steps.find((s) => s.key === 'voiceover')?.artifacts?.audio?.driveId) || '',
     stitch: finalVideoId(steps),
   };
@@ -1050,6 +1059,13 @@ function imagePromptBlock(steps) {
   return prompt ? `<h3>Image prompt</h3><p class="ro" style="white-space:pre-wrap">${esc(prompt)}</p><p class="hint">Settings adds its Thumbnail image rules after this. Change it in the video's Image prompt box on the ready video page.</p>` : '';
 }
 
+/** An array as is, an object's values, anything else empty: step artifacts differ by lane. */
+function listOf(v) {
+  if (Array.isArray(v)) return v;
+  if (v && typeof v === 'object') return Object.values(v);
+  return [];
+}
+
 function reviewPage(row, steps, approval, buttons, script) {
   const back = '<a class="act" href="/api/v1/admin/instances">← Library</a>';
   const head = `<div class="top"><div><h1>${esc(row.title || 'Untitled')}</h1>
@@ -1066,17 +1082,19 @@ function reviewPage(row, steps, approval, buttons, script) {
     ? (vid ? `<iframe class="rvplayer" allow="autoplay" src="https://drive.google.com/file/d/${esc(encodeURIComponent(vid))}/preview"></iframe>` : '<p class="hint">🟡 No video attached yet.</p>')
     : (img ? `<img class="rvimg" src="${esc(img)}" alt="preview">` : '');
   const videoLink = buttons.view !== 'video' && p.videoUrl ? `<p><a class="act" href="${esc(p.videoUrl)}" target="_blank" rel="noopener">▶ Open video</a></p>` : '';
+  const posts = buttons.approveLabel === 'Approve & post';
   const form = fields.map((f) => `<label class="rvf">${esc(f.label)}<textarea name="${esc(f.key)}" rows="${f.rows}">${esc(f.value)}</textarea></label>`).join('');
   return shell('Review', `${head}
     ${media}${buttons.view === 'copy' ? imagePromptBlock(steps) : ''}${videoLink}
     ${form ? `<form id="rvform" onsubmit="return false">${form}</form>` : ''}
     <div class="rvbar">
       ${form ? '<button class="act big" id="savebtn" onclick="save()">Save</button>' : ''}
+      ${posts ? `<label class="rvf" style="flex:0 0 auto">Post at (IST)<input id="postat" value="${esc(postAtText(row.scheduled_for))}" placeholder="DD-MM-YYYY HH:MM" style="width:11em"></label>` : ''}
       <button class="act big approve" id="apbtn" onclick="approve()">${esc(buttons.approveLabel)}</button>
       <button class="act big danger" id="dabtn" onclick="disapprove()">✕ Disapprove</button>
       <span id="rvmsg" class="hint"></span>
     </div>
-    <p class="hint">Save stores your edit only. ${esc(buttons.approveLabel)} moves it on, the same as the email's link.</p>
+    <p class="hint">Save stores your edit only. ${esc(buttons.approveLabel)} moves it on, the same as the email's link.${posts ? ' Post at starts as the time this post was planned for; change it (to today, say) before you approve. A time already past posts at once.' : ''}</p>
   `, `
     const ID=${JSON.stringify(String(row.id))};
     let dirty=false;
@@ -1100,7 +1118,8 @@ function reviewPage(row, steps, approval, buttons, script) {
     async function approve(){
       if(dirty && !confirm('You have unsaved edits. Approve without them?')) return;
       const b=document.getElementById('apbtn'); b.disabled=true; msg('Approving…');
-      try{ const j=await post('/approve'); if(j.ok){ msg('🟢 Approved. Opening Library…'); setTimeout(()=>{ location.href='/api/v1/admin/instances'; }, 900); } else { b.disabled=false; msg('🔴 '+(j.error||'failed')); } }
+      const pa=document.getElementById('postat');
+      try{ const j=await post('/approve', pa ? { postAt: pa.value } : {}); if(j.ok){ msg('🟢 Approved. Opening Library…'); setTimeout(()=>{ location.href='/api/v1/admin/instances'; }, 900); } else { b.disabled=false; msg('🔴 '+(j.error||'failed')); } }
       catch(e){ b.disabled=false; msg('🔴 '+e.message); }
     }
   `, 'instances');
@@ -1810,8 +1829,9 @@ function manualPage(row, steps) {
   const data = {
     script: (steps.find((s) => s.key === 'script')?.artifacts?.text) || '',
     transcript: (steps.find((s) => s.key === 'transcript')?.artifacts?.text) || '',
-    images: ((steps.find((s) => s.key === 'images')?.artifacts?.images) || []).map((i) => i.driveId),
-    clips: ((steps.find((s) => s.key === 'animate')?.artifacts?.clips) || []).map((c) => c.driveId),
+    // Image posts keep their pictures keyed by size (an object), the AI lane as a list.
+    images: listOf(steps.find((s) => s.key === 'images')?.artifacts?.images).map((i) => (i && i.driveId) || '').filter(Boolean),
+    clips: listOf(steps.find((s) => s.key === 'animate')?.artifacts?.clips).map((c) => (c && c.driveId) || '').filter(Boolean),
     voiceover: (steps.find((s) => s.key === 'voiceover')?.artifacts?.audio?.driveId) || '',
     stitch: finalVideoId(steps),
   };

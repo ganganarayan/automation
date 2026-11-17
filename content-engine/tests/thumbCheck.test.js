@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import sharp from 'sharp';
 import { placeChecked, placeNoteText } from '../src/services/textPlaceService.js';
-import { CHECK_SCHEMA, checkFor, freeParts, placeFor, overlapShare } from '../src/utils/thumbPlaceSpec.js';
+import { CHECK_SCHEMA, checkFor, freeParts, placeFor, overlapShare, padFace } from '../src/utils/thumbPlaceSpec.js';
 
 const W = 1280; const H = 720;
 const pic = async () => ({ buf: await sharp({ create: { width: W, height: H, channels: 3, background: '#333' } }).png().toBuffer(), w: W, h: H, label: '16:9', layout: 'top' });
@@ -117,6 +117,13 @@ describe('the geometry behind it', () => {
 
   it('a check answer without ok is unusable; faces come back in pixels', () => {
     expect(checkFor({ faces: [] }, { w: W, h: H })).toBeNull();
-    expect(checkFor({ ok: false, faces: [face], problem: 'x' }, { w: W, h: H }).faces[0]).toEqual(facePx);
+    expect(checkFor({ ok: false, faces: [face], problem: 'x' }, { w: W, h: H }).faces[0]).toEqual(padFace(facePx, { w: W, h: H })); // padded for hair and forehead
+  });
+});
+
+describe('text on the hairline counts as on the head', () => {
+  it('a face box grows a quarter of its height on top and stays in the frame', () => {
+    expect(padFace({ x0: 100, y0: 100, x1: 200, y1: 200 }, { w: 1000, h: 1000 })).toEqual({ x0: 90, y0: 75, x1: 210, y1: 210 });
+    expect(padFace({ x0: 0, y0: 10, x1: 100, y1: 110 }, { w: 1000, h: 1000 }).y0).toBe(0);
   });
 });

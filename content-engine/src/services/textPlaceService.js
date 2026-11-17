@@ -96,7 +96,8 @@ export async function checkText({ claude, pictures, places, text, sub = '', tag 
     const out = {};
     for (const d of drawn) {
       const seen = checkFor(answers.get(d.size), { w: d.w, h: d.h }) || { ok: false, faces: [], problem: 'the check gave no answer for this size' };
-      const under = d.ink ? seen.faces.some((f) => overlapShare(f, d.ink) > 0.1) : false;
+      // Any real overlap with a (padded) head counts: 10% let text across a forehead pass.
+      const under = d.ink ? seen.faces.some((f) => overlapShare(f, d.ink) > 0.02) : false;
       out[d.size] = { ok: seen.ok && !under, faces: seen.faces, problem: seen.problem || (under ? 'a face lies under the text' : '') };
     }
     log?.info?.({ check: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.ok])) }, 'finished text checked');

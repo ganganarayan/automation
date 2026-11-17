@@ -152,4 +152,33 @@ export function applyReviewEdit(approval, scriptArtifacts = {}, body = {}) {
   };
 }
 
-export default { APPROVAL_WAIT_STATUSES, waitStatusOf, isOpen, pendingByInstance, reviewView, approvalButtons, reviewFields, applyReviewEdit };
+/**
+ * The post time typed on the Review screen, DD-MM-YYYY HH:MM in IST (24-hour),
+ * as a Date. '' = keep the post's own time (null). Anything unreadable throws,
+ * so a typo never posts at a time nobody asked for.
+ */
+export function parsePostAt(raw) {
+  const t = String(raw ?? '').trim();
+  if (!t) return null;
+  const m = /^(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})$/.exec(t);
+  if (!m) throw new Error('Post time must look like 17-11-2026 20:30 (IST, 24-hour).');
+  const [, dd, mm, yyyy, hh, mi] = m.map(Number);
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31 || hh > 23 || mi > 59) throw new Error('Post time must look like 17-11-2026 20:30 (IST, 24-hour).');
+  const ms = Date.UTC(yyyy, mm - 1, dd, hh, mi) - 330 * 60000;
+  const d = new Date(ms);
+  // 31-02 rolls into March: refuse it rather than post on a day nobody typed.
+  const back = new Date(ms + 330 * 60000);
+  if (back.getUTCDate() !== dd || back.getUTCMonth() !== mm - 1) throw new Error('That date does not exist.');
+  return d;
+}
+
+/** A Date (or ISO string) as DD-MM-YYYY HH:MM in IST, for the post-time box. '' when empty. */
+export function postAtText(value) {
+  if (!value) return '';
+  const d = new Date(new Date(value).getTime() + 330 * 60000);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getUTCDate())}-${p(d.getUTCMonth() + 1)}-${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+
+export default { parsePostAt, postAtText, APPROVAL_WAIT_STATUSES, waitStatusOf, isOpen, pendingByInstance, reviewView, approvalButtons, reviewFields, applyReviewEdit };

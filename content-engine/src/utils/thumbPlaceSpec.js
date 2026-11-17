@@ -215,8 +215,8 @@ export function checkSystem() {
   return [
     'You check finished social media thumbnails before they are posted. The app wrote text on each picture.',
     'For each image, return:',
-    '- faces: one box around every face and head in the picture (people and animals), in percent of that image (x, y = top-left corner; w, h = size; 0 to 100). An empty list when there are none.',
-    '- ok: true only when no letter of the text covers or touches any face, eyes, mouth or head, nor hands or the main product. Text on plain background, wall, table, sky or blur is fine.',
+    '- faces: one box around every face and whole head, hair included, in the picture (people and animals), in percent of that image (x, y = top-left corner; w, h = size; 0 to 100). An empty list when there are none.',
+    '- ok: true only when no letter of the text covers or touches any face, forehead, hair, eyes, mouth or head, nor hands or the main product. Text on plain background, wall, table, sky or blur is fine.',
     '- problem: when ok is false, say in a few words what the text covers; else an empty string.',
     'Judge each image on its own.',
   ].join('\n');
@@ -233,9 +233,21 @@ export function checkUser(items, { text = '' } = {}) {
 }
 
 /** One size's check answer: { ok, faces: [pixel boxes], problem }; null when unusable. */
+/** A face box grown 25% of its height on top and 10% on the other sides, kept in the frame. */
+export function padFace(b, { w, h }) {
+  const fw = b.x1 - b.x0;
+  const fh = b.y1 - b.y0;
+  return {
+    x0: Math.max(0, Math.round(b.x0 - fw * 0.1)), x1: Math.min(w, Math.round(b.x1 + fw * 0.1)),
+    y0: Math.max(0, Math.round(b.y0 - fh * 0.25)), y1: Math.min(h, Math.round(b.y1 + fh * 0.1)),
+  };
+}
+
 export function checkFor(raw, { w, h }) {
   if (!raw || typeof raw.ok !== 'boolean') return null;
-  const faces = (Array.isArray(raw.faces) ? raw.faces : []).map((b) => toPx(b, w, h)).filter((b) => b && areaOf(b) > 0);
+  // Padded: a box drawn round the face often stops at the eyebrows, so text on
+  // the hairline or forehead slipped through. A quarter more on top, a tenth round the rest.
+  const faces = (Array.isArray(raw.faces) ? raw.faces : []).map((b) => toPx(b, w, h)).filter((b) => b && areaOf(b) > 0).map((b) => padFace(b, { w, h }));
   return { ok: raw.ok, faces, problem: String(raw.problem || '').slice(0, 200) };
 }
 
