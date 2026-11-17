@@ -10,6 +10,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { query } from '../core/db.js';
+import * as runLog from './runLogRepository.js';
 
 export async function create({
   id,
@@ -30,6 +31,10 @@ export async function create({
      RETURNING *`,
     [id, tenantId, funnelId, funnelName, title, status, JSON.stringify(steps), scheduledFor, sourceType, sourceId, sourceRef],
   );
+  if (rows[0]) {
+    await runLog.write(rows[0].id, 'created', { detail: `pass 1 started (${status})` });
+    await runLog.statusChanged(rows[0].id, status, '');
+  }
   return rows[0];
 }
 
@@ -116,6 +121,7 @@ export async function setStatus(id, status, note) {
        WHERE id = $1 AND locked = false`,
     [id, status, note ?? null, failEvent(note)],
   );
+  if (rowCount > 0) await runLog.statusChanged(id, status, note);
   return rowCount > 0;
 }
 
@@ -128,13 +134,14 @@ function failEvent(note) {
  * Move from one status to another only if the instance is still in `from`
  * (and unlocked): so a double-clicked approval acts once. True if we won.
  */
-export async function transition(id, from, to, note) {
+export async function transition(id, from, to, note, { logOutcome = true } = {}) {
   const { rowCount } = await query(
     `UPDATE instances SET status = $3, note = COALESCE($4, note), updated_at = now(),
             step_log = CASE WHEN $3 = 'failed' THEN COALESCE(step_log, '[]'::jsonb) || $5::jsonb ELSE step_log END
        WHERE id = $1 AND status = $2 AND locked = false`,
     [id, from, to, note ?? null, failEvent(note)],
   );
+  if (rowCount > 0 && logOutcome) await runLog.statusChanged(id, to, note);
   return rowCount > 0;
 }
 
@@ -184,6 +191,7 @@ export async function lockAsPosted(id, { postRefs = [], postedAt = new Date() } 
       WHERE id = $1 AND locked = false`,
     [id, JSON.stringify(postRefs), postedAt],
   );
+  if (rowCount > 0) await runLog.statusChanged(id, 'posted');
   return rowCount > 0;
 }
 
@@ -198,6 +206,7 @@ export async function markScheduled(id, { postRefs = [], scheduledFor = null, po
       WHERE id = $1 AND locked = false`,
     [id, JSON.stringify(postRefs), scheduledFor, postNow],
   );
+  if (rowCount > 0) await runLog.write(id, 'success', { detail: postNow ? 'handed to Post for Me to post now' : 'scheduled on Post for Me' });
   return rowCount > 0;
 }
 
@@ -208,6 +217,7 @@ export async function markPartial(id, { note = null, postedAt = new Date() } = {
       WHERE id = $1 AND locked = false`,
     [id, note, postedAt],
   );
+  if (rowCount > 0) await runLog.statusChanged(id, 'partial', note);
   return rowCount > 0;
 }
 
@@ -292,6 +302,7 @@ export async function markPostFailed(id, error) {
       WHERE id = $1 AND locked = false AND post_status = 'posting'`,
     [id, String(error || 'post failed').slice(0, 500)],
   );
+  if (rowCount > 0) await runLog.write(id, 'failed', { detail: `post: ${error || 'post failed'}` });
   return rowCount > 0;
 }
 
@@ -359,7 +370,8 @@ export const SAMPLE_TITLE = 'SAMPLE: delete me';
  * Delete an instance and log it in one statement, so its cost is never lost.
  * A locked (posted) instance is never deleted.
  */
-export async function remove(id) {
+export async function remove(id, { by = '', why = 'deleted' } = {}) {
+  const before = await get(id).catch(() => null);
   const { rows } = await query(
     `WITH gone AS (
        DELETE FROM instances WHERE id = $1 AND locked = false RETURNING *
@@ -377,7 +389,9 @@ export async function remove(id) {
      SELECT count(*)::int AS n FROM gone`,
     [id, SAMPLE_TITLE],
   );
-  return rows[0].n > 0;
+  const gone = rows[0].n > 0;
+  if (gone) await runLog.write(id, 'deleted', { detail: `${why}${before && before.status ? ` (was ${before.status})` : ''}`, by, row: before });
+  return gone;
 }
 
 /**
@@ -519,6 +533,7 @@ export async function supersede(id, note = 'replaced by a router re-run') {
       WHERE id = $1 AND locked = false AND status NOT IN ('approved', 'scheduled', 'posted', 'partial')`,
     [id, note],
   );
+  if (rowCount > 0) await runLog.write(id, 'superseded', { detail: note });
   return rowCount > 0;
 }
 

@@ -23,6 +23,7 @@
  *               driveConnectService, utils/{disapproveSpec,lessonSpec,
  *               approvalButtons}, logger.
  */
+import * as runLog from '../repositories/runLogRepository.js';
 import * as instanceRepo from '../repositories/instanceRepository.js';
 import * as approvals from '../repositories/approvalRepository.js';
 import * as tenantConfig from '../repositories/tenantConfigRepository.js';
@@ -79,7 +80,7 @@ async function finish(tenantId, row, by = '') {
     }
   }
   await instanceRepo.setStatus(row.id, 'disapproved', `Disapproved${by ? ` by ${by}` : ''}${row.note ? `: ${row.note}` : ''}`.slice(0, 500));
-  if (!(await instanceRepo.remove(row.id))) throw new Error('could not move it to the record (is it locked?)');
+  if (!(await instanceRepo.remove(row.id, { by, why: `disapproved${row.note ? `: ${row.note}` : ''}` }))) throw new Error('could not move it to the record (is it locked?)');
   log.info({ instance: row.id, funnel: row.funnel_name, files, left: filesLeft.length }, 'disapproved');
   return { ok: true, files, filesLeft: filesLeft.length };
 }
@@ -147,7 +148,7 @@ export async function hold({ tenantId = 'default', instanceId, reason = '', by =
 export async function extendHold({ tenantId = 'default', instanceId }) {
   const row = await instanceRepo.get(instanceId);
   if (!row || String(row.tenant_id) !== String(tenantId) || row.status !== HOLD_STATUS) return false;
-  if (!(await instanceRepo.transition(row.id, HOLD_STATUS, HOLD_STATUS))) return false;
+  if (!(await instanceRepo.transition(row.id, HOLD_STATUS, HOLD_STATUS, undefined, { logOutcome: false }))) return false;
   const id = String(row.id);
   clearTimeout(timers.get(id));
   timers.set(id, setTimeout(() => { finalizeHold({ tenantId, instanceId: id }).catch(() => null); }, (HOLD_SECONDS + 2) * 1000));
@@ -169,7 +170,8 @@ export async function remake({ tenantId = 'default', instanceId, corrections = '
   const back = waitStatusOf(approval);
   if (!approval || !back) throw new Error('this run has no approval to remake from');
   // Claim the run back from the hold first, so the timer cannot finish it.
-  if (!(await instanceRepo.transition(row.id, HOLD_STATUS, back, `Remake: ${fix}`.slice(0, 500)))) throw new Error('the minute ran out: it is already in the log');
+  if (!(await instanceRepo.transition(row.id, HOLD_STATUS, back, `Remake: ${fix}`.slice(0, 500), { logOutcome: false }))) throw new Error('the minute ran out: it is already in the log');
+  await runLog.write(row.id, 'remake', { detail: `${what === 'video' ? 'video' : 'picture and copy'} corrections: ${fix}` });
   clearTimeout(timers.get(String(row.id)));
   timers.delete(String(row.id));
 

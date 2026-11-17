@@ -20,6 +20,7 @@
  *         GET /api/v1/admin/log        last 30 runs, cost + delivery
  */
 import * as views from '../repositories/workViewRepository.js';
+import * as runLog from '../repositories/runLogRepository.js';
 import * as funnelsRepo from '../repositories/funnelsRepository.js';
 import * as instances from '../services/instanceService.js';
 import { reviewPath } from '../services/approvalService.js';
@@ -110,7 +111,20 @@ export function register(ctx) {
     }
   });
 
-  log.info('admin work pages registered (today, calendar, log)');
+  // Run log: every pass of every instance, how it ended and why, and every delete.
+  router.get('/admin/run-log', async (req, res, next) => {
+    try {
+      if (!(await guardHtml(req, res))) return;
+      const tenantId = req.tenantId || 'default';
+      const instance = String(req.query.instance || '').trim();
+      const [session, rows] = await Promise.all([currentSession(req), runLog.list({ tenantId, instance, limit: instance ? 2000 : 500 })]);
+      res.type('html').send(runLogPage({ session, rows, instance }));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  log.info('admin work pages registered (today, calendar, log, run log)');
 }
 
 // ---- rendering -------------------------------------------------------------
@@ -288,7 +302,7 @@ function logPage({ session, rows, month, monthStart, deleted = [], deletedAll = 
   return shell('Log and cost', `
     <div class="top">
       <div><h1>Log and cost</h1><div class="sub">The last 30 runs, their real AI cost and where each one posted.</div></div>
-      <div class="toprow"><a class="act" href="/api/v1/dashboard">Delivery dashboard (older feeds, tracking-bridge)</a></div>
+      <div class="toprow"><a class="act primary" href="/api/v1/admin/run-log">Run log: every pass and error</a><a class="act" href="/api/v1/dashboard">Delivery dashboard (older feeds, tracking-bridge)</a></div>
     </div>
     <div class="tiles">
       ${tile(`Cost since ${formatIst(monthStart, { withTime: false })}`, month ? usd(month.total) : '-', `this month, all funnels, ${month ? usd(month.deleted) : '-'} of it on deleted runs`)}
@@ -343,6 +357,47 @@ function tile(title, value, sub) {
 
 function usd(n) {
   return `$${(Number(n) || 0).toFixed(2)}`;
+}
+
+const RUN_DOT = { success: '🟢', failed: '🔴', 'retry refused': '🔴', deleted: '🔴', disapproved: '🟡', superseded: '🟡', retry: '🟡', remake: '🟡', created: '🟢' };
+
+/** Per instance: passes made, failures, how it stands now (its newest event). Rows come newest first. */
+export function runSummary(rows) {
+  const by = new Map();
+  for (const r of rows || []) {
+    const id = String(r.instance_id);
+    const s = by.get(id) || { id, title: r.title, funnel: r.funnel_name, passes: 0, failures: 0, last: r, at: r.at };
+    s.passes = Math.max(s.passes, Number(r.pass) || 1);
+    if (r.event === 'failed' || r.event === 'retry refused') s.failures += 1;
+    by.set(id, s);
+  }
+  return [...by.values()];
+}
+
+function runLogPage({ session, rows, instance }) {
+  const sum = runSummary(rows);
+  const one = instance && sum.length === 1 ? sum[0] : null;
+  const head = one
+    ? `${esc(one.title || 'Untitled')} · ${esc(one.funnel || '-')} · ${one.passes} pass${one.passes === 1 ? '' : 'es'}, ${one.failures} failure${one.failures === 1 ? '' : 's'}`
+    : `${sum.length} instance${sum.length === 1 ? '' : 's'}, newest event first${instance ? '' : ' (last 500 events)'}`;
+  const table = rows.length ? `<table><thead><tr><th>When (IST)</th><th>Instance</th><th>Pass</th><th>Event</th><th>Detail</th><th>By</th></tr></thead><tbody>${rows.map((r) => `<tr>
+    <td class="nw">${esc(formatIst(r.at))}</td>
+    <td><a href="/api/v1/admin/run-log?instance=${esc(r.instance_id)}">${esc(String(r.instance_id).slice(0, 8))}</a><div class="hint">${esc(r.title || '')}${r.funnel_name ? ` · ${esc(r.funnel_name)}` : ''}</div></td>
+    <td>${esc(String(r.pass))}</td>
+    <td class="nw">${RUN_DOT[r.event] || '⚪'} ${esc(r.event)}</td>
+    <td class="det">${esc(r.detail || '')}</td>
+    <td>${esc(r.by_email || '')}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">🟢 Nothing logged yet. Every run, Retry, Remake and delete from now on is written here.</p>';
+  return shell('Run log', `
+    <div class="top">
+      <div><h1>Run log</h1><div class="sub">Every pass of every post: pass 1 is the first run, each Retry or Remake is the next pass. How each ended, the error when it failed, and every delete. ${head}</div></div>
+      <div class="toprow">
+        <form method="get" action="/api/v1/admin/run-log" style="display:flex;gap:.4rem"><input name="instance" value="${esc(instance)}" placeholder="Instance id (first 8 is enough)" style="background:#12121b;color:#e8e8ef;border:1px solid #24243a;border-radius:8px;padding:.4rem .6rem;width:16em"><button class="act primary">Show</button></form>
+        ${instance ? '<a class="act" href="/api/v1/admin/run-log">All</a>' : ''}<a class="act" href="/api/v1/admin/log">← Log and cost</a>
+      </div>
+    </div>
+    <style>table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{text-align:left;padding:.45rem .5rem;border-bottom:1px solid #24243a;vertical-align:top}th{color:#9a9ab0;font-weight:600}.nw{white-space:nowrap}.det{max-width:420px;word-break:break-word}.hint{color:#8a8aa2;font-size:.75rem}a{color:#8fb4ff}</style>
+    ${table}
+  `, { current: 'log', session });
 }
 
 function shell(title, inner, { current = '', session = null } = {}) {

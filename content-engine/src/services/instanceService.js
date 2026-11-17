@@ -96,8 +96,8 @@ export async function logRows(args) {
   return repo.logRows(args);
 }
 
-export async function remove(instanceId) {
-  return repo.remove(instanceId);
+export async function remove(instanceId, opts = {}) {
+  return repo.remove(instanceId, opts);
 }
 
 /**

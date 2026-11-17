@@ -12,8 +12,9 @@ describe('deleting an instance keeps its cost', () => {
   it('deletes and logs in one statement, and only an unlocked instance', async () => {
     query.mockResolvedValue({ rows: [{ n: 1 }] });
     await expect(remove('abc')).resolves.toBe(true);
-    expect(query).toHaveBeenCalledTimes(1);
-    const [sql, params] = query.mock.calls[0];
+    // The row is read first (for the run log), then deleted, then the delete is logged.
+    const [sql, params] = query.mock.calls.find(([q]) => q.includes('DELETE FROM instances'));
+    expect(query.mock.calls.some(([q, p]) => q.includes('INSERT INTO run_log') && p[1] === 'deleted')).toBe(true);
     expect(sql).toContain('DELETE FROM instances WHERE id = $1 AND locked = false');
     expect(sql).toContain('INSERT INTO deleted_instances');
     expect(params).toEqual(['abc', SAMPLE_TITLE]);

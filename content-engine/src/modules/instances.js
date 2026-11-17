@@ -58,6 +58,7 @@ import * as approvalsRepo from '../repositories/approvalRepository.js';
 import { retryAction, isStuck, parseRetryDate, retryDateDefaults, RETRY_PICK_SCRIPT } from '../utils/retrySpec.js';
 import { buildTimeline, stepTotals, currentStep, formatSpan, LIVE_STEPS_SCRIPT, retryPasses, retryNote } from '../utils/stepTimeSpec.js';
 import * as stepLog from '../services/stepLogService.js';
+import * as runLog from '../repositories/runLogRepository.js';
 import { stepDownOf } from '../utils/stepDownSpec.js';
 import { pendingByInstance, approvalButtons, reviewFields, applyReviewEdit, parsePostAt, postAtText } from '../utils/approvalButtons.js';
 
@@ -465,9 +466,13 @@ export function register(ctx) {
       const s = await currentSession(req).catch(() => null);
       const pass = retryPasses(row.step_log) + 1;
       const passNote = retryNote({ pass, by: (s && s.email) || '', action, lastError: row.note || '' });
-      const refused = (msg) => stepLog.mark(row.id, 'retry-refused', `Retry pass ${pass} did not start: ${String(msg || '').slice(0, 300)}`);
+      const refused = async (msg) => {
+        await stepLog.mark(row.id, 'retry-refused', `Retry pass ${pass} did not start: ${String(msg || '').slice(0, 300)}`);
+        await runLog.write(row.id, 'retry refused', { detail: msg, by: (s && s.email) || '' });
+      };
       const startPass = async () => {
         await stepLog.mark(row.id, 'retry', passNote);
+        await runLog.write(row.id, 'retry', { detail: passNote, by: (s && s.email) || '' });
         log.info({ instance: row.id, pass, action }, 'retry pressed');
       };
       if (action === 'channels' || action === 'festival') {
@@ -533,7 +538,8 @@ export function register(ctx) {
   router.post('/admin/instances/:id/delete', async (req, res) => {
     try {
       if (!(await keyOk(req))) return res.status(401).json({ ok: false, error: 'unauthorized' });
-      const ok = await instances.remove(req.params.id);
+      const s = await currentSession(req).catch(() => null);
+      const ok = await instances.remove(req.params.id, { by: (s && s.email) || '', why: 'deleted from the Library' });
       res.json({ ok, error: ok ? null : 'locked or not found' });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
@@ -1035,7 +1041,7 @@ function detailPage(row, steps) {
       <div class="toprow">
         ${stepPill(row, steps).html}
         ${row.locked ? '<span class="pill ok">🔒 locked</span>' : ''}
-        <a class="act" href="/api/v1/admin/instances">← Library</a>
+        <a class="act" href="/api/v1/admin/run-log?instance=${esc(row.id)}">Run log</a><a class="act" href="/api/v1/admin/instances">← Library</a>
       </div>
     </div>
     <p class="ro">Read-only here. ${row.locked ? 'Posted and locked.' : 'Approve or request a change from the link in the daily email.'}</p>
