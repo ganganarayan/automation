@@ -109,12 +109,20 @@ describe('the settings', () => {
 describe('the audience line above the headline', () => {
   it.each(Object.entries(THUMB_SIZES))('%s: smaller than the headline, above it, accent serif capitals', (_, spec) => {
     const svg = thumbSvg({ ...spec, accent: THUMB_ACCENT, text: 'He just tolerates', tag: 'For NRI parents' });
-    const brow = svg.match(/<text x="\d+" y="(\d+)"[^>]*Noto Serif[^>]*font-size="(\d+)" fill="([^"]+)"[^>]*>FOR NRI PARENTS</);
+    const brow = svg.match(/Noto Serif[^>]*font-size="(\d+)" fill="([^"]+)"[^>]*><tspan x="\d+" y="(\d+)">FOR NRI PARENTS</);
     const head = svg.match(/font-weight="800" font-size="(\d+)"[^>]*><tspan x="\d+" y="(\d+)"/);
     expect(brow).not.toBeNull();
-    expect(Number(brow[2])).toBeLessThan(Number(head[1]) * 0.5);
-    expect(Number(brow[1])).toBeLessThan(Number(head[2]));
-    expect(brow[3]).toBe(THUMB_ACCENT);
+    expect(Number(brow[1])).toBeLessThan(Number(head[1]) * 0.5);
+    expect(Number(brow[3])).toBeLessThan(Number(head[2]));
+    expect(brow[2]).toBe(THUMB_ACCENT);
+  });
+  it('a long audience line in a narrow box wraps onto more lines instead of shrinking to a speck', async () => {
+    const { thumbSvgPlaced } = await import('../src/utils/thumbSpec.js');
+    const svg = thumbSvgPlaced({ w: 1080, h: 1350, text: 'You gave him everything you never had.', sub: 'You forgot to give him what you did.', tag: 'For the founder whose son will inherit', place: { x0: 40, y0: 200, x1: 420, y1: 700, align: 'left' } });
+    const brow = svg.match(/Noto Serif[^>]*font-size="(\d+)"[^>]*>(.*?)<\/text>/);
+    const head = svg.match(/font-weight="800" font-size="(\d+)"/);
+    expect((brow[2].match(/<tspan/g) || []).length).toBeGreaterThan(1);
+    expect(Number(brow[1])).toBeGreaterThanOrEqual(Number(head[1]) * 0.3);
   });
   it('a hashtag or an over-long line is not drawn; escaped', () => {
     expect(thumbSvg({ ...THUMB_SIZES.landscape, text: 'x', tag: '#parents' })).not.toContain('Noto Serif');

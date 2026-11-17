@@ -177,6 +177,30 @@ const SANS = 'font-family="Noto Sans, Noto Sans Devanagari, DejaVu Sans, sans-se
 const SERIF = 'font-family="Noto Serif, DejaVu Serif, serif"';
 
 /**
+ * The eyebrow's lines and size: as big as it can be up to 42% of the headline,
+ * on 1 to 3 lines (no word split, nothing cut), so a 40-character audience line
+ * in a narrow box still reads instead of shrinking to one tiny line.
+ */
+export function browLayout(text, { boxW, boxH = Infinity, size }) {
+  const t = String(text || '').trim();
+  if (!t) return { lines: [], size: 0 };
+  const cap = size * 0.42;
+  const words = t.split(/\s+/);
+  const longest = Math.max(...words.map((x) => x.length));
+  let best = null;
+  for (let chars = longest; chars <= Math.max(longest, t.length); chars += 1) {
+    const lines = wrapText(t, chars, 99);
+    if (lines.length > 3) continue;
+    const widest = Math.max(...lines.map((l) => textWidthEm(l, { spacing: 0.08 }))) + OUTLINE_EM;
+    const s = Math.floor(Math.min(cap, boxW / widest, boxH / (1.55 + 1.15 * (lines.length - 1))));
+    // Prefer fewer lines unless an extra line buys a clearly bigger size.
+    if (!best || s > best.size * 1.15 || (s >= best.size && lines.length <= best.lines.length)) best = { lines, size: s };
+  }
+  if (!best) best = { lines: wrapText(t, longest, 99), size: 0 };
+  return { lines: best.lines, size: Math.max(10, best.size) };
+}
+
+/**
  * The three lines as one block inside box: the audience eyebrow (small serif
  * italic capitals, accent colour), the headline (big bold sans) and the
  * sub-head under it, all fitted so no word is cut, aligned left, centre or
@@ -188,8 +212,8 @@ export function textBlock({ box, text, sub = '', tag = '', accent = '#FFC400', m
   const k = Math.max(0.3, Math.min(1, Number(shrink) || 1));
   const boxW = (x1 - x0) * k;
   const boxH = (y1 - y0) * k;
-  const brow = eyebrowClean(tag).toUpperCase();
-  const browShare = brow ? 0.16 : 0;
+  const browText = eyebrowClean(tag).toUpperCase();
+  const browShare = browText ? 0.16 : 0;
   const head = fitText(text, { boxW, boxH: boxH * ((sub ? 0.64 : 1) - browShare), maxSize: maxSize * k });
   const size = head.size || Math.round(maxSize * 0.5 * k);
   const lh = Math.round(size * 1.15);
@@ -197,9 +221,13 @@ export function textBlock({ box, text, sub = '', tag = '', accent = '#FFC400', m
   const subLh = Math.round(subFit.size * 1.25);
   const subGap = subFit.lines.length ? Math.round(size * 0.2) : 0;
   // The eyebrow is italic serif capitals with 0.08 em letter spacing: measured the same way.
-  const browSize = brow ? Math.max(10, Math.floor(Math.min(size * 0.42, boxW / (textWidthEm(brow, { spacing: 0.08 }) + OUTLINE_EM)))) : 0;
-  const browGap = brow ? Math.round(browSize * 0.55) : 0;
-  const block = browSize + browGap + lh * head.lines.length + subGap + subLh * subFit.lines.length;
+  // A long audience line in a narrow box wraps onto up to 3 lines instead of shrinking to a speck.
+  const brow = browLayout(browText, { boxW, boxH: boxH * browShare, size });
+  const browSize = brow.size;
+  const browLh = Math.round(browSize * 1.15);
+  const browGap = browSize ? Math.round(browSize * 0.55) : 0;
+  const browH = browSize ? browSize + browLh * (brow.lines.length - 1) : 0;
+  const block = browH + browGap + lh * head.lines.length + subGap + subLh * subFit.lines.length;
   const top = y0 + Math.max(0, (boxH - block) / 2);
   const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
   const x = align === 'left' ? x0 : align === 'right' ? x1 : Math.round((x0 + x1) / 2);
@@ -208,10 +236,11 @@ export function textBlock({ box, text, sub = '', tag = '', accent = '#FFC400', m
   const edge = dark ? '#FFFFFF' : '#000000';
   const stroke = (px) => `stroke="${edge}" stroke-width="${Math.max(2, Math.round(px * 0.06))}" paint-order="stroke"`;
   const parts = [];
-  if (brow) {
-    parts.push(`<text x="${x}" y="${Math.round(top + browSize * 0.85)}" text-anchor="${anchor}" ${SERIF} font-style="italic" font-weight="700" letter-spacing="${(browSize * 0.08).toFixed(1)}" font-size="${browSize}" fill="${dark ? '#9A6B00' : accent}" ${stroke(browSize)}>${xmlEsc(brow)}</text>`);
+  if (browSize) {
+    const by0 = Math.round(top + browSize * 0.85);
+    parts.push(`<text text-anchor="${anchor}" ${SERIF} font-style="italic" font-weight="700" letter-spacing="${(browSize * 0.08).toFixed(1)}" font-size="${browSize}" fill="${dark ? '#9A6B00' : accent}" ${stroke(browSize)}>${brow.lines.map((l, i) => `<tspan x="${x}" y="${by0 + i * browLh}">${xmlEsc(l)}</tspan>`).join('')}</text>`);
   }
-  const hy0 = Math.round(top + browSize + browGap + size * 0.9);
+  const hy0 = Math.round(top + browH + browGap + size * 0.9);
   parts.push(`<text text-anchor="${anchor}" ${SANS} font-weight="800" font-size="${size}" fill="${fill}" ${stroke(size)}>${head.lines.map((l, i) => `<tspan x="${x}" y="${hy0 + i * lh}">${xmlEsc(l)}</tspan>`).join('')}</text>`);
   if (subFit.lines.length) {
     const sy0 = hy0 + (head.lines.length - 1) * lh + subGap + subLh;
