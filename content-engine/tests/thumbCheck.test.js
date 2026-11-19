@@ -70,14 +70,24 @@ describe('place, check, at most one more try', () => {
     expect(placeNoteText(notes)).toMatch(/not checked a third time/);
   });
 
-  it('faces filling the picture: no text at all, never text on a face, and said on the page', async () => {
+  it('faces filling the picture: the text still goes on (never left off), and it is said on the page', async () => {
     const full = { sizes: [{ size: 'landscape', ok: false, faces: [{ x: 0, y: 0, w: 100, h: 100 }], problem: 'faces everywhere' }] };
-    const claude = fakeClaude({ places: [{ sizes: [topCentre] }, { sizes: [topCentre] }], checks: [full] });
+    const claude = fakeClaude({ places: [{ sizes: [topCentre] }, { sizes: [topCentre] }], checks: [full, full] });
     const notes = [];
     const places = await placeChecked({ claude, pictures: { landscape: await pic() }, text: 'THEY WATCH YOU', notes });
-    expect(places.landscape).toEqual({ none: true });
-    expect(claude.calls).toEqual(['place', 'check', 'place']);
-    expect(placeNoteText(notes)).toMatch(/no text on it/);
+    expect(places.landscape && places.landscape.none).toBeFalsy();
+    expect(places.landscape).toHaveProperty('x0');
+    expect(notes.length).toBe(1);
+  });
+
+  it('the model marking the whole frame as subject still leaves the text clear of the faces found', async () => {
+    const face = { sizes: [{ size: 'landscape', ok: false, faces: [{ x: 40, y: 5, w: 20, h: 30 }], problem: 'headline on her forehead' }] };
+    const everything = { size: 'landscape', subject: { x: 0, y: 0, w: 100, h: 92 }, text: { x: 59, y: 3, w: 38, h: 14 }, align: 'right', color: 'dark' };
+    const claude = fakeClaude({ places: [{ sizes: [topCentre] }, { sizes: [everything] }], checks: [face, { sizes: [{ size: 'landscape', ok: true, faces: [], problem: '' }] }] });
+    const notes = [];
+    const places = await placeChecked({ claude, pictures: { landscape: await pic() }, text: 'YOUR JAW', notes });
+    expect(places.landscape).toHaveProperty('x0');
+    expect(places.landscape.none).toBeFalsy();
   });
 
   it('a failed check is said on the page, not retried', async () => {

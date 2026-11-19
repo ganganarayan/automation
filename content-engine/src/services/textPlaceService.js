@@ -11,7 +11,7 @@
  *               thumbnails and by image posts.
  * Responsibility:
  *               - placeChecked({ claude, pictures, text, sub, tag, bottomClear, costs, notes, log }):
- *                 key -> box, null (fixed layout) or { none: true } (no text on the picture);
+ *                 key -> box or null (fixed layout); the text is never left off;
  *                 anything not proven clear of faces gets a note (shown on the page)
  *               - placeText({ claude, pictures, text, ..., avoid, hints, last, raws }): one placement call
  *               - checkText({ claude, pictures, places, text, ... }): one look at the finished pictures
@@ -113,7 +113,7 @@ export async function checkText({ claude, pictures, places, text, sub = '', tag 
  * without text, read again, keeping clear of every face found) and check once
  * more. Then stop: a size still failing is moved clear of every face either
  * check found, with no further AI call, or gets no text at all when no space
- * is clear. Returns key -> box, null (fixed top layout) or { none: true }.
+ * is clear. Returns key -> box or null (fixed top layout); never a picture without its text.
  * Every size not proven clear gets a note on `notes`, for the page.
  */
 export async function placeChecked({ claude, pictures, text, sub = '', tag = '', bottomClear = 0, accent = THUMB_ACCENT, costs = [], notes = [], log, hint = '' }) {
@@ -142,24 +142,40 @@ export async function placeChecked({ claude, pictures, text, sub = '', tag = '',
   const raws = {};
   const second = [];
   const retry = await placeText({ claude, pictures: again, text, sub, tag, bottomClear, costs, notes: second, log, avoid, hints, last: true, raws });
-  for (const size of bad) places[size] = retry[size] || (look1[size].faces.length ? { none: true } : null);
-  const shown = Object.fromEntries(bad.filter((size) => !(places[size] && places[size].none)).map((size) => [size, pictures[size]]));
+  for (const size of bad) places[size] = retry[size] || lastResort(raws[size] || null, { w: pictures[size].w, h: pictures[size].h, bottomClear, faces: look1[size].faces });
+  const shown = Object.fromEntries(bad.map((size) => [size, pictures[size]]));
   const look2 = Object.keys(shown).length ? await checkText({ claude, pictures: shown, places, text, sub, tag, accent, costs, log }) : {};
   for (const size of bad) {
     const p = pictures[size];
-    if (places[size] && places[size].none) { note(size, `no space clear of the faces after a second try, so the picture has no text on it (${look1[size].problem || 'text on a face'})`); continue; }
     if (!look2) { note(size, 'moved off a face on the second try, but the second check failed, so it was not checked again'); continue; }
     if (look2[size] && look2[size].ok) { log?.info?.({ size }, 'text fixed on the second try'); continue; }
     // Stop here: no third call. Clear of every face either look found, or no text.
     const faces = [...look1[size].faces, ...((look2[size] && look2[size].faces) || [])];
-    const place = placeFor(raws[size] || null, { w: p.w, h: p.h, bottomClear, avoid: faces, last: true });
-    places[size] = place || { none: true };
-    note(size, place
-      ? `still on a face after the second try (${(look2[size] && look2[size].problem) || 'text on a face'}), moved clear of every face found, not checked a third time`
-      : `still on a face after the second try, and no space is clear of the faces, so the picture has no text on it`);
+    places[size] = lastResort(raws[size] || null, { w: p.w, h: p.h, bottomClear, faces });
+    note(size, `still on a face after the second try (${(look2[size] && look2[size].problem) || 'text on a face'}), moved to the space farthest from the faces found, not checked a third time`);
   }
   log?.warn?.({ sizes: bad, notes: notes.length }, 'text over a face on the first try, placed again');
   return places;
+}
+
+/**
+ * The text always goes on: the box clear of every face found (ignoring the
+ * model's subject box, which can swallow the whole frame), else the widest band
+ * below the lowest face, else above the highest one, else the top band. Never
+ * no text. Pure apart from placeFor.
+ */
+export function lastResort(raw, { w, h, bottomClear = 0, faces = [] }) {
+  const near = placeFor(raw, { w, h, bottomClear, avoid: faces, last: true }) || placeFor(null, { w, h, bottomClear, avoid: faces, last: true });
+  if (near) return near;
+  const align = 'center';
+  const color = raw && raw.color === 'dark' ? 'dark' : 'light';
+  const x0 = Math.round(w * 0.03); const x1 = Math.round(w * 0.97);
+  const floor = Math.round(h * (1 - Math.max(0.03, Math.min(0.5, Number(bottomClear) || 0))));
+  const low = faces.length ? Math.max(...faces.map((f) => f.y1)) : 0;
+  const high = faces.length ? Math.min(...faces.map((f) => f.y0)) : h;
+  if (floor - low >= h * 0.1) return { x0, y0: Math.round(low + h * 0.01), x1, y1: floor, align, color, how: 'below faces' };
+  if (high - h * 0.03 >= h * 0.1) return { x0, y0: Math.round(h * 0.03), x1, y1: Math.round(high - h * 0.01), align, color, how: 'above faces' };
+  return { x0, y0: Math.round(h * 0.03), x1, y1: Math.round(h * 0.2), align, color, how: 'top band' };
 }
 
 /** The notes from placeChecked as one line for the page; '' when every size is clear. */

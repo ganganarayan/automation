@@ -67,7 +67,7 @@ export function placeSystem({ bottomClear = 0 } = {}) {
   return [
     'You place the headline on finished social media thumbnails. Each image has no text yet.',
     'For each image, return:',
-    '- subject: one box around every face and head (hair included, people in the background too) and the main subject together (hands, the product), in percent of that image (x, y = top-left corner; w, h = size; 0 to 100).',
+    '- subject: one box around the main person\'s face and head (hair included) and the main subject (the product), in percent of that image (x, y = top-left corner; w, h = size; 0 to 100). Keep it tight: not the whole frame.',
     '- text: the largest calm, empty area for a bold headline of the length given, in percent, completely outside the subject box: plain background, sky, wall, floor or soft blur. Prefer a wide box; it may run along any side. Keep 3% clear of every edge.',
     '- align: left, center or right, whichever sits best in that area next to the subject.',
     '- color: light (white text) when the area is dark, dark (near-black text) when it is bright.',
@@ -216,7 +216,7 @@ export function checkSystem() {
     'You check finished social media thumbnails before they are posted. The app wrote text on each picture.',
     'For each image, return:',
     '- faces: one box around every face and whole head, hair included, in the picture (people and animals), in percent of that image (x, y = top-left corner; w, h = size; 0 to 100). An empty list when there are none.',
-    '- ok: true only when no letter of the text covers or touches any face, forehead, hair, eyes, mouth or head, nor hands or the main product. Text on plain background, wall, table, sky or blur is fine.',
+    '- ok: true only when no letter of the text covers or touches any face, forehead, hair, eyes, mouth or head. Text over a hand, an arm, clothing, a table, a wall, sky or blur is fine.',
     '- problem: when ok is false, say in a few words what the text covers; else an empty string.',
     'Judge each image on its own.',
   ].join('\n');
