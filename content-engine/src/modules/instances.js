@@ -60,6 +60,7 @@ import { buildTimeline, stepTotals, currentStep, formatSpan, LIVE_STEPS_SCRIPT, 
 import * as stepLog from '../services/stepLogService.js';
 import * as runLog from '../repositories/runLogRepository.js';
 import { stepDownOf } from '../utils/stepDownSpec.js';
+import { canMoveText } from '../utils/moveTextSpec.js';
 import { pendingByInstance, approvalButtons, reviewFields, applyReviewEdit, parsePostAt, postAtText } from '../utils/approvalButtons.js';
 
 const MANUAL_JOB = 'manual_stage';
@@ -636,10 +637,10 @@ export function register(ctx) {
     }
   });
 
-  // 🔁 Place the text again from Review, no Disapprove needed: the same still,
-  // only the text is placed again with your note as the instruction; back here
-  // for approval. The note is also kept as a lesson. Step-down posts only: they
-  // keep their no-text still, so nothing is drawn again.
+  // 🔁 Place the text again from Review, no Disapprove needed: the same picture,
+  // only the words placed again with your note as the instruction; back here for
+  // approval. The note is also kept as a lesson. Only for posts that kept their
+  // picture without text (a video's still, or sheet image posts from now on).
   router.post('/admin/instances/:id/fix-picture', async (req, res) => {
     try {
       if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to fix the picture' });
@@ -648,11 +649,13 @@ export function register(ctx) {
       const { row, steps, approval } = await approvalFor(req);
       if (!row) return res.status(404).json({ ok: false, error: 'instance not found' });
       if (!approval || row.status !== 'image_review') return res.status(409).json({ ok: false, error: 'this picture is no longer waiting for approval' });
-      if (!stepDownOf(steps)) return res.status(409).json({ ok: false, error: 'only image posts made from a video still can have their text placed again here' });
+      if (!canMoveText(steps)) return res.status(409).json({ ok: false, error: 'this post did not keep its picture without text, so its text cannot be placed again (Disapprove and Remake draws a new picture)' });
       const s = await currentSession(req).catch(() => null);
+      const lane = await import('../services/imageLaneService.js');
+      if (approval.kind !== lane.KIND) return res.status(409).json({ ok: false, error: 'this kind of post cannot have its text placed again here' });
       await approvalsRepo.reopenForRework(approval.id, fix);
-      if (!approvalService.reworkById(approval, fix)) return res.status(409).json({ ok: false, error: 'this kind of post cannot be remade from here' });
-      await runLog.write(row.id, 'remake', { detail: `picture corrections: ${fix}`, by: (s && s.email) || '' }).catch(() => null);
+      Promise.resolve(lane.rework(approval, fix, { keepPicture: true })).catch((err) => log.error({ err: err.message, instance: row.id }, 'place the text again failed'));
+      await runLog.write(row.id, 'remake', { detail: `text placed again on the same picture: ${fix}`, by: (s && s.email) || '' }).catch(() => null);
       await disapproveService.learn(req.tenantId || 'default', 'image', fix, 'remake').catch(() => null);
       log.info({ instance: row.id, approval: approval.id }, 'picture fix requested from Review');
       res.json({ ok: true });
@@ -1154,7 +1157,7 @@ function reviewPage(row, steps, approval, buttons, script) {
       <span id="rvmsg" class="hint"></span>
     </div>
     <p class="hint">Save stores your edit only. ${esc(buttons.approveLabel)} moves it on, the same as the email's link.${posts ? ' Post at starts as the time this post was planned for; change it (to today, say) before you approve. A time already past posts at once.' : ''}</p>
-    ${row.status === 'image_review' && stepDownOf(steps) ? `<h3>Move the text</h3>
+    ${row.status === 'image_review' && canMoveText(steps) ? `<h3>Move the text</h3>
     <label class="rvf">Where the text should go<textarea id="fixnote" rows="3" placeholder="e.g. headline at the bottom on the table, off her face"></textarea></label>
     <div class="rvbar"><button class="act big" id="fixbtn" onclick="fixPic()">🔁 Place the text again</button><span id="fixmsg" class="hint"></span></div>
     <p class="hint">No Disapprove needed. The same picture is kept; only the headline and sub-head are placed again, following your note and kept clear of faces. It comes back here for approval in under a minute. The note is also kept as a lesson.</p>` : ''}

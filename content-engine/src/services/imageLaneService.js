@@ -58,6 +58,7 @@ import { placeChecked, drawText } from './textPlaceService.js';
 import { eyebrowClean } from '../utils/thumbSpec.js';
 import { SPLIT_SCHEMA, splitSystem, splitUser, splitResult } from '../utils/imageSplitSpec.js';
 import { totalClipSeconds } from '../utils/stageSpec.js';
+import { canMoveText } from '../utils/moveTextSpec.js';
 import { stepDownOf, stepDownPicture, stepDownText, stepDownCaption, stepDownNote, stepDownSize } from '../utils/stepDownSpec.js';
 import { formatIst } from '../utils/time.js';
 import { festivalCaptions } from '../utils/festivalSpec.js';
@@ -133,7 +134,7 @@ async function refill({ f, providers, tab, rows, log }) {
  * GitHub answers later through imageVideoJobService's hooks; Railway answers
  * now. Leaves the instance at image_review (or failed, with the reason).
  */
-async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '', festival = null, log }) {
+async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '', festival = null, keepPicture = false, log }) {
   const inst = await instanceRepo.get(instanceId);
   if (!inst) throw new Error(`instance ${instanceId} not found`);
   // A festival post is your own picture and your own words: nothing is drawn or rewritten.
@@ -143,7 +144,7 @@ async function renderAndSend({ instanceId, f, providers, fields, sheet, note = '
   let steps = instanceService.parseSteps(inst);
   for (const k of ['animate', 'voiceover', 'transcript', 'stitch']) steps = patchStep(steps, k, { status: 'skipped' });
   steps = patchStep(steps, 'script', { status: 'done', artifacts: { text: short || full, copy: { title: fields.headline || '', description: full }, captionFull: full, captionShort: short } });
-  steps = patchStep(steps, 'images', { status: 'running', startedAt: new Date().toISOString(), artifacts: { prompt, note: note || '', row: fields, sheet, tried: [], placed: null, ...(festival ? { festival } : {}) } });
+  steps = patchStep(steps, 'images', { status: 'running', startedAt: new Date().toISOString(), artifacts: { prompt, note: note || '', row: fields, sheet, tried: [], placed: null, keepPicture: !!keepPicture, ...(festival ? { festival } : {}) } });
   await instanceRepo.saveSteps(instanceId, steps, sumInstanceCost(steps));
   await stepLog.start(instanceId, 'images');
   const video = imageVideoMode(providers.resolved.imageVideo) === 'on';
@@ -310,9 +311,11 @@ async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
   let made = 0;
   const costs = [];
   const name = (size) => `${poster.slug(f.name)}-${poster.slug((img.sheet || {}).key || '')}-r${round || 1}${size === 'feed' ? '' : `-${size}`}.png`;
+  // Move the text: the no-text pictures kept from the last round, the same words, nothing drawn.
+  const kept = img.keepPicture ? await keptPictures(providers, img, log) : null;
   // Two steps when Claude is set: a picture with no text, then the words where it is empty.
-  const split = await splitPrompt({ providers, img, costs, log });
-  const pictures = {};
+  const split = kept ? kept.words : await splitPrompt({ providers, img, costs, log });
+  const pictures = kept ? kept.pictures : {};
   const draw = async (size) => {
     const spec = IMAGE_VIDEO_SIZES[size];
     // Gemini draws square only: cropping that to 9:16 could cut the headline, so it stays whole
@@ -326,7 +329,9 @@ async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
     return up;
   };
   let upload = null;
-  if (providers.resolved?.lean) {
+  if (kept) {
+    // Nothing to draw: straight on to placing the words.
+  } else if (providers.resolved?.lean) {
     // Starter Lite: draw the 9:16 picture once and cut the 4:5 from its middle;
     // the 16:9 size uses the 4:5 (its video fits it on a blurred copy of itself).
     const tall = await poster.generate(providers, sizedPrompt(split ? split.picture : img.prompt || '', 'portrait'), imageSpec(IMAGE_VIDEO_SIZES.portrait.gen).size, providers.resolved?.openai?.apiKey ? IMAGE_VIDEO_SIZES.portrait.gen : 'square');
@@ -345,9 +350,9 @@ async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
     }
   }
   // The 4:5 one is the preview and the picture-mode post; a size that fails uses it.
-  if (!providers.resolved?.lean) upload = await draw('feed');
+  if (!kept && !providers.resolved?.lean) upload = await draw('feed');
   if (upload && !sized.feed) sized.feed = upload.downloadUrl;
-  for (const size of providers.resolved?.lean ? [] : ['portrait', 'landscape']) {
+  for (const size of kept || providers.resolved?.lean ? [] : ['portrait', 'landscape']) {
     try {
       const up = await draw(size);
       if (up) sized[size] = up.downloadUrl;
@@ -374,9 +379,41 @@ async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
       sized[size] = up.downloadUrl;
     }
     if (!upload) throw new Error('the 4:5 picture was not made');
+    // Keep the pictures without text and their words, so Move the text never draws again.
+    if (!kept) await keepPictures({ instanceId, f, providers, pictures, words: { headline: split.headline, sub, tag: split.tag || '' }, name, log });
   }
   await rememberPlaced(instanceId, { round: round || 1, upload, sized, split: !!split });
   return { upload, sized, made, costs };
+}
+
+/** Upload the no-text pictures and save them with their words on the images step. A failure only costs Move the text. */
+async function keepPictures({ instanceId, f, providers, pictures, words, name, log }) {
+  try {
+    const bare = {};
+    for (const [size, buf] of Object.entries(pictures)) {
+      const up = await providers.storage.uploadPng(f.driveFolder, name(size).replace(/\.png$/, '-notext.png'), buf);
+      if (up && (up.id || up.downloadUrl)) bare[size] = { driveId: up.id || null, url: up.downloadUrl || '' };
+    }
+    if (!Object.keys(bare).length) return;
+    await instanceService.updateStep(instanceId, 'images', { artifacts: { ...imagesArtOf(await instanceRepo.get(instanceId)), bare, words } });
+  } catch (err) {
+    log.warn({ err: err.message, instanceId }, 'no-text pictures not kept (Move the text will not be offered)');
+  }
+}
+
+/** The kept no-text pictures as buffers with their words, or null (then the picture is drawn as usual). */
+async function keptPictures(providers, img, log) {
+  const bare = img.bare || {};
+  const words = img.words || {};
+  if (!Object.keys(bare).length || !String(words.headline || '').trim()) return null;
+  try {
+    const pictures = {};
+    for (const [size, p] of Object.entries(bare)) pictures[size] = await stillBuffer(providers, p);
+    return { pictures, words: { picture: '', headline: words.headline, sub: words.sub || '', tag: words.tag || '' } };
+  } catch (err) {
+    log.warn({ err: err.message }, 'kept no-text pictures could not be read');
+    throw new Error(`the original pictures could not be read from Drive (${err.message}); nothing was drawn again`);
+  }
 }
 
 // Share of the height kept free of the headline: the video's subtitles run there.
@@ -919,8 +956,12 @@ async function videoFor({ row, f, providers, publish, images, sizes, text, log }
   }
 }
 
-/** Rework (reject with a note): regenerate the image and re-send the approval. */
-export async function rework(approval, note) {
+/**
+ * Rework (reject with a note): regenerate the image and re-send the approval.
+ * keepPicture (Move the text on Review): the same no-text pictures, only the
+ * words placed again with the note as the instruction; nothing is drawn.
+ */
+export async function rework(approval, note, { keepPicture = false } = {}) {
   const p = approval.payload || {};
   const row = p.instanceId ? await instanceRepo.get(p.instanceId) : null;
   const log = baseLog.child({ instance: p.instanceId });
@@ -943,7 +984,7 @@ export async function rework(approval, note) {
       await renderAndSend({ instanceId: row.id, f: ctx.f, providers: ctx.providers, fields: img.row || {}, sheet: {}, festival: { ...img.festival, autoPost: false }, log });
       return null;
     }
-    await renderAndSend({ instanceId: row.id, f: ctx.f, providers: ctx.providers, fields: img.row || {}, sheet: { ...ctx.sheet, tab: ctx.tab }, note: note || '', log });
+    await renderAndSend({ instanceId: row.id, f: ctx.f, providers: ctx.providers, fields: img.row || {}, sheet: { ...ctx.sheet, tab: ctx.tab }, note: note || '', keepPicture: keepPicture && canMoveText(ctx.steps), log });
   } catch (err) {
     log.error({ err: err.message }, 'image rework failed');
     await instanceRepo.setStatus(row.id, 'failed', `Rework: ${err.message}`);
