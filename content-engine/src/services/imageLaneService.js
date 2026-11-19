@@ -58,8 +58,7 @@ import { placeChecked, drawText } from './textPlaceService.js';
 import { eyebrowClean } from '../utils/thumbSpec.js';
 import { SPLIT_SCHEMA, splitSystem, splitUser, splitResult } from '../utils/imageSplitSpec.js';
 import { totalClipSeconds } from '../utils/stageSpec.js';
-import { stepDownOf, stepDownPicture, stepDownText, stepDownCaption, stepDownPrompt, stepDownNote } from '../utils/stepDownSpec.js';
-import { headlineImage } from './imageComposer.js';
+import { stepDownOf, stepDownPicture, stepDownText, stepDownCaption, stepDownPrompt, stepDownNote, stepDownSize } from '../utils/stepDownSpec.js';
 import { formatIst } from '../utils/time.js';
 import { festivalCaptions } from '../utils/festivalSpec.js';
 import {
@@ -365,7 +364,7 @@ async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
     const tag = eyebrowClean(split.tag);
     const sub = split.sub;
     const notes = [];
-    const places = await placeChecked({ claude: providers.claude, pictures: pics, text: split.headline, sub, tag, bottomClear: SUB_CLEAR, costs, notes, log });
+    const places = await placeChecked({ claude: providers.claude, pictures: pics, text: split.headline, sub, tag, bottomClear: SUB_CLEAR, costs, notes, log, hint: img.note || '' });
     if (notes.length) log.warn({ instance: instanceId, notes }, 'image post text in the fixed top band for some sizes');
     for (const [size, p] of Object.entries(pics)) {
       const png = await drawText(p.buf, { text: split.headline, sub, tag, place: places[size] || null });
@@ -645,11 +644,20 @@ export async function stepDown({ instanceId, reason = '', note = '', log = baseL
     const cfg = await funnels.getConfig(f.id).catch(() => ({}));
     await stepLog.start(row.id, 'draw_image');
     let upload;
+    const placeCosts = [];
     try {
       const base = note
         ? await poster.generate(providers, stepDownPrompt(still.prompt, note), f.imageSize, f.imageKey)
         : await stillBuffer(providers, still);
-      const png = await headlineImage(base, { text: headline, sub: subhead });
+      // Claude finds the faces and the empty area, checks the drawn result once
+      // (and moves it once more if it still touches a face). The fixed top band
+      // only when there is no Claude key.
+      const { w, h } = stepDownSize(await sharp(base).metadata());
+      const fitted = await sharp(base).resize(w, h, { fit: 'cover' }).png().toBuffer();
+      const notes = [];
+      const places = await placeChecked({ claude: providers.claude, pictures: { feed: { buf: fitted, w, h, label: 'Image post' } }, text: headline, sub: subhead, bottomClear: SUB_CLEAR, costs: placeCosts, notes, log, hint: note });
+      if (notes.length) log.warn({ instance: row.id, notes }, 'step-down text not proven clear of faces');
+      const png = await drawText(fitted, { text: headline, sub: subhead, place: places.feed || null });
       upload = await providers.storage.uploadPng(cfg.drive_folder_id || f.driveFolder || '', `${poster.slug(f.name)}-stepdown-${String(row.id).slice(0, 8)}-r${row.round || 1}.png`, png);
       if (!upload || !upload.downloadUrl) throw new Error('the image could not be uploaded to Drive (is a Drive folder set on the funnel?)');
     } catch (err) {
@@ -677,6 +685,7 @@ export async function stepDown({ instanceId, reason = '', note = '', log = baseL
     if (note && providers.resolved?.openai?.apiKey) {
       next = addCostToSteps(next, 'images', { ...costImages({ count: 1, size: f.imageSize }), at: new Date().toISOString() });
     }
+    for (const { step, ...c } of placeCosts) next = addCostToSteps(next, 'images', { ...c, at: new Date().toISOString() });
     await instanceRepo.saveSteps(row.id, next, sumInstanceCost(next));
     if (first) await stepLog.mark(row.id, 'step_down', info.note);
     await instanceRepo.setStatus(row.id, IMAGE_REVIEW, info.note);

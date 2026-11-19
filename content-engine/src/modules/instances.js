@@ -636,6 +636,29 @@ export function register(ctx) {
     }
   });
 
+  // 🔁 Fix the picture from Review, no Disapprove needed: your note goes to the
+  // picture and to the text placement, the picture is made again and comes back
+  // here for approval. The note is also kept as a lesson for later pictures.
+  router.post('/admin/instances/:id/fix-picture', async (req, res) => {
+    try {
+      if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to fix the picture' });
+      const fix = String(req.body?.corrections || '').trim().slice(0, 1000);
+      if (!fix) return res.status(400).json({ ok: false, error: 'write what to change in the picture' });
+      const { row, approval } = await approvalFor(req);
+      if (!row) return res.status(404).json({ ok: false, error: 'instance not found' });
+      if (!approval || row.status !== 'image_review') return res.status(409).json({ ok: false, error: 'this picture is no longer waiting for approval' });
+      const s = await currentSession(req).catch(() => null);
+      await approvalsRepo.reopenForRework(approval.id, fix);
+      if (!approvalService.reworkById(approval, fix)) return res.status(409).json({ ok: false, error: 'this kind of post cannot be remade from here' });
+      await runLog.write(row.id, 'remake', { detail: `picture corrections: ${fix}`, by: (s && s.email) || '' }).catch(() => null);
+      await disapproveService.learn(req.tenantId || 'default', 'image', fix, 'remake').catch(() => null);
+      log.info({ instance: row.id, approval: approval.id }, 'picture fix requested from Review');
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
   router.post('/admin/instances/:id/disapprove', async (req, res) => {
     try {
       if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to disapprove' });
@@ -1044,7 +1067,7 @@ function detailPage(row, steps) {
         <a class="act" href="/api/v1/admin/run-log?instance=${esc(row.id)}">Run log</a><a class="act" href="/api/v1/admin/instances">← Library</a>
       </div>
     </div>
-    <p class="ro">Read-only here. ${row.locked ? 'Posted and locked.' : 'Approve or request a change from the link in the daily email.'}</p>
+    <p class="ro">Read-only here. ${row.locked ? 'Posted and locked.' : 'Approve or request a change from the link in the daily email.'}${row.status === 'image_review' ? ` <a class="act" href="/api/v1/admin/instances/${esc(row.id)}/review">Review, approve or fix the picture →</a>` : ''}</p>
     ${channelsOf(steps).length && ['posted', 'partial'].includes(row.status) ? `<div class="chans">${channelsOf(steps).map((c) => esc(channelText(c)) + (/^https?:\/\//i.test(String(c.url || '')) && !c.removedAt ? ` · <a href="${esc(c.url)}" target="_blank" rel="noopener">Open post</a>` : '')).join('<br>')}</div>` : ''}
     ${takeDownBox(row, channelsOf(steps))}
     ${row.locked ? '' : `<div class="row">
@@ -1129,7 +1152,19 @@ function reviewPage(row, steps, approval, buttons, script) {
       <span id="rvmsg" class="hint"></span>
     </div>
     <p class="hint">Save stores your edit only. ${esc(buttons.approveLabel)} moves it on, the same as the email's link.${posts ? ' Post at starts as the time this post was planned for; change it (to today, say) before you approve. A time already past posts at once.' : ''}</p>
+    ${row.status === 'image_review' ? `<h3>Fix the picture</h3>
+    <label class="rvf">What to change in the picture or where its text goes<textarea id="fixnote" rows="3" placeholder="e.g. text off her face, put the headline at the bottom on the table; or: no people in the background"></textarea></label>
+    <div class="rvbar"><button class="act big" id="fixbtn" onclick="fixPic()">🔁 Make the picture again</button><span id="fixmsg" class="hint"></span></div>
+    <p class="hint">No Disapprove needed. A new picture is drawn with your note, the text is placed clear of faces, and it comes back here for approval in a minute or two. The note is also kept as a lesson for later pictures.</p>` : ''}
   `, `
+    async function fixPic(){
+      const t=document.getElementById('fixnote'); const fix=(t.value||'').trim();
+      const m=document.getElementById('fixmsg');
+      if(!fix){ m.textContent='🟡 Write what to change first'; t.focus(); return; }
+      const b=document.getElementById('fixbtn'); b.disabled=true; m.textContent='Sending…';
+      try{ const j=await post('/fix-picture', { corrections: fix }); if(j.ok){ m.textContent='🟢 Making the picture again. Opening Library…'; setTimeout(()=>{ location.href='/api/v1/admin/instances'; }, 1200); } else { b.disabled=false; m.textContent='🔴 '+(j.error||'failed'); } }
+      catch(e){ b.disabled=false; m.textContent='🔴 '+e.message; }
+    }
     const ID=${JSON.stringify(String(row.id))};
     let dirty=false;
     const fm=document.getElementById('rvform'); if(fm) fm.addEventListener('input',()=>{ dirty=true; msg('🟡 Not saved yet'); });

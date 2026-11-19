@@ -67,11 +67,11 @@ export function placeSystem({ bottomClear = 0 } = {}) {
   return [
     'You place the headline on finished social media thumbnails. Each image has no text yet.',
     'For each image, return:',
-    '- subject: one box around every face and the main subject together (heads, hands, the product), in percent of that image (x, y = top-left corner; w, h = size; 0 to 100).',
+    '- subject: one box around every face and head (hair included, people in the background too) and the main subject together (hands, the product), in percent of that image (x, y = top-left corner; w, h = size; 0 to 100).',
     '- text: the largest calm, empty area for a bold headline of the length given, in percent, completely outside the subject box: plain background, sky, wall, floor or soft blur. Prefer a wide box; it may run along any side. Keep 3% clear of every edge.',
     '- align: left, center or right, whichever sits best in that area next to the subject.',
     '- color: light (white text) when the area is dark, dark (near-black text) when it is bright.',
-    'Never put the text box over a face, eyes, hands or the main subject, even partly. Judge each size on its own picture: they are cropped differently.',
+    'Never put the text box over a face, head, eyes, hands or the main subject, even partly. Prefer an area that is off people\'s bodies too (wall, table, background, blur); use a body only when nothing else is free. The top is not special: when the faces are at the top, use the bottom, a side or any other empty area. Judge each size on its own picture: they are cropped differently.',
     keep ? `The bottom ${keep}% of every image is kept for subtitles: the text box must end above it.` : '',
   ].filter(Boolean).join('\n');
 }
@@ -85,7 +85,7 @@ export function placeUser(items, { text = '', sub = '', tag = '' } = {}) {
   ].filter(Boolean).join('\n');
   const blocks = [{ type: 'text', text: `${words}\n\nReturn one entry per image, in this order, with its size name.` }];
   for (const it of items) {
-    blocks.push({ type: 'text', text: `Image "${it.size}" (${it.label}, ${it.w}x${it.h}):${it.hint ? `\nSecond try: ${it.hint}` : ''}` });
+    blocks.push({ type: 'text', text: `Image "${it.size}" (${it.label}, ${it.w}x${it.h}):${it.hint ? `\nNote: ${it.hint}` : ''}` });
     blocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: it.b64 } });
   }
   return blocks;

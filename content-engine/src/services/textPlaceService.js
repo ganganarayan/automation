@@ -116,12 +116,15 @@ export async function checkText({ claude, pictures, places, text, sub = '', tag 
  * is clear. Returns key -> box, null (fixed top layout) or { none: true }.
  * Every size not proven clear gets a note on `notes`, for the page.
  */
-export async function placeChecked({ claude, pictures, text, sub = '', tag = '', bottomClear = 0, accent = THUMB_ACCENT, costs = [], notes = [], log }) {
+export async function placeChecked({ claude, pictures, text, sub = '', tag = '', bottomClear = 0, accent = THUMB_ACCENT, costs = [], notes = [], log, hint = '' }) {
   const entries = Object.entries(pictures || {});
   if (!entries.length || !String(text || '').trim()) return {};
   const note = (size, reason) => notes.push({ size, label: (pictures[size] && pictures[size].label) || size, reason });
+  // The reviewer's own correction (e.g. "text off her face, put it at the bottom") goes to every placement.
+  const asked = String(hint || '').trim().slice(0, 400);
+  const told = asked ? Object.fromEntries(entries.map(([size]) => [size, `The reviewer asked: ${asked}`])) : {};
   const first = [];
-  const places = await placeText({ claude, pictures, text, sub, tag, bottomClear, costs, notes: first, log });
+  const places = await placeText({ claude, pictures, text, sub, tag, bottomClear, costs, notes: first, log, hints: told });
   if (!claude) { notes.push(...first); return places; }
   const look1 = await checkText({ claude, pictures, places, text, sub, tag, accent, costs, log });
   if (!look1) {
@@ -135,7 +138,7 @@ export async function placeChecked({ claude, pictures, text, sub = '', tag = '',
   // The one more try, for the sizes that failed only.
   const again = Object.fromEntries(bad.map((size) => [size, pictures[size]]));
   const avoid = Object.fromEntries(bad.map((size) => [size, look1[size].faces]));
-  const hints = Object.fromEntries(bad.map((size) => [size, `the text placed last time covered ${look1[size].problem || 'a face'}. Pick an area well away from every face and head.`]));
+  const hints = Object.fromEntries(bad.map((size) => [size, `the text placed last time covered ${look1[size].problem || 'a face'}. Pick an area well away from every face, head and body.${asked ? ` The reviewer asked: ${asked}` : ''}`]));
   const raws = {};
   const second = [];
   const retry = await placeText({ claude, pictures: again, text, sub, tag, bottomClear, costs, notes: second, log, avoid, hints, last: true, raws });
