@@ -55,6 +55,33 @@ export function retryAction(row, steps, now = Date.now()) {
   return step('stitch').artifacts?.video?.driveId ? 'final' : 'stages';
 }
 
+// What a run cut off by a restart may carry on with on its own (the Retry actions that redo no approval).
+const RESUME_ACTIONS = ['script', 'stages', 'final', 'image', 'stepdown'];
+
+/** True when a running step is being worked on by GitHub Actions, not by this server. */
+export function onGithub(steps) {
+  return (Array.isArray(steps) ? steps : []).some((s) => {
+    const a = (s && s.artifacts) || {};
+    const j = a.job || {};
+    if (j.runner === 'github' && j.state === 'running') return true;
+    return !!s && s.status === 'running' && (a.runner === 'github' || j.runner === 'github');
+  });
+}
+
+/**
+ * A run the last restart cut off: 'running', not touched since this server
+ * started (so the old one was working on it), and not waiting on GitHub. Returns
+ * the Retry action that carries it on, or '' to leave it alone.
+ */
+export function resumeAction(row, steps, bootAt) {
+  const r = row || {};
+  if (r.status !== 'running' || r.locked || !r.updated_at || !bootAt) return '';
+  if (new Date(r.updated_at).getTime() >= new Date(bootAt).getTime()) return '';
+  if (onGithub(steps)) return '';
+  const action = retryAction({ ...r, status: 'failed' }, steps);
+  return RESUME_ACTIONS.includes(action) ? action : '';
+}
+
 /**
  * A date picked for a retry (a datetime-local value, read as IST). Null unless it
  * is a real time still to come.
@@ -101,4 +128,4 @@ function retryPick(b, id, j){
 }
 `;
 
-export default { RETRY_STUCK_MS, isStuck, retryAction, parseRetryDate, retryDateDefaults, retitleForDate, RETRY_PICK_SCRIPT };
+export default { RETRY_STUCK_MS, isStuck, retryAction, resumeAction, onGithub, parseRetryDate, retryDateDefaults, retitleForDate, RETRY_PICK_SCRIPT };

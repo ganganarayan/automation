@@ -59,6 +59,15 @@ export async function list({ tenantId = 'default', status = null, limit = 100 })
   return rows;
 }
 
+/** Every tenant's runs still 'running' that nothing has touched since `at` (the restart check). */
+export async function runningBefore(at, limit = 50) {
+  const { rows } = await query(
+    `SELECT * FROM instances WHERE status = 'running' AND NOT COALESCE(locked, false) AND updated_at < $1 ORDER BY updated_at ASC LIMIT $2`,
+    [at, limit],
+  );
+  return rows;
+}
+
 /** A few instances by id, for the Library's live step updates. */
 export async function byIds({ tenantId = 'default', ids = [] }) {
   if (!ids.length) return [];

@@ -39,6 +39,10 @@ async function main() {
     logger.info({ port: settings.port }, 'content-engine listening');
   });
 
+  // Runs the last restart (a deploy, a wake from sleep) cut off carry on by themselves.
+  const bootAt = new Date();
+  import('./services/resumeService.js').then((m) => m.scheduleResume(bootAt)).catch((err) => logger.warn({ err: err.message }, 'restart check not scheduled'));
+
   // A new version updates the landing on Cloudflare too, without the Deploy button.
   setTimeout(() => {
     import('./services/landingDeployService.js').then((m) => m.autoDeploy()).catch(() => {});
