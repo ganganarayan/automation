@@ -636,17 +636,19 @@ export function register(ctx) {
     }
   });
 
-  // 🔁 Fix the picture from Review, no Disapprove needed: your note goes to the
-  // picture and to the text placement, the picture is made again and comes back
-  // here for approval. The note is also kept as a lesson for later pictures.
+  // 🔁 Place the text again from Review, no Disapprove needed: the same still,
+  // only the text is placed again with your note as the instruction; back here
+  // for approval. The note is also kept as a lesson. Step-down posts only: they
+  // keep their no-text still, so nothing is drawn again.
   router.post('/admin/instances/:id/fix-picture', async (req, res) => {
     try {
       if (!(await canApprove(req))) return res.status(401).json({ ok: false, error: 'sign in to fix the picture' });
       const fix = String(req.body?.corrections || '').trim().slice(0, 1000);
-      if (!fix) return res.status(400).json({ ok: false, error: 'write what to change in the picture' });
-      const { row, approval } = await approvalFor(req);
+      if (!fix) return res.status(400).json({ ok: false, error: 'write where the text should go' });
+      const { row, steps, approval } = await approvalFor(req);
       if (!row) return res.status(404).json({ ok: false, error: 'instance not found' });
       if (!approval || row.status !== 'image_review') return res.status(409).json({ ok: false, error: 'this picture is no longer waiting for approval' });
+      if (!stepDownOf(steps)) return res.status(409).json({ ok: false, error: 'only image posts made from a video still can have their text placed again here' });
       const s = await currentSession(req).catch(() => null);
       await approvalsRepo.reopenForRework(approval.id, fix);
       if (!approvalService.reworkById(approval, fix)) return res.status(409).json({ ok: false, error: 'this kind of post cannot be remade from here' });
@@ -1152,10 +1154,10 @@ function reviewPage(row, steps, approval, buttons, script) {
       <span id="rvmsg" class="hint"></span>
     </div>
     <p class="hint">Save stores your edit only. ${esc(buttons.approveLabel)} moves it on, the same as the email's link.${posts ? ' Post at starts as the time this post was planned for; change it (to today, say) before you approve. A time already past posts at once.' : ''}</p>
-    ${row.status === 'image_review' ? `<h3>Fix the picture</h3>
-    <label class="rvf">What to change in the picture or where its text goes<textarea id="fixnote" rows="3" placeholder="e.g. text off her face, put the headline at the bottom on the table; or: no people in the background"></textarea></label>
-    <div class="rvbar"><button class="act big" id="fixbtn" onclick="fixPic()">🔁 Make the picture again</button><span id="fixmsg" class="hint"></span></div>
-    <p class="hint">No Disapprove needed. A new picture is drawn with your note, the text is placed clear of faces, and it comes back here for approval in a minute or two. The note is also kept as a lesson for later pictures.</p>` : ''}
+    ${row.status === 'image_review' && stepDownOf(steps) ? `<h3>Move the text</h3>
+    <label class="rvf">Where the text should go<textarea id="fixnote" rows="3" placeholder="e.g. headline at the bottom on the table, off her face"></textarea></label>
+    <div class="rvbar"><button class="act big" id="fixbtn" onclick="fixPic()">🔁 Place the text again</button><span id="fixmsg" class="hint"></span></div>
+    <p class="hint">No Disapprove needed. The same picture is kept; only the headline and sub-head are placed again, following your note and kept clear of faces. It comes back here for approval in under a minute. The note is also kept as a lesson.</p>` : ''}
   `, `
     async function fixPic(){
       const t=document.getElementById('fixnote'); const fix=(t.value||'').trim();

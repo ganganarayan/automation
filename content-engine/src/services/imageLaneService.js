@@ -58,7 +58,7 @@ import { placeChecked, drawText } from './textPlaceService.js';
 import { eyebrowClean } from '../utils/thumbSpec.js';
 import { SPLIT_SCHEMA, splitSystem, splitUser, splitResult } from '../utils/imageSplitSpec.js';
 import { totalClipSeconds } from '../utils/stageSpec.js';
-import { stepDownOf, stepDownPicture, stepDownText, stepDownCaption, stepDownPrompt, stepDownNote, stepDownSize } from '../utils/stepDownSpec.js';
+import { stepDownOf, stepDownPicture, stepDownText, stepDownCaption, stepDownNote, stepDownSize } from '../utils/stepDownSpec.js';
 import { formatIst } from '../utils/time.js';
 import { festivalCaptions } from '../utils/festivalSpec.js';
 import {
@@ -620,7 +620,7 @@ async function openApproval({ row, funnelId, image, captionFull, captionShort })
 /**
  * A router AI video's animation failed: the same instance becomes an image post,
  * from the still already made for animating, with the headline and sub-head drawn
- * on it. No new image is paid for unless a reviewer sends it back with a note, and
+ * on it. No new image is ever drawn (a reviewer's note only moves the text), and
  * no sheet is needed. Then the usual image approval. Returns false when the instance
  * has moved on; throws when the still can't be used (the caller tries the sheet).
  */
@@ -646,9 +646,9 @@ export async function stepDown({ instanceId, reason = '', note = '', log = baseL
     let upload;
     const placeCosts = [];
     try {
-      const base = note
-        ? await poster.generate(providers, stepDownPrompt(still.prompt, note), f.imageSize, f.imageKey)
-        : await stillBuffer(providers, still);
+      // Always the video's own still, never a new picture: a note only moves the
+      // text (it goes to the placement as the reviewer's instruction).
+      const base = await stillBuffer(providers, still);
       // Claude finds the faces and the empty area, checks the drawn result once
       // (and moves it once more if it still touches a face). The fixed top band
       // only when there is no Claude key.
@@ -681,9 +681,6 @@ export async function stepDown({ instanceId, reason = '', note = '', log = baseL
     const anim = art(steps, 'animate');
     if (first && (anim.clips || []).length && !((steps.find((s) => s.key === 'animate') || {}).costs || []).length) {
       next = addCostToSteps(next, 'animate', { ...costAnimation({ provider: anim.provider, seconds: totalClipSeconds(cfg.clip_length, anim.clips.length, anim.provider) }), at: new Date().toISOString() });
-    }
-    if (note && providers.resolved?.openai?.apiKey) {
-      next = addCostToSteps(next, 'images', { ...costImages({ count: 1, size: f.imageSize }), at: new Date().toISOString() });
     }
     for (const { step, ...c } of placeCosts) next = addCostToSteps(next, 'images', { ...c, at: new Date().toISOString() });
     await instanceRepo.saveSteps(row.id, next, sumInstanceCost(next));
