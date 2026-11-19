@@ -204,10 +204,10 @@ async function startOnGithub({ instanceId, f, providers, log = baseLog }) {
   let inst = await instanceRepo.get(instanceId);
   let steps = instanceService.parseSteps(inst);
   let img = art(steps, 'images');
-  // With Claude set the pictures are made here in two steps (no text, then the words placed);
-  // GitHub then only voices them. Their cost is recorded now.
+  // The pictures are always made here in two steps (no text, then the words placed);
+  // GitHub only voices them, so it never draws a picture with words in it. Their cost is recorded now.
   let drawn = null;
-  if ((providers.claude || providers.resolved?.lean) && !(img.festival && img.festival.imageUrl)) {
+  if (!(img.festival && img.festival.imageUrl)) {
     const d = await drawOnRailway({ instanceId, f, providers, log }, img, inst.round);
     inst = await instanceRepo.get(instanceId);
     steps = instanceService.parseSteps(inst);
@@ -315,6 +315,8 @@ async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
   const kept = img.keepPicture ? await keptPictures(providers, img, log) : null;
   // Two steps when Claude is set: a picture with no text, then the words where it is empty.
   const split = kept ? kept.words : await splitPrompt({ providers, img, costs, log });
+  // Never a picture with words drawn in by the image model: no split, no picture.
+  if (!split) throw new LaneError('the picture was not drawn: the prompt could not be split into a picture without text and its words (is the Claude key set on Keys and credit?), and the app never lets the image model write the text');
   const pictures = kept ? kept.pictures : {};
   const draw = async (size) => {
     const spec = IMAGE_VIDEO_SIZES[size];
@@ -419,19 +421,21 @@ async function keptPictures(providers, img, log) {
 // Share of the height kept free of the headline: the video's subtitles run there.
 const SUB_CLEAR = 0.25;
 
-/** Claude splits the sheet prompt into a no-text picture and the words; null = draw it in one step as before. */
+/** Claude splits the sheet prompt into a no-text picture and the words (two tries); null = nothing is drawn. */
 async function splitPrompt({ providers, img, costs, log }) {
   if (!providers.claude || !String(img.prompt || '').trim()) return null;
-  try {
-    const { data, model, usage } = await providers.claude.generateJsonDetailed({ system: splitSystem(), user: splitUser(img.prompt, img.row || {}), schema: SPLIT_SCHEMA, maxTokens: 8000 });
-    costs.push({ step: 'images', ...costClaude({ ...usage, model }) });
-    const split = splitResult(data, img.row || {});
-    if (!split) log.warn('prompt split gave no picture or headline, drawing in one step');
-    return split;
-  } catch (err) {
-    log.warn({ err: err.message }, 'prompt split failed, drawing in one step');
-    return null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const { data, model, usage } = await providers.claude.generateJsonDetailed({ system: splitSystem(), user: splitUser(img.prompt, img.row || {}), schema: SPLIT_SCHEMA, maxTokens: 8000 });
+      costs.push({ step: 'images', ...costClaude({ ...usage, model }) });
+      const split = splitResult(data, img.row || {});
+      if (split) return split;
+      log.warn({ attempt }, 'prompt split gave no picture or headline');
+    } catch (err) {
+      log.warn({ err: err.message, attempt }, 'prompt split failed');
+    }
   }
+  return null;
 }
 
 /** The finished pictures of this round, kept so a hand-over or a retry does not draw them again. */
