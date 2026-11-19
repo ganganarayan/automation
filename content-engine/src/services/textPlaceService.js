@@ -24,6 +24,9 @@ import { PLACE_SCHEMA, placeSystem, placeUser, placeFor, placeWhyNot, CHECK_SCHE
 import { thumbSvg, thumbSvgPlaced, textLayer, THUMB_ACCENT } from '../utils/thumbSpec.js';
 import { costClaude } from '../utils/pricing.js';
 
+// A picture's own share of the height kept for subtitles (its video's band), else the call's.
+const clearOf = (p, fallback = 0) => (p && Number.isFinite(Number(p.bottomClear)) ? Number(p.bottomClear) : fallback);
+
 const small = async (buf) => (await sharp(buf).resize({ width: 768, height: 768, fit: 'inside' }).jpeg({ quality: 80 }).toBuffer()).toString('base64');
 
 /**
@@ -44,14 +47,14 @@ export async function placeText({ claude, pictures, text, sub = '', tag = '', bo
   }
   try {
     const items = await Promise.all(entries.map(async ([size, p]) => ({ size, label: p.label, w: p.w, h: p.h, b64: await small(p.buf), hint: hints[size] || '' })));
-    const { data, model, usage } = await claude.generateJsonDetailed({ system: placeSystem({ bottomClear }), user: placeUser(items, { text, sub, tag }), schema: PLACE_SCHEMA, maxTokens: 8000 });
+    const { data, model, usage } = await claude.generateJsonDetailed({ system: placeSystem({ bottomClear: Math.max(...entries.map(([, p]) => clearOf(p, bottomClear))) }), user: placeUser(items, { text, sub, tag }), schema: PLACE_SCHEMA, maxTokens: 8000 });
     costs.push({ step: 'images', ...costClaude({ ...usage, model }) });
     const answers = new Map(((data && data.sizes) || []).filter((r) => r && pictures[r.size]).map((r) => [r.size, r]));
     const out = {};
     for (const [size, p] of entries) {
       const raw = answers.get(size) || null;
       raws[size] = raw;
-      const place = placeFor(raw, { w: p.w, h: p.h, bottomClear, avoid: avoid[size] || [], last });
+      const place = placeFor(raw, { w: p.w, h: p.h, bottomClear: clearOf(p, bottomClear), avoid: avoid[size] || [], last });
       if (place) {
         out[size] = place;
         if (place.how !== 'picked') log?.info?.({ size, how: place.how, raw }, 'text box moved off the subject');
@@ -66,7 +69,7 @@ export async function placeText({ claude, pictures, text, sub = '', tag = '', bo
     // The call failed: on a last try the faces already found still give a place.
     const out = {};
     for (const [size, p] of entries) {
-      const place = (avoid[size] || []).length ? placeFor(null, { w: p.w, h: p.h, bottomClear, avoid: avoid[size], last }) : null;
+      const place = (avoid[size] || []).length ? placeFor(null, { w: p.w, h: p.h, bottomClear: clearOf(p, bottomClear), avoid: avoid[size], last }) : null;
       if (place) out[size] = place;
       else note(size, `the placement call failed (${err.message}), so the text is in the fixed top band`);
     }
@@ -142,7 +145,7 @@ export async function placeChecked({ claude, pictures, text, sub = '', tag = '',
   const raws = {};
   const second = [];
   const retry = await placeText({ claude, pictures: again, text, sub, tag, bottomClear, costs, notes: second, log, avoid, hints, last: true, raws });
-  for (const size of bad) places[size] = retry[size] || lastResort(raws[size] || null, { w: pictures[size].w, h: pictures[size].h, bottomClear, faces: look1[size].faces });
+  for (const size of bad) places[size] = retry[size] || lastResort(raws[size] || null, { w: pictures[size].w, h: pictures[size].h, bottomClear: clearOf(pictures[size], bottomClear), faces: look1[size].faces });
   const shown = Object.fromEntries(bad.map((size) => [size, pictures[size]]));
   const look2 = Object.keys(shown).length ? await checkText({ claude, pictures: shown, places, text, sub, tag, accent, costs, log }) : {};
   for (const size of bad) {
@@ -151,7 +154,7 @@ export async function placeChecked({ claude, pictures, text, sub = '', tag = '',
     if (look2[size] && look2[size].ok) { log?.info?.({ size }, 'text fixed on the second try'); continue; }
     // Stop here: no third call. Clear of every face either look found, or no text.
     const faces = [...look1[size].faces, ...((look2[size] && look2[size].faces) || [])];
-    places[size] = lastResort(raws[size] || null, { w: p.w, h: p.h, bottomClear, faces });
+    places[size] = lastResort(raws[size] || null, { w: p.w, h: p.h, bottomClear: clearOf(p, bottomClear), faces });
     note(size, `still on a face after the second try (${(look2[size] && look2[size].problem) || 'text on a face'}), moved to the space farthest from the faces found, not checked a third time`);
   }
   log?.warn?.({ sizes: bad, notes: notes.length }, 'text over a face on the first try, placed again');

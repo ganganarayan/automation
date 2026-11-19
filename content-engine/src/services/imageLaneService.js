@@ -366,7 +366,7 @@ async function drawOnRailway({ instanceId, f, providers, log }, img, round) {
     const pics = {};
     for (const [size, buf] of Object.entries(pictures)) {
       const { width, height } = await sharp(buf).metadata();
-      pics[size] = { buf, w: width, h: height, label: IMAGE_VIDEO_SIZES[size].label };
+      pics[size] = { buf, w: width, h: height, label: IMAGE_VIDEO_SIZES[size].label, bottomClear: subClear(size) };
     }
     const tag = eyebrowClean(split.tag);
     const sub = split.sub;
@@ -419,7 +419,11 @@ async function keptPictures(providers, img, log) {
 }
 
 // Share of the height kept free of the headline: the video's subtitles run there.
+// Tall videos (9:16, 4:5) burn them about 24% to 37% up from the bottom (libass
+// MarginV 70 of 288 rows, two lines), wide 16:9 about 10% to 24% (shortSpec).
 const SUB_CLEAR = 0.25;
+const SUB_CLEAR_TALL = 0.4;
+const subClear = (size) => (size === 'landscape' ? SUB_CLEAR : SUB_CLEAR_TALL);
 
 /** Claude splits the sheet prompt into a no-text picture and the words (two tries); null = nothing is drawn. */
 async function splitPrompt({ providers, img, costs, log }) {
@@ -696,7 +700,7 @@ export async function stepDown({ instanceId, reason = '', note = '', log = baseL
       const { w, h } = stepDownSize(await sharp(base).metadata());
       const fitted = await sharp(base).resize(w, h, { fit: 'cover' }).png().toBuffer();
       const notes = [];
-      const places = await placeChecked({ claude: providers.claude, pictures: { feed: { buf: fitted, w, h, label: 'Image post' } }, text: headline, sub: subhead, bottomClear: SUB_CLEAR, costs: placeCosts, notes, log, hint: note });
+      const places = await placeChecked({ claude: providers.claude, pictures: { feed: { buf: fitted, w, h, label: 'Image post', bottomClear: SUB_CLEAR_TALL } }, text: headline, sub: subhead, bottomClear: SUB_CLEAR, costs: placeCosts, notes, log, hint: note });
       if (notes.length) log.warn({ instance: row.id, notes }, 'step-down text not proven clear of faces');
       const png = await drawText(fitted, { text: headline, sub: subhead, place: places.feed || null });
       upload = await providers.storage.uploadPng(cfg.drive_folder_id || f.driveFolder || '', `${poster.slug(f.name)}-stepdown-${String(row.id).slice(0, 8)}-r${row.round || 1}.png`, png);
