@@ -206,7 +206,7 @@ export function browLayout(text, { boxW, boxH = Infinity, size }) {
  * sub-head under it, all fitted so no word is cut, aligned left, centre or
  * right, and centred in the box's height.
  */
-export function textBlock({ box, text, sub = '', tag = '', accent = '#FFC400', maxSize, align = 'center', color = 'light', shrink = 1 }) {
+export function textBlock({ box, text, sub = '', tag = '', accent = '#FFC400', maxSize, align = 'center', color = 'light', shrink = 1, panel = false }) {
   const { x0, y0, x1, y1 } = box;
   // shrink < 1: the drawn text was measured wider than its box, so fit into less.
   const k = Math.max(0.3, Math.min(1, Number(shrink) || 1));
@@ -231,11 +231,18 @@ export function textBlock({ box, text, sub = '', tag = '', accent = '#FFC400', m
   const top = y0 + Math.max(0, (boxH - block) / 2);
   const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
   const x = align === 'left' ? x0 : align === 'right' ? x1 : Math.round((x0 + x1) / 2);
-  const dark = color === 'dark';
+  // On a grey panel the letters are always white.
+  const dark = !panel && color === 'dark';
   const fill = dark ? '#111111' : '#FFFFFF';
   const edge = dark ? '#FFFFFF' : '#000000';
   const stroke = (px) => `stroke="${edge}" stroke-width="${Math.max(2, Math.round(px * 0.06))}" paint-order="stroke"`;
   const parts = [];
+  if (panel) {
+    // No calm area was free: a see-through grey panel the width of the box, as tall as the words, so they read on anything.
+    const pad = Math.round(Math.max(size * 0.35, 8));
+    const py = Math.max(0, Math.round(top - pad));
+    parts.push(`<rect x="${Math.round(x0 - pad)}" y="${py}" width="${Math.round(x1 - x0 + pad * 2)}" height="${Math.round(block + pad * 2)}" rx="${Math.round(pad * 0.8)}" fill="#2B2B2B" fill-opacity="0.72"/>`);
+  }
   if (browSize) {
     const by0 = Math.round(top + browSize * 0.85);
     parts.push(`<text text-anchor="${anchor}" ${SERIF} font-style="italic" font-weight="700" letter-spacing="${(browSize * 0.08).toFixed(1)}" font-size="${browSize}" fill="${dark ? '#9A6B00' : accent}" ${stroke(browSize)}>${brow.lines.map((l, i) => `<tspan x="${x}" y="${by0 + i * browLh}">${xmlEsc(l)}</tspan>`).join('')}</text>`);
@@ -304,9 +311,9 @@ function thumbTagSvg({ w, h, layout, tag }) {
  * No haze: the box is already a calm part of the picture.
  */
 export function thumbSvgPlaced({ w, h, text, sub = '', tag = '', accent = '#FFFFFF', place, shrink = 1 }) {
-  const { align = 'center', color = 'light' } = place;
+  const { align = 'center', color = 'light', panel = false } = place;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
-${textBlock({ box: place, text, sub, tag, accent, maxSize: Math.min(w, h) * 0.13, align, color, shrink })}</svg>`;
+${textBlock({ box: place, text, sub, tag, accent, maxSize: Math.min(w, h) * 0.13, align, color, shrink, panel })}</svg>`;
 }
 
 /**
@@ -314,7 +321,8 @@ ${textBlock({ box: place, text, sub, tag, accent, maxSize: Math.min(w, h) * 0.13
  * box they must stay in: the placed box, else the fixed layout's.
  */
 export function textLayer({ w, h, text, sub = '', tag = '', accent = '#FFFFFF', place = null, layout = 'top', shrink = 1 }) {
-  if (place) return { box: place, svg: thumbSvgPlaced({ w, h, text, sub, tag, accent, place, shrink }) };
+  // Measured without the grey panel: only the letters must stay in the box.
+  if (place) return { box: place, svg: thumbSvgPlaced({ w, h, text, sub, tag, accent, place: { ...place, panel: false }, shrink }) };
   const box = thumbBox({ w, h, layout });
   const maxSize = layout === 'stack' ? w * 0.085 : h * 0.11;
   return { box, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">\n${textBlock({ box, text, sub, tag, accent, maxSize, align: 'center', color: 'light', shrink })}</svg>` };

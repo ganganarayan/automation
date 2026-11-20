@@ -145,7 +145,7 @@ export async function placeChecked({ claude, pictures, text, sub = '', tag = '',
   const raws = {};
   const second = [];
   const retry = await placeText({ claude, pictures: again, text, sub, tag, bottomClear, costs, notes: second, log, avoid, hints, last: true, raws });
-  for (const size of bad) places[size] = retry[size] || lastResort(raws[size] || null, { w: pictures[size].w, h: pictures[size].h, bottomClear: clearOf(pictures[size], bottomClear), faces: look1[size].faces });
+  for (const size of bad) places[size] = (retry[size] && retry[size].how !== 'picked' ? { ...retry[size], color: 'light', panel: true } : retry[size]) || lastResort(raws[size] || null, { w: pictures[size].w, h: pictures[size].h, bottomClear: clearOf(pictures[size], bottomClear), faces: look1[size].faces });
   const shown = Object.fromEntries(bad.map((size) => [size, pictures[size]]));
   const look2 = Object.keys(shown).length ? await checkText({ claude, pictures: shown, places, text, sub, tag, accent, costs, log }) : {};
   for (const size of bad) {
@@ -169,16 +169,17 @@ export async function placeChecked({ claude, pictures, text, sub = '', tag = '',
  */
 export function lastResort(raw, { w, h, bottomClear = 0, faces = [] }) {
   const near = placeFor(raw, { w, h, bottomClear, avoid: faces, last: true }) || placeFor(null, { w, h, bottomClear, avoid: faces, last: true });
-  if (near) return near;
+  if (near) return { ...near, color: 'light', panel: true };
   const align = 'center';
-  const color = raw && raw.color === 'dark' ? 'dark' : 'light';
+  const color = 'light';
+  const panel = true;
   const x0 = Math.round(w * 0.03); const x1 = Math.round(w * 0.97);
   const floor = Math.round(h * (1 - Math.max(0.03, Math.min(0.5, Number(bottomClear) || 0))));
   const low = faces.length ? Math.max(...faces.map((f) => f.y1)) : 0;
   const high = faces.length ? Math.min(...faces.map((f) => f.y0)) : h;
-  if (floor - low >= h * 0.1) return { x0, y0: Math.round(low + h * 0.01), x1, y1: floor, align, color, how: 'below faces' };
-  if (high - h * 0.03 >= h * 0.1) return { x0, y0: Math.round(h * 0.03), x1, y1: Math.round(high - h * 0.01), align, color, how: 'above faces' };
-  return { x0, y0: Math.round(h * 0.03), x1, y1: Math.round(h * 0.2), align, color, how: 'top band' };
+  if (floor - low >= h * 0.1) return { x0, y0: Math.round(low + h * 0.01), x1, y1: floor, align, color, panel, how: 'below faces' };
+  if (high - h * 0.03 >= h * 0.1) return { x0, y0: Math.round(h * 0.03), x1, y1: Math.round(high - h * 0.01), align, color, panel, how: 'above faces' };
+  return { x0, y0: Math.round(h * 0.03), x1, y1: Math.round(h * 0.2), align, color, panel, how: 'top band' };
 }
 
 /** The notes from placeChecked as one line for the page; '' when every size is clear. */
